@@ -2,3 +2,5 @@ strands-agents>=1.21.0
 httpx>=0.23.0
 fastapi>=0.100.0
 uvicorn[standard]>=0.22.0
+azure-ai-inference>=1.0.0
+pytest>=7.0.0
