@@ -70,7 +70,7 @@ def test_chat_shaped_parsing(monkeypatch):
         ev = await gen.__anext__()  # type: ignore[attr-defined]
         assert "contentBlockDelta" in ev
 
-    asyncio.get_event_loop().run_until_complete(run())
+    asyncio.run(run())
 
 
 def test_text_fallback_parsing(monkeypatch):
@@ -96,7 +96,7 @@ def test_text_fallback_parsing(monkeypatch):
         assert isinstance(delta, dict)
         assert delta.get("text") == "Plain text response"  # type: ignore[union-attr]
 
-    asyncio.get_event_loop().run_until_complete(run2())
+    asyncio.run(run2())
 
 
 def test_permission_error_detection(monkeypatch):
@@ -117,4 +117,55 @@ def test_permission_error_detection(monkeypatch):
         with pytest.raises(PermissionError):
             await gen.__anext__()  # type: ignore[attr-defined]
 
-    asyncio.get_event_loop().run_until_complete(run3())
+    asyncio.run(run3())
+
+
+def test_legacy_choice_message_structures(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "fake-token")
+
+    class FakeClientLegacy:
+        def __init__(self, endpoint, credential):
+            pass
+
+        def get_chat_response(self, model, messages, timeout):
+            # simulate a choice where message is a dict with content as a list
+            content_list = [{"text": "Part1 "}, {"text": "Part2"}]
+            return DummyResponse(choices=[DummyChoice(role="assistant", message={"content": content_list})])
+
+    provider = GitHubModels()
+    provider._client_cls = FakeClientLegacy  # type: ignore[assignment]
+
+    async def run4():
+        gen = provider.stream([{"role": "user", "content": "Hi"}])  # type: ignore[arg-type]
+        ev = await gen.__anext__()  # type: ignore[attr-defined]
+        assert ev["contentBlockDelta"]["delta"]["text"] == "Part1 Part2"
+
+    asyncio.run(run4())
+
+
+def test_messages_array_with_nested_objects(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "fake-token")
+
+    class MessageObj:
+        def __init__(self, role, content):
+            self.role = role
+            self.content = content
+
+    class FakeClientMsgs:
+        def __init__(self, endpoint, credential):
+            pass
+
+        def get_chat_response(self, model, messages, timeout):
+            # messages array shaped with objects nested inside
+            msgs = [MessageObj("assistant", {"value": "Nested text response"})]
+            return DummyResponse(messages=msgs)
+
+    provider = GitHubModels()
+    provider._client_cls = FakeClientMsgs  # type: ignore[assignment]
+
+    async def run5():
+        gen = provider.stream([{"role": "user", "content": "Hi"}])  # type: ignore[arg-type]
+        ev = await gen.__anext__()  # type: ignore[attr-defined]
+        assert ev["contentBlockDelta"]["delta"]["text"] == "Nested text response"
+
+    asyncio.run(run5())
