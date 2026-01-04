@@ -1,7 +1,19 @@
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, AsyncIterable, AsyncGenerator, Type, TypeVar, TypeAlias, TYPE_CHECKING
 import os
 
 from strands.models import Model
+
+# Keep module import-safe in environments/tests that stub only `strands.models.Model`.
+# Only import Strands typing helpers during type-checking.
+if TYPE_CHECKING:  # pragma: no cover
+    from strands.types.streaming import StreamEvent as StreamEvent
+    from strands.types.content import Messages as Messages
+else:  # pragma: no cover
+    StreamEvent: TypeAlias = Dict[str, Any]
+    Messages: TypeAlias = Any
+from pydantic import BaseModel
+
+T = TypeVar("T", bound=BaseModel)
 
 
 class MissingTokenError(RuntimeError):
@@ -20,7 +32,7 @@ class GitHubModels(Model):
 
         # Lazy import to keep file import-safe when SDK isn't installed
         try:
-            from azure.ai.inference import ChatCompletionsClient
+            from azure.ai.inference import ChatCompletionsClient  # type: ignore
             self._client_cls = ChatCompletionsClient
         except Exception:
             self._client_cls = None
@@ -32,36 +44,49 @@ class GitHubModels(Model):
         if "model_name" in model_config:
             self.model_name = model_config["model_name"]
 
-    async def structured_output(self, output_model, prompt: str, system_prompt: Optional[str] = None, **kwargs):
+    async def structured_output(
+        self, output_model: Type[T], prompt: Messages, system_prompt: Optional[str] = None, **kwargs
+    ) -> AsyncGenerator[Dict[str, Any], None]:
         # For synchronous use-case we delegate to stream and collect final message
-        events = []
-        async for ev in self.stream([{"role": "user", "content": prompt}], system_prompt=system_prompt, **kwargs):
-            events.append(ev)
-        # Map events to structured output if required by strands SDK
-        return events
+        async for ev in self.stream(prompt, system_prompt=system_prompt, **kwargs):
+            yield ev  # type: ignore
 
-    async def stream(self, messages, system_prompt: Optional[str] = None, **kwargs):
-        # Synchronous provider: call the SDK synchronously via thread or simple blocking call
+    def _get_client(self):
         if self._client_cls is None:
             raise RuntimeError("azure-ai-inference SDK not available; ensure azure-ai-inference is installed")
 
-        # Build chat messages payload
-        chat_messages = []
-        if system_prompt:
-            chat_messages.append({"role": "system", "content": system_prompt})
-        for m in messages:
-            chat_messages.append(m)
-
-        # Instantiate client and call complete
-        client = self._client_cls(self.endpoint, credential=self._token)
-
-        # The exact client call may vary by SDK; attempt common method names
+        # azure-ai-inference typically expects an AzureKeyCredential; keep a string fallback
+        # for compatibility with older SDKs and unit tests using fake clients.
         try:
-            response = client.get_chat_response(model=self.model_name, messages=chat_messages, timeout=self.timeout)
-        except AttributeError:
-            response = client.create_chat_completion(model=self.model_name, messages=chat_messages, timeout=self.timeout)
+            from azure.core.credentials import AzureKeyCredential  # type: ignore
+
+            credential: Any = AzureKeyCredential(self._token)
+        except Exception:
+            credential = self._token
+
+        return self._client_cls(self.endpoint, credential=credential)
+
+    def _make_request(self, client, chat_messages):
+        try:
+            # azure-ai-inference (>=1.0.0b*) - timeout passed via kwargs
+            if hasattr(client, "complete"):
+                return client.complete(
+                    model=self.model_name,
+                    messages=chat_messages,
+                    timeout=self.timeout
+                )
+
+            # Back-compat for earlier SDKs or for unit-test fake clients
+            if hasattr(client, "get_chat_response"):
+                return client.get_chat_response(model=self.model_name, messages=chat_messages, timeout=self.timeout)
+            if hasattr(client, "create_chat_completion"):
+                return client.create_chat_completion(model=self.model_name, messages=chat_messages, timeout=self.timeout)
+
+            raise AttributeError(
+                "GitHubModels client does not expose any supported chat completion method. "
+                "Tried: complete, get_chat_response, create_chat_completion"
+            )
         except Exception as e:
-            # Detect common permission errors surfaced by SDK or HTTP layer
             msg = str(e)
             if "401" in msg or "403" in msg or "permission" in msg.lower():
                 raise PermissionError(
@@ -70,36 +95,96 @@ class GitHubModels(Model):
                 ) from e
             raise
 
-        # Parse response: prefer messages/choices with role=assistant, fallback to text
-        assistant_text = None
-        try:
-            # Try chat-shaped response (choices preferred)
-            choices = getattr(response, "choices", None)
-            if choices:
-                for c in choices:
-                    role = getattr(c, "role", None)
-                    if role == "assistant" or getattr(c, "finish_reason", None) is not None:
-                        assistant_text = getattr(c, "message", None) or getattr(c, "content", None) or getattr(c, "text", None)
-                        break
+    def _parse_response(self, response) -> Optional[str]:
+        # azure-ai-inference returns ChatCompletions with choices[*].message.content
+        # but be defensive about multiple shapes.
+        for parser in (self._parse_from_choices, self._parse_from_messages, self._parse_from_text):
+            text = parser(response)
+            if text is not None:
+                return text
+        return None
 
-            # Next try messages array
-            if assistant_text is None:
-                msgs = getattr(response, "messages", None)
-                if msgs:
-                    for m in msgs:
-                        if getattr(m, "role", None) == "assistant":
-                            assistant_text = getattr(m, "content", None) or getattr(m, "text", None)
-                            break
+    def _parse_from_choices(self, response) -> Optional[str]:
+        choices = getattr(response, "choices", None)
+        if not choices:
+            return None
 
-            # Fallback to top-level text
-            if assistant_text is None:
-                assistant_text = getattr(response, "text", None)
-        except Exception:
-            # Let parsing errors surface as SDK/HTTP errors
-            raise
+        for choice in choices:
+            if not self._is_assistant_choice(choice):
+                continue
+
+            msg = getattr(choice, "message", None)
+            content = self._extract_message_content(msg)
+            if content is not None:
+                return content
+
+            # Last-resort fallback for unusual SDK/test shapes.
+            for attr in ("content", "text"):
+                val = getattr(choice, attr, None)
+                if isinstance(val, str):
+                    return val
+
+            if isinstance(msg, str):
+                return msg
+
+        return None
+
+    def _is_assistant_choice(self, choice) -> bool:
+        role = getattr(choice, "role", None)
+        if role == "assistant":
+            return True
+        return getattr(choice, "finish_reason", None) is not None
+
+    def _extract_message_content(self, msg) -> Optional[str]:
+        if isinstance(msg, dict):
+            content = msg.get("content")
+            return content if isinstance(content, str) else None
+
+        content = getattr(msg, "content", None)
+        return content if isinstance(content, str) else None
+
+    def _parse_from_messages(self, response) -> Optional[str]:
+        msgs = getattr(response, "messages", None)
+        if not msgs:
+            return None
+
+        for m in msgs:
+            if getattr(m, "role", None) != "assistant":
+                continue
+            content = getattr(m, "content", None)
+            if isinstance(content, str):
+                return content
+            text = getattr(m, "text", None)
+            if isinstance(text, str):
+                return text
+
+        return None
+
+    def _parse_from_text(self, response) -> Optional[str]:
+        text = getattr(response, "text", None)
+        return text if isinstance(text, str) else None
+
+    async def stream(self, messages: Messages, tool_specs=None, system_prompt: Optional[str] = None, **kwargs) -> AsyncIterable[StreamEvent]:
+        # Synchronous provider: call the SDK synchronously via thread or simple blocking call
+
+        # Build chat messages payload
+        chat_messages = []
+        if system_prompt:
+            chat_messages.append({"role": "system", "content": system_prompt})
+        for m in messages:
+            chat_messages.append(m)
+
+        client = self._get_client()
+        response = self._make_request(client, chat_messages)
+        assistant_text = self._parse_response(response)
 
         if assistant_text is None:
             raise RuntimeError("Could not parse assistant text from GitHub Models response")
 
-        # Yield a single StreamEvent shaped dict expected by strands (contentBlockDelta)
-        yield {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": assistant_text}}}
+        # Yield a StreamEvent with contentBlockDelta
+        yield {
+            "contentBlockDelta": {
+                "contentBlockIndex": 0,
+                "delta": {"text": assistant_text}
+            }
+        }

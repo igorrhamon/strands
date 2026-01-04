@@ -4,6 +4,11 @@ import sys
 import types
 import pytest
 
+# Ensure repo root is on sys.path so `import src.*` works when running pytest.
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 # Ensure a minimal strands.models.Model exists for tests when the real package
 # is not installed in the environment.
 if "strands" not in sys.modules:
