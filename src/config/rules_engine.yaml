@@ -1,0 +1,117 @@
+# Rules Engine Configuration
+# Deterministic decision rules (Constitution Principle II)
+
+# Version
+version: "1.0.0"
+
+# Rule Priority Order (highest to lowest)
+# Rules are evaluated in this order; first match with high confidence wins
+rule_priority:
+  - critical_degrading
+  - recovery_detected
+  - insufficient_data
+  - historical_patterns
+  - stable_metrics
+  - default_observe
+
+# Rule Definitions
+rules:
+  # RULE: Critical alert with degrading metrics → ESCALATE
+  critical_degrading:
+    id: "rule_critical_degrading"
+    enabled: true
+    conditions:
+      severity: "critical"
+      trend_state: "DEGRADING"
+      trend_confidence_min: 0.7
+    action: "ESCALATE"
+    base_confidence: 0.85
+    description: "Critical alerts with degrading metrics require immediate escalation"
+  
+  # RULE: All metrics recovering → CLOSE
+  recovery_detected:
+    id: "rule_recovery_detected"
+    enabled: true
+    conditions:
+      all_trends_state: "RECOVERING"
+      trend_confidence_min: 0.6
+    action: "CLOSE"
+    base_confidence: 0.85
+    description: "When all metrics show recovery, alert can be closed"
+  
+  # RULE: Too many UNKNOWN metrics → MANUAL_REVIEW
+  insufficient_data:
+    id: "rule_insufficient_data"
+    enabled: true
+    conditions:
+      unknown_ratio_min: 0.5
+    action: "MANUAL_REVIEW"
+    base_confidence: 0.70
+    description: "Insufficient metric data requires human review"
+  
+  # RULE: Strong historical match → Follow pattern
+  historical_patterns:
+    id: "rule_historical_close"
+    enabled: true
+    conditions:
+      similarity_score_min: 0.85
+    action: "dynamic"  # Based on historical outcome
+    base_confidence: "dynamic"  # Uses similarity score
+    description: "High-confidence historical matches guide decisions"
+  
+  # RULE: Stable metrics, no degradation → OBSERVE
+  stable_metrics:
+    id: "rule_stable_metrics"
+    enabled: true
+    conditions:
+      min_stable_count: 2
+      no_degrading: true
+    action: "OBSERVE"
+    base_confidence: 0.70
+    description: "Stable metrics warrant continued observation"
+  
+  # RULE: Default fallback → OBSERVE
+  default_observe:
+    id: "rule_default_observe"
+    enabled: true
+    conditions: {}
+    action: "OBSERVE"
+    base_confidence: 0.50
+    description: "Default action when no other rule matches"
+
+# Confidence Thresholds
+confidence:
+  # Minimum confidence to accept a rule decision
+  acceptance_threshold: 0.60
+  
+  # Confidence levels
+  high: 0.85
+  medium: 0.70
+  low: 0.50
+
+# LLM Fallback Configuration
+llm_fallback:
+  enabled: true
+  # Trigger LLM when confidence is below this threshold
+  trigger_threshold: 0.60
+  # Maximum tokens for LLM context
+  max_context_tokens: 4000
+  # Model to use (placeholder for future implementation)
+  model: "gpt-4o-mini"
+
+# Semantic Evidence Configuration
+semantic_evidence:
+  # Minimum score for historical match to influence decision
+  min_influence_score: 0.85
+  # Keywords that indicate closure in historical summaries
+  close_keywords:
+    - "closed"
+    - "resolved"
+    - "recovered"
+    - "auto-closed"
+  # Keywords that indicate escalation in historical summaries
+  escalate_keywords:
+    - "escalated"
+    - "critical"
+    - "urgent"
+    - "manual intervention"

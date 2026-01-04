@@ -21,7 +21,7 @@ class MissingTokenError(RuntimeError):
 
 
 class GitHubModels(Model):
-    def __init__(self, endpoint: str = "https://models.github.ai/inference", model_name: str = "openai/gpt-5", timeout: int = 30):
+    def __init__(self, endpoint: str = "https://models.github.ai/inference", model_name: str = "microsoft/Phi-4-reasoning", timeout: int = 30):
         token = os.environ.get("GITHUB_TOKEN")
         if not token:
             raise MissingTokenError("GITHUB_TOKEN not found in environment")
@@ -136,12 +136,71 @@ class GitHubModels(Model):
         return getattr(choice, "finish_reason", None) is not None
 
     def _extract_message_content(self, msg) -> Optional[str]:
-        if isinstance(msg, dict):
-            content = msg.get("content")
-            return content if isinstance(content, str) else None
+        def _normalize(c):
+            # Normalize many possible shapes into a single string when possible
+            if c is None:
+                return None
+            if isinstance(c, str):
+                return c
+            # dict with text-like fields
+            if isinstance(c, dict):
+                for key in ("text", "content", "value"):
+                    v = c.get(key)
+                    if isinstance(v, str):
+                        return v
+                    if isinstance(v, list) or isinstance(v, dict):
+                        nested = _normalize(v)
+                        if nested:
+                            return nested
+                return None
+            # list: concatenate text pieces or extract text fields from dict items
+            if isinstance(c, (list, tuple)):
+                parts = []
+                for item in c:
+                    if isinstance(item, str):
+                        parts.append(item)
+                    elif isinstance(item, dict):
+                        s = _normalize(item)
+                        if s:
+                            parts.append(s)
+                    else:
+                        # try attribute access on objects
+                        text = getattr(item, "text", None)
+                        if isinstance(text, str):
+                            parts.append(text)
+                        else:
+                            cont = getattr(item, "content", None)
+                            if isinstance(cont, str):
+                                parts.append(cont)
+                return "".join(parts) if parts else None
+            # Fallback: try common attributes on objects
+            text = getattr(c, "text", None)
+            if isinstance(text, str):
+                return text
+            content = getattr(c, "content", None)
+            if isinstance(content, str):
+                return content
+            # nothing useful found
+            return None
 
+        if msg is None:
+            return None
+
+        # dict-like message
+        if isinstance(msg, dict):
+            return _normalize(msg.get("content") or msg.get("text") or msg)
+
+        # object-like message: try attributes first, then attempt normalization
         content = getattr(msg, "content", None)
-        return content if isinstance(content, str) else None
+        if content is not None:
+            return _normalize(content)
+
+        text = getattr(msg, "text", None)
+        if isinstance(text, str):
+            return text
+
+        # final attempt: try to normalize the message object itself
+        return _normalize(msg)
 
     def _parse_from_messages(self, response) -> Optional[str]:
         msgs = getattr(response, "messages", None)
@@ -151,12 +210,11 @@ class GitHubModels(Model):
         for m in msgs:
             if getattr(m, "role", None) != "assistant":
                 continue
-            content = getattr(m, "content", None)
-            if isinstance(content, str):
+            # Use the generic extractor which normalizes dicts, lists, and
+            # object-like message shapes into strings when possible.
+            content = self._extract_message_content(m)
+            if content is not None:
                 return content
-            text = getattr(m, "text", None)
-            if isinstance(text, str):
-                return text
 
         return None
 

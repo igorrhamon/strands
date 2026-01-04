@@ -1,0 +1,78 @@
+# Alert Decision Agent - Default Configuration
+# Constitution-compliant settings for the multi-agent system
+
+# Version
+version: "1.0.0"
+
+# Agent Timeouts (seconds)
+timeouts:
+  default: 30.0
+  correlation: 10.0
+  metrics: 15.0
+  semantic: 10.0
+  decision: 10.0
+  report: 5.0
+
+# Pipeline Configuration
+pipeline:
+  enable_metrics: true
+  enable_semantic: true
+  enable_llm_fallback: true
+  auto_persist: true
+
+# Correlation Settings
+correlation:
+  time_window_minutes: 5
+  min_cluster_size: 1
+  fingerprint_grouping: true
+  service_grouping: true
+
+# Metric Analysis Settings
+metrics:
+  prometheus_timeout: 10.0
+  default_range_minutes: 30
+  min_data_points: 5
+
+# Semantic Memory Settings
+semantic:
+  collection_name: "alert_decisions"
+  embedding_model: "text-embedding-3-small"
+  embedding_dimension: 384
+  top_k: 5
+  min_score: 0.75
+  only_confirmed: true
+
+# Qdrant Settings
+qdrant:
+  host: "localhost"
+  port: 6333
+  grpc_port: 6334
+  use_grpc: false
+
+# Decision Engine Settings
+decision:
+  llm_fallback_threshold: 0.60
+  high_confidence: 0.85
+  medium_confidence: 0.70
+  low_confidence: 0.50
+
+# Audit Settings
+audit:
+  log_directory: "./logs"
+  log_filename: "audit_decisions.jsonl"
+  enable_replay: true
+
+# Constitution Principles (Read-only reference)
+constitution:
+  # Principle I: Human-in-the-Loop
+  human_confirmation_required: true
+  
+  # Principle II: Determinismo
+  rules_before_llm: true
+  
+  # Principle III: Controle de Aprendizado
+  embeddings_only_after_confirmation: true
+  
+  # Principle IV: Rastreabilidade
+  full_audit_trail: true
+  replay_enabled: true
