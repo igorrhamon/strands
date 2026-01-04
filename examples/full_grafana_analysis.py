@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.agents.grafana_alert_analysis.agent import GrafanaAlertAgent
 from src.agents.grafana_alert_analysis.schemas import AgentInput, AgentOutput
+from src.agents.grafana_alert_analysis.correlator import AlertCorrelator
 from src.agents.grafana_alert_analysis.tools.grafana_mcp import (
     get_dashboard_panel_queries,
     list_alerts,
@@ -195,11 +196,16 @@ def build_report(*, start: str, end: str, environment: str) -> Dict[str, Any]:
     all_ds = list_datasources(None)
     prom_ds = [d for d in all_ds if isinstance(d, dict) and d.get("type") == "prometheus"]
 
-    # 2) Alerts analysis (agent heuristics)
+    # 2) Alerts analysis (agent heuristics with correlation)
     agent_out = _analyze_alerts(start, end, environment)
-
-    # 3) Raw alerts stats (read-only)
+    
+    # 2b) Explicit clustering of alert rules for detailed view
     alert_stats = _alerts_probe(start, end)
+    rules = list_alert_rules()
+    clusters = []
+    if rules and len(rules) > 0:
+        correlator = AlertCorrelator()
+        clusters = correlator.cluster(rules)
 
     # 4) Dashboard probe (optional)
     dashboard_url = _resolve_dashboard_url()
@@ -219,6 +225,10 @@ def build_report(*, start: str, end: str, environment: str) -> Dict[str, Any]:
             "agent_summary": agent_out.summary,
             "recommendations": [r.model_dump() for r in agent_out.recommendations],
             "stats": alert_stats,
+            "clusters": {
+                "total": len(clusters),
+                "items": clusters[:10] if len(clusters) > 10 else clusters,  # Limit to 10 for brevity
+            },
         },
         "dashboard": {
             "url": dashboard_url,

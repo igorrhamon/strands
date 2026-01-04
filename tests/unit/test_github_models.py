@@ -18,8 +18,8 @@ if "strands" not in sys.modules:
     class Model:
         pass
 
-    models_mod.Model = Model
-    strands_mod.models = models_mod
+    models_mod.Model = Model  # type: ignore[attr-defined]
+    strands_mod.models = models_mod  # type: ignore[attr-defined]
     sys.modules["strands"] = strands_mod
     sys.modules["strands.models"] = models_mod
 
@@ -53,7 +53,7 @@ def test_chat_shaped_parsing(monkeypatch):
 
     class FakeClient:
         def __init__(self, endpoint, credential):
-            pass
+            pass  # Mock client for testing
 
         def get_chat_response(self, model, messages, timeout):
             # return a response with choices shaped like SDK
@@ -63,11 +63,11 @@ def test_chat_shaped_parsing(monkeypatch):
 
     # monkeypatch _client_cls directly by instantiating and setting attribute
     provider = GitHubModels()
-    provider._client_cls = FakeClient
+    provider._client_cls = FakeClient  # type: ignore[assignment]
 
     async def run():
-        gen = provider.stream([{"role":"user","content":"Hi"}])
-        ev = await gen.__anext__()
+        gen = provider.stream([{"role":"user","content":"Hi"}])  # type: ignore[arg-type]
+        ev = await gen.__anext__()  # type: ignore[attr-defined]
         assert "contentBlockDelta" in ev
 
     asyncio.get_event_loop().run_until_complete(run())
@@ -78,18 +78,23 @@ def test_text_fallback_parsing(monkeypatch):
 
     class FakeClient2:
         def __init__(self, endpoint, credential):
-            pass
+            pass  # Mock client for testing
 
         def get_chat_response(self, model, messages, timeout):
             return DummyResponse(text="Plain text response")
 
     provider = GitHubModels()
-    provider._client_cls = FakeClient2
+    provider._client_cls = FakeClient2  # type: ignore[assignment]
 
     async def run2():
-        gen = provider.stream([{"role":"user","content":"Hi"}])
-        ev = await gen.__anext__()
-        assert ev["contentBlockDelta"]["delta"]["text"] == "Plain text response"
+        gen = provider.stream([{"role":"user","content":"Hi"}])  # type: ignore[arg-type]
+        ev = await gen.__anext__()  # type: ignore[attr-defined]
+        assert isinstance(ev, dict)
+        cbd = ev.get("contentBlockDelta")
+        assert isinstance(cbd, dict)
+        delta = cbd.get("delta")  # type: ignore[union-attr]
+        assert isinstance(delta, dict)
+        assert delta.get("text") == "Plain text response"  # type: ignore[union-attr]
 
     asyncio.get_event_loop().run_until_complete(run2())
 
@@ -99,17 +104,17 @@ def test_permission_error_detection(monkeypatch):
 
     class BadClient:
         def __init__(self, endpoint, credential):
-            pass
+            pass  # Mock client for testing
 
         def get_chat_response(self, model, messages, timeout):
             raise RuntimeError("403 Forbidden: token lacks permission")
 
     provider = GitHubModels()
-    provider._client_cls = BadClient
+    provider._client_cls = BadClient  # type: ignore[assignment]
 
     async def run3():
-        gen = provider.stream([{"role":"user","content":"Hi"}])
+        gen = provider.stream([{"role":"user","content":"Hi"}])  # type: ignore[arg-type]
         with pytest.raises(PermissionError):
-            await gen.__anext__()
+            await gen.__anext__()  # type: ignore[attr-defined]
 
     asyncio.get_event_loop().run_until_complete(run3())

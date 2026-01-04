@@ -33,9 +33,9 @@ class GitHubModels(Model):
         # Lazy import to keep file import-safe when SDK isn't installed
         try:
             from azure.ai.inference import ChatCompletionsClient  # type: ignore
-            self._client_cls = ChatCompletionsClient
+            self._client_cls: Any = ChatCompletionsClient  # type: ignore[assignment]
         except Exception:
-            self._client_cls = None
+            self._client_cls: Any = None  # type: ignore[assignment]
 
     def get_config(self) -> Dict[str, Any]:
         return {"endpoint": self.endpoint, "model_name": self.model_name}

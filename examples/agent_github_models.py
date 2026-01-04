@@ -24,7 +24,7 @@ def run_example():
     print(f"✅ Using token: {token[:20]}...")
     
     model = GitHubModels()
-    print(f"✅ GitHubModels initialized")
+    print("✅ GitHubModels initialized")
     print(f"   Endpoint: {model.get_config()['endpoint']}")
     print(f"   Model: {model.get_config()['model_name']}")
 
@@ -38,22 +38,28 @@ def run_example():
     
     class MockClient:
         def __init__(self, endpoint, credential):
-            pass
-        def get_chat_response(self, model, messages, timeout):
+            pass  # Mock client for demo
+        def get_chat_response(self, _model, _messages, _timeout):
+            # Unused parameters required for API compatibility
             return MockResponse()
     
     # Use mock for demonstration (comment out to use real API)
-    model._client_cls = MockClient
+    model._client_cls = MockClient  # type: ignore[assignment]
     
     async def demo():
         try:
             messages = [{"role": "user", "content": "Hello, what is 2+2?"}]
             print("Prompt:", messages[0]["content"])
             print("\nResponse:\n")
-            async for ev in model.stream(messages, system_prompt="You are a helpful assistant."):
-                if "contentBlockDelta" in ev:
-                    text = ev["contentBlockDelta"]["delta"]["text"]
-                    print(f"  {text}")
+            async for ev in model.stream(messages, system_prompt="You are a helpful assistant."):  # type: ignore[arg-type]
+                if "contentBlockDelta" in ev and isinstance(ev, dict):
+                    cbd = ev.get("contentBlockDelta")
+                    if isinstance(cbd, dict):
+                        delta = cbd.get("delta")  # type: ignore[union-attr]
+                        if isinstance(delta, dict):
+                            text = delta.get("text")  # type: ignore[union-attr]
+                            if isinstance(text, str):
+                                print(f"  {text}")
             print("\n✅ Done!")
         except Exception as e:
             print(f"❌ Error: {type(e).__name__}: {e}")

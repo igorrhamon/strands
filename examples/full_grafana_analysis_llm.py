@@ -34,10 +34,10 @@ def _extract_text_delta(ev: Any) -> str:
     cbd = ev.get("contentBlockDelta")
     if not isinstance(cbd, dict):
         return ""
-    delta = cbd.get("delta")
+    delta = cbd.get("delta")  # type: ignore[union-attr]
     if not isinstance(delta, dict):
         return ""
-    text = delta.get("text")
+    text = delta.get("text")  # type: ignore[union-attr]
     return text if isinstance(text, str) else ""
 
 
