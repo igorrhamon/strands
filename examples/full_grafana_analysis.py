@@ -187,8 +187,8 @@ def main() -> None:
     end = os.environ.get("GRAFANA_TO", "now")
     environment = os.environ.get("ENVIRONMENT", "local")
     import json
-
-    print(json.dumps(build_report(start=start, end=end, environment=environment), indent=2, ensure_ascii=False))
+    report = build_report(start=start, end=end, environment=environment)
+    print(json.dumps(report, indent=2, ensure_ascii=False))
 
 
 def build_report(*, start: str, end: str, environment: str) -> Dict[str, Any]:
