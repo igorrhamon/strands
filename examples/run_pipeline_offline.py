@@ -1,12 +1,17 @@
-"""Example: Running the complete alert decision pipeline with synthetic data"""
+"""Example: Running the complete alert decision pipeline with synthetic data
+
+NOTE: This is the OFFLINE version (no external dependencies).
+For real Qdrant vector database with persistent storage, see:
+    examples/demo_graph_agent_qdrant.py
+"""
 import logging
 from datetime import datetime, timezone
 
 try:
     from dotenv import load_dotenv
 except Exception:  # pragma: no cover - optional dependency for examples
-    def load_dotenv(*args, **kwargs):
-        return None
+    def load_dotenv(*args, **kwargs) -> bool:
+        return False
 
 from src.models.alert import Alert
 from src.agents.alert_normalizer import AlertNormalizerAgent
@@ -14,6 +19,7 @@ from src.agents.alert_correlation import AlertCorrelationAgent
 from src.agents.metrics_analysis import MetricsAnalysisAgent
 from src.agents.decision_engine import DecisionEngine
 from src.agents.human_review import HumanReviewAgent
+from src.agents.graph_agent import GraphAgent
 from src.rules.decision_rules import RuleEngine
 
 
@@ -89,6 +95,10 @@ def main():
     alert_correlation = AlertCorrelationAgent(time_window_minutes=15)
     metrics_analysis = MetricsAnalysisAgent(prometheus_client=None)  # Offline mode
     
+    # Initialize graph agent (memory-only mode for offline)
+    graph_agent = GraphAgent(enable_qdrant=False)
+    logger.info(f"  Graph Agent Stats: {graph_agent.get_stats()}")
+    
     # Initialize decision engine with rule engine
     rule_engine = RuleEngine()
     decision_engine = DecisionEngine(rule_engine=rule_engine)
@@ -142,18 +152,33 @@ def main():
                 # Step 4: Skip metrics analysis in offline mode (no Prometheus)
                 logger.info("  Step 4: Skipping metrics analysis (offline mode)")
                 
-                # Step 5: Make decision (sync mode - rules only, no LLM)
+                # Step 4.5: Search for similar past decisions (RAG)
+                logger.info("  Step 4.5: Searching for similar past decisions...")
+                semantic_evidence = graph_agent.find_similar_decisions(
+                    cluster=cluster,
+                    top_k=3,
+                    min_similarity=0.7
+                )
+                if semantic_evidence:
+                    logger.info(f"    Found {len(semantic_evidence)} similar past decisions")
+                    for idx, evidence in enumerate(semantic_evidence, 1):
+                        logger.info(f"      {idx}. Similarity: {evidence.similarity_score:.2f} - {evidence.summary[:80]}...")
+                else:
+                    logger.info("    No similar past decisions found")
+                
+                # Step 5: Make decision (sync mode - rules first, enriched with semantic evidence)
                 logger.info("  Step 5: Making decision...")
                 decision = decision_engine.decide_sync(
                     cluster=cluster,
                     trends={},
-                    semantic_evidence=[]
+                    semantic_evidence=semantic_evidence
                 )
                 
                 logger.info(f"  Decision: {decision.decision_state.value}")
                 logger.info(f"    Confidence: {decision.confidence:.2f}")
                 logger.info(f"    Rules Applied: {', '.join(decision.rules_applied)}")
                 logger.info(f"    Justification: {decision.justification}")
+                logger.info(f"    Semantic Evidence: {len(decision.semantic_evidence)} past decisions")
                 logger.info(f"    LLM Used: {decision.llm_contribution}")
                 
                 # Step 6: Human review if required
@@ -186,6 +211,19 @@ def main():
             for review in pending_reviews:
                 logger.info(f"  - Review ID: {review['review_id']}")
                 logger.info(f"    Decision: {review['decision_state']} (confidence: {review['confidence']})")
+        
+        # Simulate storing confirmed decisions in graph (for demo purposes)
+        # In production, this happens after human validation
+        logger.info(f"\n{'='*60}")
+        logger.info("Simulating storage of decisions in knowledge graph...")
+        stored_count = 0
+        for i, (decision, cluster) in enumerate(zip(decisions, clusters)):
+            # Simulate confirmation (in production, wait for human validation)
+            decision.confirm(validator_id="demo_user")
+            if graph_agent.store_decision(decision, cluster):
+                stored_count += 1
+        logger.info(f"Stored {stored_count} confirmed decisions for future reference")
+        logger.info(f"Graph Agent Stats: {graph_agent.get_stats()}")
         
         logger.info("\n" + "="*60)
         logger.info("Pipeline execution complete (offline mode)")
