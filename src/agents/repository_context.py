@@ -185,7 +185,7 @@ class RepositoryContextAgent:
         quality = (avg_score * 0.6) + (count_factor * 0.2) + confidence_bonus
         return min(1.0, quality)
     
-    async def _get_repo_metadata(self, service: str) -> dict:
+    def _get_repo_metadata(self, service: str) -> dict:
         """
         Get repository metadata for a service.
         

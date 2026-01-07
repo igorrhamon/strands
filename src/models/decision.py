@@ -93,3 +93,17 @@ class Decision(BaseModel):
     def is_confirmed(self) -> bool:
         """Check if decision is confirmed (for embedding persistence)."""
         return self.human_validation_status == HumanValidationStatus.CONFIRMED
+
+
+class DecisionValidation(BaseModel):
+    """Result of a human review/validation of a Decision."""
+    validation_id: str
+    decision_id: UUID
+    validated_by: str
+    is_approved: bool
+    feedback: str | None = None
+    corrected_decision: DecisionState | None = None
+    validated_at: datetime | None = None
+
+    class Config:
+        frozen = False

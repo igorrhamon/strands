@@ -198,8 +198,8 @@ class AlertOrchestrator:
                 context = await self._run_with_timeout(
                     self._context.get_context(
                         cluster=cluster,
-                        # top_k=5,
-                        # min_score=0.75,
+
+
                     ),
                     "semantic",
                 )

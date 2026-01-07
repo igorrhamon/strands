@@ -55,12 +55,10 @@ class GrafanaMCPClient:
         self._mcp_available = True
         return self._mcp_available
     
-    async def fetch_alerts(
+    def fetch_alerts(
         self,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
-        severity_filter: Optional[list[str]] = None,
-        service_filter: Optional[str] = None,
     ) -> list[Alert]:
         """
         Fetch alerts from Grafana.
@@ -95,26 +93,15 @@ class GrafanaMCPClient:
             )
             
             # Placeholder - real implementation would parse MCP response
-            raw_alerts = await self._call_mcp_alerts(
-                start_time=start_time,
-                end_time=end_time,
-                severity_filter=severity_filter,
-                service_filter=service_filter,
-            )
+            alerts = self._call_mcp_alerts()
             
-            # Convert to Alert objects
-            return [self._parse_alert(raw) for raw in raw_alerts]
+            # Return Alert objects directly
+            return alerts
         
         except Exception as e:
             raise GrafanaClientError(f"Failed to fetch alerts: {e}") from e
     
-    async def _call_mcp_alerts(
-        self,
-        start_time: datetime,
-        end_time: datetime,
-        severity_filter: Optional[list[str]] = None,
-        service_filter: Optional[str] = None,
-    ) -> list[dict]:
+    def _call_mcp_alerts(self) -> list[Alert]:
         """
         Internal method to call MCP tools.
         
@@ -144,19 +131,17 @@ class GrafanaMCPClient:
         )
 
 
-async def fetch_active_alerts(
+def fetch_active_alerts(
     lookback_minutes: int = 60,
-    severity_filter: Optional[list[str]] = None,
 ) -> list[Alert]:
     """
     Convenience function to fetch active alerts.
     
     Args:
         lookback_minutes: Time window to query.
-        severity_filter: Optional severity filter.
     
     Returns:
         List of active alerts.
     """
     client = GrafanaMCPClient(default_lookback_minutes=lookback_minutes)
-    return await client.fetch_alerts(severity_filter=severity_filter)
+    return client.fetch_alerts()

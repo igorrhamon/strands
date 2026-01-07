@@ -125,7 +125,7 @@ class PrometheusClient:
         self._datasource_uid = datasource_uid
         self._default_step = default_step_seconds
     
-    async def query_instant(
+    def query_instant(
         self,
         expr: str,
         time: Optional[datetime] = None,
@@ -149,18 +149,14 @@ class PrometheusClient:
             logger.info(f"Instant query: {expr} at {time.isoformat()}")
             
             # Placeholder - real implementation would parse MCP response
-            raw_result = await self._call_mcp_query(
-                expr=expr,
-                query_type="instant",
-                time=time,
-            )
+            raw_result = self._call_mcp_query()
             
             return self._parse_instant_result(raw_result, time)
         
         except Exception as e:
             raise PrometheusQueryError(f"Instant query failed: {e}") from e
     
-    async def query_range(
+    def query_range(
         self,
         expr: str,
         start: Optional[datetime] = None,
@@ -191,28 +187,14 @@ class PrometheusClient:
                 f"Range query: {expr} from {start.isoformat()} to {end.isoformat()}"
             )
             
-            raw_result = await self._call_mcp_query(
-                expr=expr,
-                query_type="range",
-                start=start,
-                end=end,
-                step_seconds=step_seconds,
-            )
+            raw_result = self._call_mcp_query()
             
             return self._parse_range_result(raw_result)
         
         except Exception as e:
             raise PrometheusQueryError(f"Range query failed: {e}") from e
     
-    async def _call_mcp_query(
-        self,
-        expr: str,
-        query_type: str,
-        time: Optional[datetime] = None,
-        start: Optional[datetime] = None,
-        end: Optional[datetime] = None,
-        step_seconds: Optional[int] = None,
-    ) -> dict:
+    def _call_mcp_query(self) -> dict:
         """
         Internal method to call MCP Prometheus tool.
         

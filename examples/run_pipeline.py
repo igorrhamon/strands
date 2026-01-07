@@ -1,0 +1,117 @@
+"""Example: Running the complete alert decision pipeline"""
+import logging
+try:
+    from dotenv import load_dotenv
+except Exception:  # pragma: no cover - optional dependency for examples
+    def load_dotenv(*args, **kwargs):
+        return None
+
+try:
+    from src.tools.grafana_client import GrafanaMCPClient
+except Exception:  # pragma: no cover - example fallback
+    class GrafanaMCPClient:
+        def __init__(self, *args, **kwargs):
+            pass
+        def close(self):
+            pass
+
+try:
+    from src.tools.prometheus_client import PrometheusClient
+except Exception:  # pragma: no cover - example fallback
+    class PrometheusClient:
+        def __init__(self, *args, **kwargs):
+            pass
+        def close(self):
+            pass
+from src.agents.alert_collector import AlertCollectorAgent
+from src.agents.alert_normalizer import AlertNormalizerAgent
+from src.agents.alert_correlation import AlertCorrelationAgent
+from src.agents.metrics_analysis import MetricsAnalysisAgent
+from src.agents.decision_engine import DecisionEngine
+from src.agents.human_review import HumanReviewAgent
+from src.agents.orchestrator import AlertOrchestratorAgent
+from src.rules.policy_engine import PolicyEngine
+
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+def main():
+    """Run the alert decision pipeline"""
+    load_dotenv()
+    
+    logger.info("Initializing pipeline components...")
+    
+    # Initialize clients
+    grafana_client = GrafanaMCPClient()
+    prometheus_client = PrometheusClient()
+    
+    # Initialize agents
+    alert_collector = AlertCollectorAgent(grafana_client)
+    alert_normalizer = AlertNormalizerAgent()
+    alert_correlation = AlertCorrelationAgent(time_window_minutes=15)
+    metrics_analysis = MetricsAnalysisAgent(prometheus_client)
+    
+    # Initialize decision engine (policy engine kept for backward compatibility)
+    policy_engine = PolicyEngine()
+    decision_engine = DecisionEngine()
+    
+    # Initialize human review agent
+    human_review = HumanReviewAgent()
+    
+    # Create orchestrator
+    orchestrator = AlertOrchestratorAgent(
+        alert_collector=alert_collector,
+        alert_normalizer=alert_normalizer,
+        alert_correlation=alert_correlation,
+        metrics_analysis=metrics_analysis,
+        decision_engine=decision_engine,
+        human_review=human_review
+    )
+    
+    logger.info("Starting pipeline execution...")
+    
+    try:
+        # Run pipeline
+        decisions = orchestrator.run_pipeline()
+        
+        # Display results
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Pipeline Results: {len(decisions)} decisions made")
+        logger.info(f"{'='*60}\n")
+        
+        for decision in decisions:
+            logger.info(f"Decision ID: {decision.decision_id}")
+            logger.info(f"  Cluster: {decision.cluster_id}")
+            logger.info(f"  State: {decision.decision_state.value}")
+            logger.info(f"  Confidence: {decision.confidence:.2f}")
+            logger.info(f"  LLM Used: {decision.llm_contribution}")
+            logger.info(f"  Rules Applied: {', '.join(decision.rules_applied)}")
+            logger.info(f"  Justification: {decision.justification}")
+            logger.info("")
+        
+        # Check for pending reviews
+        pending_reviews = human_review.get_pending_reviews()
+        if pending_reviews:
+            logger.info(f"\n{len(pending_reviews)} decisions pending human review:")
+            for review in pending_reviews:
+                logger.info(f"  - Review ID: {review['review_id']}")
+                logger.info(f"    Decision: {review['decision_state']} (confidence: {review['confidence']})")
+        
+    except Exception as e:
+        logger.error(f"Pipeline execution failed: {e}", exc_info=True)
+        raise
+    finally:
+        # Cleanup
+        grafana_client.close()
+        prometheus_client.close()
+        logger.info("Pipeline execution complete")
+
+
+if __name__ == "__main__":
+    main()

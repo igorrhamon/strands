@@ -139,7 +139,7 @@ class DecisionEngine:
         
         return decision
     
-    async def _invoke_llm_fallback(
+    def _invoke_llm_fallback(
         self,
         cluster: AlertCluster,
         trends: dict[str, MetricTrend],
@@ -207,31 +207,31 @@ class DecisionEngine:
             Formatted context string.
         """
         parts = [
-            f"# Alert Cluster Analysis",
-            f"",
-            f"## Cluster Summary",
+            "# Alert Cluster Analysis",
+            "",
+            "## Cluster Summary",
             f"- Service: {cluster.primary_service}",
             f"- Severity: {cluster.primary_severity}",
             f"- Alert Count: {cluster.alert_count}",
             f"- Correlation Score: {cluster.correlation_score:.2f}",
-            f"",
-            f"## Alert Descriptions",
+            "",
+            "## Alert Descriptions",
         ]
         
         for alert in cluster.alerts[:5]:  # Limit to first 5
             parts.append(f"- {alert.description}")
         
         parts.extend([
-            f"",
-            f"## Metric Trends",
+            "",
+            "## Metric Trends",
         ])
         
         for name, trend in trends.items():
             parts.append(f"- {name}: {trend.trend_state.value} (confidence: {trend.confidence:.2f})")
         
         parts.extend([
-            f"",
-            f"## Historical Evidence",
+            "",
+            "## Historical Evidence",
         ])
         
         if semantic_evidence:
@@ -241,8 +241,8 @@ class DecisionEngine:
             parts.append("- No historical matches found")
         
         parts.extend([
-            f"",
-            f"## Rule Evaluation",
+            "",
+            "## Rule Evaluation",
             f"- Result: {rule_result.decision_state.value if rule_result.decision_state else 'None'}",
             f"- Confidence: {rule_result.confidence:.2f}",
             f"- Rule: {rule_result.rule_id}",
@@ -310,7 +310,6 @@ DECISION_ENGINE_TOOL = {
 async def execute_decision_tool(
     service: str,
     severity: str,
-    trends_summary: Optional[dict] = None,
 ) -> dict:
     """
     Tool execution function for Strands integration.

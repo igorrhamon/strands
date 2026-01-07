@@ -1,0 +1,69 @@
+Metadata-Version: 2.4
+Name: strads-alert-agent
+Version: 0.1.0
+Summary: Intelligent Alert Decision Agent - Multi-agent pipeline for alert triage and decision making
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: strands-agents>=1.21.0
+Requires-Dist: pydantic>=2.0.0
+Requires-Dist: httpx>=0.24.0
+Requires-Dist: requests>=2.31.0
+Requires-Dist: neo4j>=5.0.0
+Requires-Dist: chromadb>=0.4.0
+Requires-Dist: prometheus-client>=0.17.0
+Requires-Dist: python-dotenv>=1.0.0
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: pytest>=7.4.0
+Requires-Dist: pytest-asyncio>=0.21.0
+Requires-Dist: pytest-mock>=3.11.0
+Provides-Extra: dev
+Requires-Dist: black>=23.0.0; extra == "dev"
+Requires-Dist: ruff>=0.0.280; extra == "dev"
+Requires-Dist: mypy>=1.4.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.1.0; extra == "dev"
+
+# Strands Agents — HTTP custom model provider example
+
+This example shows how to create a custom `Model` provider for Strands Agents
+that forwards prompts to an HTTP endpoint (for example an open-source model
+you hosted yourself). It also includes a minimal FastAPI demo server.
+
+Setup
+-----
+
+1. Create and activate a virtual environment
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install --upgrade pip setuptools wheel
+pip install -r requirements.txt
+```
+
+2. Run the demo server (FastAPI)
+
+```bash
+uvicorn server_fastapi:app --reload --port 8000
+```
+
+3. In another terminal (with `.venv` activated) run the agent example
+
+```bash
+python agent_http.py
+```
+
+Files
+-----
+- `my_http_model.py`: Custom `HTTPModel` provider that posts prompts to an endpoint.
+- `agent_http.py`: Example that creates an `Agent` using the custom provider.
+- `server_fastapi.py`: Small FastAPI demo server that returns an echoed response.
+- `requirements.txt`: Packages used in the example.
+
+Notes
+-----
+- Production servers should implement streaming, authentication, retries,
+  timeout control and proper error handling. The demo server only echoes the
+  prompt for simplicity.
+- If you have a model from GitHub Models, first serve it with a model server
+  (Ollama, Llama-API, custom FastAPI wrapping a transformers pipeline, etc.)
+  and then point `HTTPModel.endpoint_url` to that server.

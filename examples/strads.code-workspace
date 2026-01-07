@@ -5,9 +5,6 @@
 		},
 		{
 			"path": "../../../sgn/sgn-agendamento-massificado-api"
-		},
-		{
-			"path": "../../../sgn/sgn-encerrar-ficha-api"
 		}
 	],
 	"settings": {

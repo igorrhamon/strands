@@ -10,6 +10,7 @@ from typing import Optional
 
 from src.models.alert import Alert, NormalizedAlert
 from src.models.cluster import AlertCluster
+from src.models.cluster import AlertCluster
 from src.tools.grafana_mcp import GrafanaMCPClient, GrafanaClientError
 from src.utils.alert_normalizer import AlertNormalizer
 from src.rules.correlation_rules import CorrelationEngine, CorrelationConfig
@@ -107,7 +108,7 @@ class AlertCorrelationAgent:
         normalized = self._normalizer.normalize_batch(alerts)
         return self._correlation.correlate(normalized)
     
-    async def correlate(self, alerts: list[Alert], time_window_minutes: int) -> list[AlertCluster]:
+    def correlate(self, alerts: list[Alert], time_window_minutes: int) -> list[AlertCluster]:
         """
         Correlate a list of alerts with specified time window.
         
