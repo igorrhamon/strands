@@ -4,6 +4,9 @@ from enum import Enum
 from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
+# Import the enhanced MetricTrend from metric_trend module
+from src.models.metric_trend import MetricTrend as MetricTrendEnhanced, TrendState
+
 
 class TrendClassification(str, Enum):
     """Metric trend classifications"""
@@ -43,19 +46,25 @@ class MetricTrend(BaseModel):
 
 
 class MetricsAnalysisResult(BaseModel):
-    """Complete metrics analysis for an alert cluster"""
+    """Complete metrics analysis for an alert cluster (FR-008 enhanced)"""
     cluster_id: str
-    trends: List[MetricTrend] = Field(..., description="Analyzed metric trends")
+    service: str = Field(..., description="Primary service being analyzed")
+    trends: Dict[str, MetricTrendEnhanced] = Field(..., description="Dict mapping metric type to analyzed trend")
     overall_health: TrendClassification = Field(..., description="Aggregate health status")
     overall_confidence: float = Field(..., ge=0.0, le=1.0)
-    query_latency_ms: int = Field(..., description="Time taken for Prometheus queries")
+    query_latency_ms: int = Field(..., description="Total query latency in milliseconds (FR-008)")
+    metrics_available_count: int = Field(..., description="Number of metrics requested")
+    metrics_queried_count: int = Field(..., description="Number of metrics successfully queried")
+    prometheus_errors: List[str] = Field(default_factory=list, description="List of errors encountered (FR-008)")
+    retry_summary: Dict = Field(default_factory=dict, description="Retry statistics from Prometheus client (FR-008)")
     analyzed_at: datetime = Field(default_factory=datetime.utcnow)
-    errors: List[str] = Field(default_factory=list, description="Any errors during analysis")
     
     @property
     def has_degrading_metrics(self) -> bool:
         """Check if any metrics are degrading"""
-        return any(t.classification == TrendClassification.DEGRADING for t in self.trends)
+        if isinstance(self.trends, dict):
+            return any(t.trend_state == TrendState.DEGRADING for t in self.trends.values())
+        return False
     
     @property
     def is_reliable(self) -> bool:
