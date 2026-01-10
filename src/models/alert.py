@@ -18,18 +18,25 @@ class ValidationStatus(str, Enum):
     MALFORMED = "MALFORMED"
 
 
+class AlertSource(str, Enum):
+    """Source of the alert."""
+    GRAFANA = "GRAFANA"
+    SERVICENOW = "SERVICENOW"
+
+
 class Alert(BaseModel):
     """
-    Raw immutable event from Grafana/Prometheus.
+    Raw immutable event from Grafana/Prometheus or ServiceNow.
     
     This is the input format received from external systems.
     """
     
     timestamp: datetime = Field(..., description="Time of alert generation (ISO8601)")
-    fingerprint: str = Field(..., description="Unique hash from Prometheus")
+    fingerprint: str = Field(..., description="Unique hash from Prometheus or Ticket ID")
     service: str = Field(..., description="Service name (e.g., 'checkout-service')")
     severity: str = Field(..., description="Alert severity: critical, warning, info")
     description: str = Field(..., description="Human-readable alert text")
+    source: AlertSource = Field(default=AlertSource.GRAFANA, description="Source system of the alert")
     labels: dict[str, str] = Field(default_factory=dict, description="Key-value pairs from source")
     
     class Config:

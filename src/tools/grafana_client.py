@@ -23,7 +23,16 @@ class GrafanaMCPClient:
         token = os.getenv("GRAFANA_SERVICE_ACCOUNT_TOKEN")
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        self.client = httpx.Client(timeout=timeout, headers=headers)
+            self.client = httpx.Client(timeout=timeout, headers=headers)
+        else:
+            # Fallback to basic auth if provided
+            user = os.getenv("GRAFANA_ADMIN_USER")
+            pwd = os.getenv("GRAFANA_ADMIN_PASSWORD")
+            if user and pwd:
+                self.client = httpx.Client(timeout=timeout, auth=(user, pwd))
+            else:
+                # No auth provided, use headers only (may be an open Grafana)
+                self.client = httpx.Client(timeout=timeout, headers=headers)
     
     def fetch_active_alerts(self) -> List[Alert]:
         """Fetch currently firing alerts from Grafana
