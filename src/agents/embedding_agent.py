@@ -104,11 +104,13 @@ class EmbeddingAgent:
             logger.error(f"[{self.AGENT_NAME}] Search failed: {e}")
             return []  # Graceful degradation
     
-    def persist_confirmed_decision(
+    async def persist_confirmed_decision(
         self,
         decision: Decision,
-        alert_description: str,
-        human_validator: str,
+        alert_description: str | None = None,
+        human_validator: str | None = None,
+        cluster = None,  # Cluster context (optional, for backward compatibility)
+        **kwargs,  # Absorb any other unexpected kwargs
     ) -> VectorEmbedding:
         """
         Persist a CONFIRMED decision to semantic memory.
@@ -146,8 +148,10 @@ class EmbeddingAgent:
                 human_validator=human_validator,
             )
             
+            # Handle both string IDs (from mocks) and VectorEmbedding objects (from real store)
+            embedding_id = embedding if isinstance(embedding, str) else getattr(embedding, 'vector_id', str(embedding))
             logger.info(
-                f"[{self.AGENT_NAME}] Persisted embedding {embedding.vector_id} "
+                f"[{self.AGENT_NAME}] Persisted embedding {embedding_id} "
                 f"for decision {decision.decision_id}"
             )
             

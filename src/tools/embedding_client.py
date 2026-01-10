@@ -40,6 +40,11 @@ class EmbeddingClient:
     """
 
     _instance: Optional["EmbeddingClient"] = None
+    # explicit attributes for static analyzers
+    _model_name: str
+    _provider: str
+    _remote_client: Optional[object]
+    _vector_dim: int
 
     def __new__(cls, model_name: str = DEFAULT_MODEL_NAME, provider: Optional[str] = None):
         if cls._instance is None:
@@ -54,7 +59,6 @@ class EmbeddingClient:
         self._model_name = model_name
         if provider:
             self._provider = provider
-
 
     def _ensure_remote_client(self):
         """Lazy-init GitHub Models client using azure-ai-inference SDK."""
@@ -83,68 +87,47 @@ class EmbeddingClient:
             except Exception as e:
                 raise EmbeddingModelError(f"Failed to initialize remote embeddings client: {e}") from e
         return self._remote_client
-    
+
     def embed(self, text: str) -> list[float]:
-        """
-        Generate embedding for a single text.
-        
-        Args:
-            text: Input text to embed.
-        
-        Returns:
-            384-dimensional embedding vector.
-        
-        Raises:
-            EmbeddingModelError: If embedding generation fails.
-        """
+        """Generate embedding for a single text."""
         if not text or not text.strip():
             raise ValueError("Cannot embed empty text")
-        
         try:
             if self._provider == "github":
                 client = self._ensure_remote_client()
-                # azure-ai-inference EmbeddingsClient.embed accepts input list
                 resp = client.embed(input=[text], model=self._model_name)
                 data = list(resp.data)
                 if not data:
                     raise EmbeddingModelError("Remote embedding returned empty response")
                 emb = [float(x) for x in data[0].embedding]
-                # set vector dim on first successful call
                 self._vector_dim = len(emb)
                 return emb
             else:
-                # Local provider requested but local libs are not available at import-time.
-                # Attempt to give a helpful error rather than silently returning None.
-                raise EmbeddingModelError(
-                    "Local embedding provider requested but local dependencies are not installed. "
-                    "Install 'sentence-transformers' or set EMBEDDING_PROVIDER=github to use remote embeddings."
-                )
+                # Use local SentenceTransformer
+                try:
+                    result = SentenceTransformer(self._model_name).encode(text)
+                    emb = result.tolist() if hasattr(result, 'tolist') else list(result)
+                    self._vector_dim = len(emb)
+                    return emb
+                except RuntimeError as e:
+                    # Shim raises RuntimeError when sentence-transformers not installed
+                    raise EmbeddingModelError(str(e)) from e
         except EmbeddingModelError:
             raise
         except Exception as e:
             raise EmbeddingModelError(f"Failed to generate embedding: {e}") from e
-    
+
+    def generate_embedding(self, text: str) -> list[float]:
+        """Alias for embed() for backward compatibility."""
+        return self.embed(text)
+
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """
-        Generate embeddings for multiple texts.
-        
-        Args:
-            texts: List of input texts to embed.
-        
-        Returns:
-            List of 384-dimensional embedding vectors.
-        
-        Raises:
-            EmbeddingModelError: If embedding generation fails.
-        """
+        """Generate embeddings for multiple texts."""
         if not texts:
             return []
-        
-        # Validate all texts
         for i, text in enumerate(texts):
             if not text or not text.strip():
                 raise ValueError(f"Cannot embed empty text at index {i}")
-        
         try:
             if self._provider == "github":
                 client = self._ensure_remote_client()
@@ -156,24 +139,45 @@ class EmbeddingClient:
                     self._vector_dim = len(out[0])
                 return out
             else:
-                raise EmbeddingModelError(
-                    "Local embedding provider requested but local dependencies are not installed. "
-                    "Install 'sentence-transformers' or set EMBEDDING_PROVIDER=github to use remote embeddings."
-                )
+                # Use local SentenceTransformer
+                try:
+                    result = SentenceTransformer(self._model_name).encode(texts)
+                    out = [row.tolist() if hasattr(row, 'tolist') else list(row) for row in result]
+                    if out:
+                        self._vector_dim = len(out[0])
+                    return out
+                except RuntimeError as e:
+                    # Shim raises RuntimeError when sentence-transformers not installed
+                    raise EmbeddingModelError(str(e)) from e
         except EmbeddingModelError:
             raise
         except Exception as e:
             raise EmbeddingModelError(f"Failed to generate batch embeddings: {e}") from e
-    
+
     @property
     def vector_dimension(self) -> int:
         """Return the dimension of embedding vectors."""
         return getattr(self, '_vector_dim', VECTOR_DIM)
-    
+
     @property
     def model_name(self) -> str:
         """Return the model name."""
         return self._model_name
+
+
+# Expose a minimal SentenceTransformer shim so other modules/tests that import
+# `from src.tools.embedding_client import SentenceTransformer` will not fail
+# when the optional `sentence-transformers` package is not installed.
+try:
+    from sentence_transformers import SentenceTransformer  # type: ignore
+except Exception:
+    class SentenceTransformer:  # type: ignore
+        """Minimal shim that raises a helpful error on use."""
+        def __init__(self, model_name: str):
+            raise RuntimeError(
+                "sentence-transformers is not installed. Install it to use local embeddings, "
+                "or set EMBEDDING_PROVIDER=github to use remote GitHub-hosted embeddings."
+            )
 
 
 def create_embedding_text(

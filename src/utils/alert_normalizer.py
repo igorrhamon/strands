@@ -92,26 +92,39 @@ class AlertNormalizer:
         Returns:
             List of validation errors, or None if valid.
         """
-        errors = []
-        
-        # Check required fields
-        if not alert.fingerprint or not alert.fingerprint.strip():
-            errors.append("Missing or empty fingerprint")
-        
-        if not alert.service or not alert.service.strip():
-            errors.append("Missing or empty service")
-        
-        if not alert.description or not alert.description.strip():
-            errors.append("Missing or empty description")
-        
-        # Validate severity
-        if alert.severity.lower() not in self.VALID_SEVERITIES:
-            errors.append(f"Invalid severity: {alert.severity}")
-        
-        # Validate timestamp
-        if alert.timestamp > datetime.now(timezone.utc):
-            errors.append("Timestamp is in the future")
-        
+        errors: list[str] = []
+
+        def _check_present(field_val: str, msg: str) -> None:
+            if not field_val or not field_val.strip():
+                errors.append(msg)
+
+        _check_present(alert.fingerprint, "Missing or empty fingerprint")
+        _check_present(alert.service, "Missing or empty service")
+        _check_present(alert.description, "Missing or empty description")
+
+        # Validate severity (simple membership check)
+        try:
+            if alert.severity is None or alert.severity.lower() not in self.VALID_SEVERITIES:
+                errors.append(f"Invalid severity: {alert.severity}")
+        except Exception:
+            errors.append("Invalid severity value")
+
+        # Validate timestamp. Coerce naive datetimes to UTC.
+        ts = alert.timestamp
+        if ts is None:
+            errors.append("Missing timestamp")
+        else:
+            if getattr(ts, "tzinfo", None) is None or getattr(ts.tzinfo, "utcoffset", lambda x: None)(ts) is None:
+                # Coerce naive datetime to UTC for backward compatibility
+                try:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                except Exception:
+                    errors.append("Invalid timestamp format")
+                    return errors
+
+            if ts > datetime.now(timezone.utc):
+                errors.append("Timestamp is in the future")
+
         return errors if errors else None
     
     def _normalize_service(self, service: str) -> str:

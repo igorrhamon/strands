@@ -37,11 +37,12 @@ def test_audit_logger_log_decision_raises_validation_error():
         logger.log_decision(dummy, cluster_id="cluster-001", alert_fingerprints=["fp-001"])
 
 
-def test_alert_normalizer_timestamp_naive_raises_typeerror():
+def test_alert_normalizer_timestamp_naive_is_coerced():
+    # AlertNormalizer should now coerce naive datetimes to UTC (fixed)
     normalizer = AlertNormalizer()
     # Create an alert-like simple object with a naive datetime timestamp
     alert = SimpleNamespace(
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.utcnow(),  # naive datetime
         fingerprint="fp-1",
         service="svc",
         severity="critical",
@@ -49,15 +50,20 @@ def test_alert_normalizer_timestamp_naive_raises_typeerror():
         source=SimpleNamespace(),
         labels={}
     )
-    with pytest.raises(TypeError):
-        normalizer._validate(alert)
+    # Should not raise; instead should return None or empty errors (valid after coercion)
+    errors = normalizer._validate(alert)
+    assert errors is None or (isinstance(errors, list) and len(errors) == 0)
 
 
 def test_embedding_client_missing_sentence_transformer_attribute():
     # The module is expected to expose SentenceTransformer; current codebase
     # lacks it and tests earlier surfaced AttributeError. Assert behavior.
-    with pytest.raises(AttributeError):
-        _ = embedding_client.SentenceTransformer
+    # The module should expose `SentenceTransformer` (shim). Attempting to
+    # instantiate the shim without the external dependency should raise a
+    # RuntimeError with a helpful message.
+    assert hasattr(embedding_client, "SentenceTransformer")
+    with pytest.raises(RuntimeError):
+        embedding_client.SentenceTransformer("model-name")
 
 
 def test_metrics_analysisresult_validation_error():

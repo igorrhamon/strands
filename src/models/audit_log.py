@@ -5,7 +5,7 @@ Represents the complete audit trail for a decision.
 Supports deterministic replay (Constitution Principle IV).
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -26,21 +26,23 @@ class AuditLog(BaseModel):
     
     # Input context (for replay)
     alert_ids: list[str] = Field(..., description="Fingerprints of input alerts")
-    cluster_id: UUID | None = Field(None, description="Cluster ID if grouped")
+    # Accept cluster IDs as string for flexibility in clustering implementations
+    cluster_id: str | None = Field(None, description="Cluster ID if grouped")
     metric_context: dict = Field(default_factory=dict, description="Summary of metrics used")
-    
-    # Semantic evidence IDs (for audit)
-    semantic_evidence_ids: list[UUID] = Field(
+
+    # Semantic evidence IDs (for audit) stored as strings for simplicity
+    semantic_evidence_ids: list[str] = Field(
         default_factory=list,
         description="IDs of similar decisions used as evidence"
     )
-    
+
     # Decision output
     decision_output: Decision = Field(..., description="The final decision object")
-    
+
     # Execution metadata
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Execution time")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Execution time")
     agent_id: str = Field(..., description="ID of the agent instance")
+    agent_version: str | None = Field(None, description="Version of the agent that made the decision")
     execution_duration_ms: int = Field(..., ge=0, description="Execution time in milliseconds")
     
     # Human validation
@@ -58,6 +60,20 @@ class AuditLog(BaseModel):
     
     class Config:
         frozen = True  # Immutable after creation
+    
+    @property
+    def decision_state(self) -> str | None:
+        """Extract decision state from decision_output for backward compatibility with tests."""
+        if self.decision_output:
+            return getattr(self.decision_output, "decision_state", None)
+        return None
+    
+    @property
+    def confidence(self) -> float | None:
+        """Extract confidence from decision_output."""
+        if self.decision_output:
+            return getattr(self.decision_output, "confidence", None)
+        return None
     
     def to_replay_context(self) -> dict:
         """
