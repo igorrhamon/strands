@@ -88,30 +88,37 @@ class EmbeddingClient:
                 raise EmbeddingModelError(f"Failed to initialize remote embeddings client: {e}") from e
         return self._remote_client
 
+    def _embed_via_github(self, text: str) -> list[float]:
+        """Generate embedding using GitHub Models provider."""
+        client = self._ensure_remote_client()
+        resp = client.embed(input=[text], model=self._model_name)
+        data = list(resp.data)
+        if not data:
+            raise EmbeddingModelError("Remote embedding returned empty response")
+        emb = [float(x) for x in data[0].embedding]
+        self._vector_dim = len(emb)
+        return emb
+
+    def _embed_via_local(self, text: str) -> list[float]:
+        """Generate embedding using local SentenceTransformer."""
+        try:
+            result = SentenceTransformer(self._model_name).encode(text)
+            emb = result.tolist() if hasattr(result, 'tolist') else list(result)
+            self._vector_dim = len(emb)
+            return emb
+        except RuntimeError as e:
+            # Shim raises RuntimeError when sentence-transformers not installed
+            raise EmbeddingModelError(str(e)) from e
+
     def embed(self, text: str) -> list[float]:
         """Generate embedding for a single text."""
         if not text or not text.strip():
             raise ValueError("Cannot embed empty text")
         try:
             if self._provider == "github":
-                client = self._ensure_remote_client()
-                resp = client.embed(input=[text], model=self._model_name)
-                data = list(resp.data)
-                if not data:
-                    raise EmbeddingModelError("Remote embedding returned empty response")
-                emb = [float(x) for x in data[0].embedding]
-                self._vector_dim = len(emb)
-                return emb
+                return self._embed_via_github(text)
             else:
-                # Use local SentenceTransformer
-                try:
-                    result = SentenceTransformer(self._model_name).encode(text)
-                    emb = result.tolist() if hasattr(result, 'tolist') else list(result)
-                    self._vector_dim = len(emb)
-                    return emb
-                except RuntimeError as e:
-                    # Shim raises RuntimeError when sentence-transformers not installed
-                    raise EmbeddingModelError(str(e)) from e
+                return self._embed_via_local(text)
         except EmbeddingModelError:
             raise
         except Exception as e:
@@ -120,6 +127,29 @@ class EmbeddingClient:
     def generate_embedding(self, text: str) -> list[float]:
         """Alias for embed() for backward compatibility."""
         return self.embed(text)
+
+    def _embed_with_github(self, texts: list[str]) -> list[list[float]]:
+        """Embed texts using GitHub provider."""
+        client = self._ensure_remote_client()
+        resp = client.embed(input=texts, model=self._model_name)
+        out = []
+        for item in resp.data:
+            out.append([float(x) for x in item.embedding])
+        if out:
+            self._vector_dim = len(out[0])
+        return out
+
+    def _embed_with_local(self, texts: list[str]) -> list[list[float]]:
+        """Embed texts using local SentenceTransformer."""
+        try:
+            result = SentenceTransformer(self._model_name).encode(texts)
+            out = [row.tolist() if hasattr(row, 'tolist') else list(row) for row in result]
+            if out:
+                self._vector_dim = len(out[0])
+            return out
+        except RuntimeError as e:
+            # Shim raises RuntimeError when sentence-transformers not installed
+            raise EmbeddingModelError(str(e)) from e
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for multiple texts."""
@@ -130,25 +160,9 @@ class EmbeddingClient:
                 raise ValueError(f"Cannot embed empty text at index {i}")
         try:
             if self._provider == "github":
-                client = self._ensure_remote_client()
-                resp = client.embed(input=texts, model=self._model_name)
-                out = []
-                for item in resp.data:
-                    out.append([float(x) for x in item.embedding])
-                if out:
-                    self._vector_dim = len(out[0])
-                return out
+                return self._embed_with_github(texts)
             else:
-                # Use local SentenceTransformer
-                try:
-                    result = SentenceTransformer(self._model_name).encode(texts)
-                    out = [row.tolist() if hasattr(row, 'tolist') else list(row) for row in result]
-                    if out:
-                        self._vector_dim = len(out[0])
-                    return out
-                except RuntimeError as e:
-                    # Shim raises RuntimeError when sentence-transformers not installed
-                    raise EmbeddingModelError(str(e)) from e
+                return self._embed_with_local(texts)
         except EmbeddingModelError:
             raise
         except Exception as e:

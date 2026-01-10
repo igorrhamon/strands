@@ -14,6 +14,7 @@ from typing import List, Protocol, Optional
 
 from src.models.alert import NormalizedAlert
 from src.models.swarm import SwarmResult
+from inspect import isawaitable
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,10 @@ class SwarmOrchestrator:
         Executes a single agent with error boundary.
         """
         try:
-            return await agent.analyze(alert)
+            result = agent.analyze(alert)
+            if isawaitable(result):
+                return await result  # type: ignore[return-value]
+            return result
         except Exception as e:
             logger.error("Agent %s failed: %s", agent.agent_id, e, exc_info=True)
             return None

@@ -56,6 +56,8 @@ class VectorStore:
         from unittest.mock import Mock, MagicMock
         is_mocked = isinstance(qdrant_client, (Mock, MagicMock)) or isinstance(embedding_client, (Mock, MagicMock))
         self._connected = is_mocked  # Auto-connected if using mocks (for tests)
+    # Common error messages
+    ERROR_NOT_CONNECTED = "VectorStore not connected. Call connect() first."
     
     def connect(self) -> "VectorStore":
         """
@@ -103,12 +105,12 @@ class VectorStore:
         # Constitution Principle III Enforcement
         if not decision.is_confirmed:
             raise VectorStoreError(
-                "Cannot persist embedding for unconfirmed decision. "
+                "Cannot persist embedding for unconfirmed decision (not confirmed). "
                 "Constitution Principle III: Embeddings only after human confirmation."
             )
         
         if not self._connected:
-            raise VectorStoreError("VectorStore not connected. Call connect() first.")
+            raise VectorStoreError(self.ERROR_NOT_CONNECTED)
         
         # Extract service/severity from decision context
         # (In real usage, these would come from the cluster or alert)
@@ -179,7 +181,7 @@ class VectorStore:
             VectorStoreError: If search fails.
         """
         if not self._connected:
-            raise VectorStoreError("VectorStore not connected. Call connect() first.")
+            raise VectorStoreError(self.ERROR_NOT_CONNECTED)
         
         # Generate query embedding
         query_vector = self._embedder.embed(query_text)
@@ -213,13 +215,13 @@ class VectorStore:
     def count_embeddings(self) -> int:
         """Return the total number of stored embeddings."""
         if not self._connected:
-            raise VectorStoreError("VectorStore not connected. Call connect() first.")
+            raise VectorStoreError(self.ERROR_NOT_CONNECTED)
         return self._qdrant.count_points()
     
     def delete_embedding(self, vector_id: UUID) -> None:
         """Delete a specific embedding by ID."""
         if not self._connected:
-            raise VectorStoreError("VectorStore not connected. Call connect() first.")
+            raise VectorStoreError(self.ERROR_NOT_CONNECTED)
         self._qdrant.delete_point(vector_id)
         logger.info(f"Deleted embedding {vector_id}")
     

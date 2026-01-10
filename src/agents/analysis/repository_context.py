@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class RepositoryContextAgent:
     agent_id = "repository_context"
 
-    async def analyze(self, alert: NormalizedAlert) -> SwarmResult:
+    def analyze(self, alert: NormalizedAlert) -> SwarmResult:
         logger.info(f"[{self.agent_id}] Checking code for {alert.service}...")
         
         # Simulation

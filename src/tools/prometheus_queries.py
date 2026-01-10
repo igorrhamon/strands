@@ -169,7 +169,11 @@ class PrometheusClient:
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
-                    asyncio.create_task(self._http_client.aclose())
+                    task = asyncio.create_task(self._http_client.aclose())
+                    # Keep a reference to prevent garbage collection
+                    if not hasattr(self, '_cleanup_tasks'):
+                        self._cleanup_tasks = []
+                    self._cleanup_tasks.append(task)
                 else:
                     asyncio.run(self._http_client.aclose())
             except Exception:
@@ -313,12 +317,12 @@ class PrometheusClient:
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                # Already in async context - create task
-                logger.warning(
-                    "query_range called from async context, use query_range_async instead"
+                # Already in async context - raise to prevent returning Task
+                raise RuntimeError(
+                    "query_range called from async context; use query_range_async instead"
                 )
-                return asyncio.create_task(self.query_range_async(expr, start, end, step_seconds))
         except RuntimeError:
+            # No running loop, fall through to run synchronously
             pass
 
         return asyncio.run(self.query_range_async(expr, start, end, step_seconds))

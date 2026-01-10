@@ -14,9 +14,11 @@ class DecisionEngine:
     """
     
     def __init__(self):
+        # Intentionally empty: decision engine holds no runtime state.
+        # Kept for DI and future extension.
         pass
 
-    async def consolidate(self, alert: NormalizedAlert, swarm_results: list[SwarmResult]) -> DecisionCandidate:
+    def consolidate(self, alert: NormalizedAlert, swarm_results: list[SwarmResult]) -> DecisionCandidate:
         """
         Aggregates multiple SwarmResults into a single DecisionCandidate using deterministic heuristics
         (and potentially LLM synthesis in future versions).

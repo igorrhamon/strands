@@ -14,7 +14,7 @@ class HumanReviewAgent:
     def __init__(self, repo: Neo4jRepository):
         self.repo = repo
 
-    async def process_review(self, candidate: DecisionCandidate, validation: DecisionValidation) -> DecisionCandidate:
+    def process_review(self, candidate: DecisionCandidate, validation: DecisionValidation) -> DecisionCandidate:
         """
         Applies human validation to a decision candidate and persists the outcome.
         """

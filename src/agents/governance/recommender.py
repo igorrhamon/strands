@@ -11,7 +11,7 @@ class RecommenderAgent:
     
     agent_id = "recommender"
 
-    async def refine_recommendation(self, candidate: DecisionCandidate) -> DecisionCandidate:
+    def refine_recommendation(self, candidate: DecisionCandidate) -> DecisionCandidate:
         """
         Refines the DecisionCandidate with specific action plans.
         """

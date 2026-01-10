@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import IntEnum
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from enum import Enum as _StrEnum
@@ -54,28 +54,25 @@ class MetricTrend(BaseModel):
     Created by TrendAnalyzer from Prometheus data.
     """
 
-    metric_name: str = Field(..., description="Name of the metric (e.g., 'cpu_usage')")
-    trend_state: TrendState = Field(..., description="DEGRADING, STABLE, RECOVERING, or UNKNOWN")
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    metric_name: str
+    trend_state: TrendState
     confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence of trend classification")
     data_points: list[DataPoint] = Field(default_factory=list, description="Time-series data used")
 
     # Analysis metadata
-    lookback_minutes: int = Field(15, description="Time window analyzed")
-    threshold_value: float | None = Field(None, description="Threshold that triggered alert")
-    current_value: float | None = Field(None, description="Most recent metric value")
+    lookback_minutes: int = 15
+    threshold_value: float | None = None
+    current_value: float | None = None
 
     # Enhancement fields (FR-011, FR-008)
-    data_points_total: int = Field(0, description="Total raw data points retrieved")
-    data_points_used: int = Field(0, description="Data points after p95 filtering")
-    outliers_removed: int = Field(0, description="Count of outliers filtered (FR-011)")
-    reasoning: str = Field("", description="Human-readable explanation of classification")
-    time_window_seconds: int = Field(
-        900, description="Actual analysis window duration (default 15min)"
-    )
-    fusion_method: str | None = Field(None, description="Multi-metric fusion method if applicable")
-
-    class Config:
-        frozen = True
+    data_points_total: int = 0
+    data_points_used: int = 0
+    outliers_removed: int = 0
+    reasoning: str = ""
+    time_window_seconds: int = 900
+    fusion_method: str | None = None
 
     @property
     def is_actionable(self) -> bool:

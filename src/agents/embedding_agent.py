@@ -104,12 +104,12 @@ class EmbeddingAgent:
             logger.error(f"[{self.AGENT_NAME}] Search failed: {e}")
             return []  # Graceful degradation
     
-    async def persist_confirmed_decision(
+    def persist_confirmed_decision(
         self,
         decision: Decision,
         alert_description: str | None = None,
         human_validator: str | None = None,
-        cluster = None,  # Cluster context (optional, for backward compatibility)
+        _cluster=None,  # Cluster context (optional, for backward compatibility)
         **kwargs,  # Absorb any other unexpected kwargs
     ) -> VectorEmbedding:
         """

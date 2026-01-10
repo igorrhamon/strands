@@ -85,6 +85,32 @@ class AlertNormalizer:
         """
         return [self.normalize(alert) for alert in alerts]
     
+    def _validate_severity(self, alert: Alert, errors: list[str]) -> None:
+        """Validate severity field."""
+        try:
+            if alert.severity is None or alert.severity.lower() not in self.VALID_SEVERITIES:
+                errors.append(f"Invalid severity: {alert.severity}")
+        except Exception:
+            errors.append("Invalid severity value")
+
+    def _validate_timestamp(self, alert: Alert, errors: list[str]) -> None:
+        """Validate and coerce timestamp to UTC."""
+        ts = alert.timestamp
+        if ts is None:
+            errors.append("Missing timestamp")
+            return
+        
+        # Check if naive datetime
+        if getattr(ts, "tzinfo", None) is None or getattr(ts.tzinfo, "utcoffset", lambda x: None)(ts) is None:
+            try:
+                ts = ts.replace(tzinfo=timezone.utc)
+            except Exception:
+                errors.append("Invalid timestamp format")
+                return
+
+        if ts > datetime.now(timezone.utc):
+            errors.append("Timestamp is in the future")
+
     def _validate(self, alert: Alert) -> Optional[list[str]]:
         """
         Validate alert fields.
@@ -102,28 +128,8 @@ class AlertNormalizer:
         _check_present(alert.service, "Missing or empty service")
         _check_present(alert.description, "Missing or empty description")
 
-        # Validate severity (simple membership check)
-        try:
-            if alert.severity is None or alert.severity.lower() not in self.VALID_SEVERITIES:
-                errors.append(f"Invalid severity: {alert.severity}")
-        except Exception:
-            errors.append("Invalid severity value")
-
-        # Validate timestamp. Coerce naive datetimes to UTC.
-        ts = alert.timestamp
-        if ts is None:
-            errors.append("Missing timestamp")
-        else:
-            if getattr(ts, "tzinfo", None) is None or getattr(ts.tzinfo, "utcoffset", lambda x: None)(ts) is None:
-                # Coerce naive datetime to UTC for backward compatibility
-                try:
-                    ts = ts.replace(tzinfo=timezone.utc)
-                except Exception:
-                    errors.append("Invalid timestamp format")
-                    return errors
-
-            if ts > datetime.now(timezone.utc):
-                errors.append("Timestamp is in the future")
+        self._validate_severity(alert, errors)
+        self._validate_timestamp(alert, errors)
 
         return errors if errors else None
     

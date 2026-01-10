@@ -22,7 +22,7 @@ class MetricsAnalysisAgent:
         # Fallback URL if config logic isn't fully wired or env var missing
         self.prometheus = PrometheusClient(base_url="http://localhost:9090")
 
-    async def analyze(self, alert: NormalizedAlert) -> SwarmResult:
+    def analyze(self, alert: NormalizedAlert) -> SwarmResult:
         logger.info(f"[{self.agent_id}] Analyzing metrics for {alert.service}...")
         
         hypothesis = "No significant metric anomalies detected."
@@ -84,21 +84,4 @@ class MetricsAnalysisAgent:
             confidence=confidence,
             evidence=evidence,
             suggested_actions=["Check Prometheus targets"]
-        )
-            
-        evidence = [
-            EvidenceItem(
-                type=EvidenceType.METRIC,
-                description=f"95th percentile {alert.labels.get('metric', 'cpu')} > threshold",
-                source_url="http://grafana/d/123",
-                timestamp=datetime.now(timezone.utc)
-            )
-        ]
-
-        return SwarmResult(
-            agent_id=self.agent_id,
-            hypothesis=hypothesis,
-            confidence=confidence,
-            evidence=evidence,
-            suggested_actions=["Check container resource limits", "Profile heap usage"]
         )

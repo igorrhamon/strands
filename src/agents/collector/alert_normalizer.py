@@ -6,7 +6,7 @@ Integrates with Neo4j to persist the initial graph node.
 """
 
 from typing import Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 from src.models.alert import Alert, AlertSource
 from src.graph.neo4j_repo import Neo4jRepository
@@ -33,7 +33,7 @@ class AlertNormalizer:
                 # Simple robust parsing, usually ISO8601
                 timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
             else:
-                timestamp = datetime.utcnow()
+                timestamp = datetime.now(timezone.utc)
 
             alert = Alert(
                 timestamp=timestamp,

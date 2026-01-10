@@ -20,7 +20,7 @@ class GraphAgent:
     def __init__(self, neo4j_repo: Neo4jRepository):
         self.repo = neo4j_repo
 
-    async def analyze(self, alert: NormalizedAlert) -> SwarmResult:
+    def analyze(self, alert: NormalizedAlert) -> SwarmResult:
         logger.info(f"[{self.agent_id}] Querying knowledge graph for {alert.service}...")
         
         # Real impl would run Cypher queries to find affected paths
@@ -46,7 +46,7 @@ class GraphAgent:
             suggested_actions=["Check health of downstream dependencies"]
         )
 
-    async def record_lineage(self, decision_id: str, outcome: str):
+    def record_lineage(self, decision_id: str, outcome: str) -> None:
         """
         Records the causal link between a decision and its real-world outcome.
         T027: Implement Lineage Recording

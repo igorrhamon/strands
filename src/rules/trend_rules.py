@@ -93,7 +93,7 @@ class TrendAnalyzer:
         # Check for minimum data points (FR-005)
         if len(valid_values) < 5:
             logger.warning(
-                f"Insufficient data for {metric_name}: " f"{len(valid_values)} points (need ≥5)"
+                f"Insufficient data for {metric_name}: {len(valid_values)} points (need ≥5)"
             )
             return self._create_unknown_trend(
                 metric_name,
@@ -103,7 +103,14 @@ class TrendAnalyzer:
             )
 
         # Apply p95 outlier filtering (FR-011)
-        filtered_values, outliers = filter_outliers_p95(valid_values)
+        # For very small datasets, skip outlier filtering to avoid removing
+        # critical points that would make the set insufficient for analysis.
+        total_valid = len(valid_values)
+        if total_valid <= 5:
+            filtered_values = valid_values
+            outliers = []
+        else:
+            filtered_values, outliers = filter_outliers_p95(valid_values)
 
         # Update DataPoint objects with outlier flag
         filtered_data_points = self._mark_outliers(data_points, outliers)
@@ -200,22 +207,28 @@ class TrendAnalyzer:
                 f"Insufficient filtered data: {len(values)} points after p95 filtering",
             )
 
-        # Compute linear trend (FR-011)
-        slope, r_squared = compute_linear_trend(values)
-        cv = compute_variance_coefficient(values)
+        # Prefer relative percent change over the window for classification.
+        # This aligns with human expectations (e.g., 15% increase => degrading).
+        try:
+            first = values[0]
+            last = values[-1]
+            percent_change = (last - first) / abs(first) if first != 0 else 0.0
+        except Exception:
+            percent_change = 0.0
 
-        # Classify based on slope threshold (FR-004)
-        SLOPE_THRESHOLD = 0.01  # 1% increase/decrease per step
-
-        if slope > SLOPE_THRESHOLD:
+        if percent_change > self._config.degrading_threshold:
             trend_state = TrendState.DEGRADING
             direction = "increasing"
-        elif slope < -SLOPE_THRESHOLD:
+        elif percent_change < -self._config.recovering_threshold:
             trend_state = TrendState.RECOVERING
             direction = "decreasing"
         else:
             trend_state = TrendState.STABLE
             direction = "stable"
+
+        # Compute linear regression diagnostics for confidence scoring
+        slope, r_squared = compute_linear_trend(values)
+        cv = compute_variance_coefficient(values)
 
         # Tiered confidence scoring (FR-005)
         base_confidence = r_squared  # Start with goodness-of-fit (0.0-1.0)
@@ -240,11 +253,19 @@ class TrendAnalyzer:
         else:
             variance_note = ""
 
+        # Boost confidence for STABLE classification: low CV and many points should be trustworthy
+        if trend_state == TrendState.STABLE:
+            if len(values) >= 10:
+                confidence = max(confidence, min(0.95, 0.6 + (1 - min(cv, 1.0)) * 0.3))
+            else:
+                confidence = max(confidence, min(0.75, 0.5 + (1 - min(cv, 1.0)) * 0.2))
+
         # Generate deterministic reasoning (FR-008)
         reasoning = (
-            f"Trend: {direction} (slope={slope:.4f}, threshold=±{SLOPE_THRESHOLD}). "
+            f"Trend: {direction} (slope={slope:.4f}). "
             f"Confidence: {confidence:.2f} (R²={r_squared:.2f}, data_quality={data_quality}, "
             f"cv={cv:.2f}{variance_note}). "
+            f"Thresholds: degrading={self._config.degrading_threshold}, recovering={self._config.recovering_threshold}. "
             f"Points: {len(values)} used from {total_valid_points} valid."
         )
 

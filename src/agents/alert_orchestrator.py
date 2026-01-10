@@ -26,6 +26,7 @@ from src.agents.repository_context import RepositoryContextAgent
 from src.agents.decision_engine import DecisionEngine
 from src.agents.report_agent import ReportAgent
 from src.utils.audit_logger import AuditLogger
+from src.utils.error_handling import TimeoutError as ExternalTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -159,9 +160,9 @@ class AlertOrchestrator:
             
             return reports
         
-        except asyncio.TimeoutError:
+        except (asyncio.TimeoutError, ExternalTimeoutError):
             raise OrchestratorError(
-                f"Pipeline timeout after {self._config.timeout_seconds}s"
+                f"Pipeline timeout or external timeout after {self._config.timeout_seconds}s"
             )
     
     async def _process_cluster(self, cluster: AlertCluster) -> dict:

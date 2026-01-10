@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class CorrelatorAgent:
     agent_id = "correlator"
 
-    async def analyze(self, alert: NormalizedAlert) -> SwarmResult:
+    def analyze(self, alert: NormalizedAlert) -> SwarmResult:
         logger.info(f"[{self.agent_id}] Correlating signals for {alert.fingerprint}...")
         
         # Simulation

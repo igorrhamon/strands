@@ -76,13 +76,17 @@ class Neo4jRepository:
             return result.single()["fingerprint"]
 
     # Placeholder for future methods
-    def create_incident_from_alert(self, alert_fingerprint: str):
-        pass
+    def create_incident_from_alert(self, _alert_fingerprint: str):
+        # Intentionally left unimplemented in this prototype.
+        # Implement when incident creation workflow is defined.
+        return None
         
-    def save_swarm_hypothesis(self, incident_id: str, swarm_result):
-        pass
+    def save_swarm_hypothesis(self, _incident_id: str, _swarm_result):
+        # Persist swarm hypothesis for an incident (TBD)
+        # Returning None indicates not implemented in this stub.
+        return None
 
-    def save_decision_candidate(self, candidate: Any) -> str:
+    def save_decision_candidate(self, candidate: Any) -> Optional[str]:
         """
         Persist a DecisionCandidate node and link to the Alert.
         RELATIONSHIP: (:Alert)-[:HAS_CANDIDATE]->(:DecisionCandidate)
@@ -116,8 +120,8 @@ class Neo4jRepository:
         with self._driver.session() as session:
             result = session.run(query, params)
             if result.peek() is None:
-               logger.warning(f"Alert {candidate.alert_reference} not found when saving decision.")
-               return None
+                logger.warning(f"Alert {candidate.alert_reference} not found when saving decision.")
+                return None
             return result.single()["id"]
 
     def record_decision_outcome(self, validation: Any):

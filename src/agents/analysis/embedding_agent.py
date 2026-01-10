@@ -21,7 +21,7 @@ class EmbeddingAgent:
     def __init__(self, qdrant_repo: QdrantRepository):
         self.repo = qdrant_repo
 
-    async def analyze(self, alert: NormalizedAlert) -> SwarmResult:
+    def analyze(self, _alert: NormalizedAlert) -> SwarmResult:
         logger.info(f"[{self.agent_id}] Searching for similar incidents...")
         
         # Real impl would generate embedding for alert.description and query Qdrant
@@ -48,12 +48,12 @@ class EmbeddingAgent:
             suggested_actions=["Apply fix from Incident #99 (Restart Payment Pod)"]
         )
 
-    async def index_resolution(self, candidate: DecisionCandidate):
+    def index_resolution(self, _candidate: DecisionCandidate):
         """
         Indexes the resolved incident for future retrieval.
         T028: Implement Vector Indexing
         """
-        logger.info(f"[{self.agent_id}] Indexing resolution for {candidate.decision_id}")
+        logger.info(f"[{self.agent_id}] Indexing resolution for {getattr(_candidate, 'decision_id', '<unknown>')}")
         # Real impl: generate embedding and store in Qdrant
         # text = f"{candidate.summary}\n{candidate.primary_hypothesis}"
         # self.repo.add_point(candidate.decision_id, text)

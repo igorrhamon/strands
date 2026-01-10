@@ -5,7 +5,7 @@ Responsibility: Ingest alerts from external systems (Grafana, ServiceNow)
 and forward them to the Normalizer.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from uuid import uuid4
 
@@ -16,6 +16,7 @@ class AlertCollector:
     """
     
     def __init__(self):
+        # No initialization needed - stateless collector
         pass
 
     def collect_from_grafana(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,7 +33,7 @@ class AlertCollector:
         raw_alert = alerts[0]
         return {
             "source": "GRAFANA",
-            "timestamp": raw_alert.get("startsAt", datetime.utcnow().isoformat()),
+            "timestamp": raw_alert.get("startsAt", datetime.now(timezone.utc).isoformat()),
             "fingerprint": raw_alert.get("fingerprint", str(uuid4())),
             "service": raw_alert.get("labels", {}).get("service", "unknown-service"),
             "severity": raw_alert.get("labels", {}).get("severity", "unknown"),
@@ -47,7 +48,7 @@ class AlertCollector:
         """
         return {
             "source": "SERVICENOW",
-            "timestamp": ticket_payload.get("sys_created_on", datetime.utcnow().isoformat()),
+            "timestamp": ticket_payload.get("sys_created_on", datetime.now(timezone.utc).isoformat()),
             "fingerprint": ticket_payload.get("number", str(uuid4())),
             "service": ticket_payload.get("cmdb_ci", "unknown-ci"),
             "severity": ticket_payload.get("priority", "low"),  # Map 1=Critical later if needed

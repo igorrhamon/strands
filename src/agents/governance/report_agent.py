@@ -11,14 +11,14 @@ class ReportAgent:
     
     agent_id = "report_agent"
 
-    async def generate_post_mortem(self, candidate: DecisionCandidate) -> str:
+    def generate_post_mortem(self, candidate: DecisionCandidate) -> str:
         """
         Creates a markdown formatted post-mortem report.
         """
         logger.info(f"Generating post-mortem for {candidate.decision_id}")
         
         report = []
-        report.append(f"# Post-Mortem Report")
+        report.append("# Post-Mortem Report")
         report.append(f"**Alert Reference**: {candidate.alert_reference}")
         report.append(f"**Date**: {candidate.created_at.strftime('%Y-%m-%d %H:%M UTC')}")
         report.append(f"**Status**: {candidate.status.value}")
@@ -43,7 +43,7 @@ class ReportAgent:
                 report.append(f"- {item}")
         
         if candidate.validated_at:
-             report.append(f"\n## Governance")
+             report.append("\n## Governance")
              report.append(f"Validated at: {candidate.validated_at}")
              # In real usage we would have validator ID here too
         
