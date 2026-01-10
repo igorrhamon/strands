@@ -44,25 +44,44 @@ class GrafanaMCPClient:
             httpx.HTTPError: On connection or HTTP errors
         """
         try:
-            response = self.client.get(f"{self.base_url}/alerts/active")
-            # If Grafana redirects to /login, it means auth is required
+            # Try official Grafana Alerting API (Prometheus compatible)
+            response = self.client.get(f"{self.base_url}/api/prometheus/grafana/api/v1/alerts")
+            
+            # If 404, try legacy/MCP path (for compatibility)
+            if response.status_code == 404:
+                logger.info("New API not found, falling back to /alerts/active")
+                response = self.client.get(f"{self.base_url}/alerts/active")
+            
+            # Authentication check
             if response.status_code == 302 and "/login" in response.headers.get("location", ""):
-                raise httpx.HTTPStatusError(
+                 raise httpx.HTTPStatusError(
                     "Redirect to login - Grafana requires authentication",
                     request=response.request,
                     response=response,
                 )
+                
             response.raise_for_status()
             data = response.json()
             
             alerts = []
-            for alert_data in data.get("alerts", []):
-                try:
-                    alert = self._parse_alert(alert_data)
-                    alerts.append(alert)
-                except Exception as e:
-                    logger.error(f"Failed to parse alert: {e}", exc_info=True)
-                    continue
+            # Handle Prometheus-style API response
+            if "data" in data and "alerts" in data["data"]:
+                for alert_data in data["data"]["alerts"]:
+                     try:
+                        alert = self._parse_alert(alert_data)
+                        alerts.append(alert)
+                     except Exception as e:
+                        logger.error(f"Failed to parse alert: {e}", exc_info=True)
+                        continue
+            # Handle legacy/flat format
+            elif "alerts" in data:
+                for alert_data in data.get("alerts", []):
+                    try:
+                        alert = self._parse_alert(alert_data)
+                        alerts.append(alert)
+                    except Exception as e:
+                        logger.error(f"Failed to parse alert: {e}", exc_info=True)
+                        continue
             
             logger.info(f"Fetched {len(alerts)} active alerts from Grafana")
             return alerts

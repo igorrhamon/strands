@@ -122,18 +122,20 @@ class AlertOrchestratorAgent:
         
         # Step 4: Analyze metrics
         logger.info("  Step 4: Analyzing metrics...")
-        metrics_result = self.metrics_analysis.analyze(cluster)
+        metrics_result = self.metrics_analysis.analyze_cluster_sync(cluster)
         
         # Step 5: Make decision
         logger.info("  Step 5: Making decision...")
-        decision = self.decision_engine.decide(
+        # Extract trends from metrics result for decision engine
+        trends = metrics_result.trends if metrics_result else {}
+        decision = self.decision_engine.decide_sync(
             cluster=cluster,
-            metrics_result=metrics_result,
-            context={}  # RAG/graph context planned for Phase 2
+            trends=trends,
+            semantic_evidence=[]  # RAG/graph context planned for Phase 2
         )
         
         # Step 6: Human review if required
-        if decision.decision_state == DecisionState.HUMAN_REVIEW_REQUIRED:
+        if decision.decision_state == DecisionState.MANUAL_REVIEW:
             logger.info("  Step 6: Human review required")
             review_id = self.human_review.request_review(decision)
             logger.info(f"  Review requested: {review_id}")

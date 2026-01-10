@@ -162,6 +162,19 @@ class PrometheusClient:
         else:
             self._http_client = None
 
+    def close(self):
+        """Close the HTTP client connection if initialized."""
+        if self._http_client:
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.create_task(self._http_client.aclose())
+                else:
+                    asyncio.run(self._http_client.aclose())
+            except Exception:
+                pass  # Best-effort cleanup
+
     def query_instant(
         self,
         expr: str,
@@ -432,43 +445,58 @@ async def query_multiple_metrics(
     end_time = datetime.now(timezone.utc)
     start_time = end_time - timedelta(minutes=lookback_minutes)
 
-    # Build PromQL queries for each metric
-    queries = {}
-    for metric_name in metric_names:
-        # Construct metric query with service label
-        # Assumes naming convention: {service_id}_{metric_name}
-        full_metric_name = f"{service_id}_{metric_name}"
-        queries[metric_name] = full_metric_name
-
-    # Execute queries in parallel
+    # Build and attempt PromQL queries for each metric with graceful fallbacks
     logger.info(
         f"Querying {len(metric_names)} metrics in parallel for service '{service_id}' "
         f"(window={lookback_minutes}m, step={step_seconds}s)"
     )
 
-    tasks = [
-        client.query_range_async(
-            expr=query_expr,
-            start=start_time,
-            end=end_time,
-            step_seconds=step_seconds,
-        )
-        for query_expr in queries.values()
-    ]
+    async def try_candidates(metric_name: str) -> list[DataPoint]:
+        """Try a set of candidate PromQL expressions for a metric until one returns data."""
+        candidates: list[str] = []
 
-    # return_exceptions=True prevents one failure from blocking others
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Direct metric name convention: {service}_{metric}
+        candidates.append(f"{service_id}_{metric_name}")
 
-    # Parse results and handle exceptions
-    metric_data = {}
+        # Alternate suffix convention: {service}_{metric}_usage
+        candidates.append(f"{service_id}_{metric_name}_usage")
+
+        # For cpu/memory prefer label-based PromQL builders
+        if metric_name == "cpu":
+            candidates.append(build_service_cpu_query(service_id))
+        elif metric_name == "memory":
+            candidates.append(build_service_memory_query(service_id))
+
+        last_exc: Exception | None = None
+        for expr in candidates:
+            try:
+                logger.debug(f"Trying PromQL '{expr}' for metric '{metric_name}'")
+                res = await client.query_range_async(
+                    expr=expr,
+                    start=start_time,
+                    end=end_time,
+                    step_seconds=step_seconds,
+                )
+                if res:
+                    logger.debug(f"PromQL '{expr}' returned {len(res)} points for '{metric_name}'")
+                    return res
+            except Exception as e:
+                logger.warning(f"Candidate query '{expr}' failed: {e}")
+                last_exc = e
+
+        # If all candidates failed or returned empty, return empty list (caller logs)
+        if last_exc:
+            logger.debug(f"All candidates for '{metric_name}' failed, last error: {last_exc}")
+        return []
+
+    # Launch all candidate attempts in parallel (one coroutine per metric)
+    tasks = [try_candidates(metric_name) for metric_name in metric_names]
+    results = await asyncio.gather(*tasks, return_exceptions=False)
+
+    # Map results back to metric names
+    metric_data: Dict[str, List[DataPoint]] = {}
     for metric_name, result in zip(metric_names, results):
-        if isinstance(result, Exception):
-            logger.warning(
-                f"Metric '{metric_name}' query failed: {result.__class__.__name__}: {result}"
-            )
-            metric_data[metric_name] = []  # Empty data for failed metric
-        else:
-            metric_data[metric_name] = result
-            logger.debug(f"Metric '{metric_name}': {len(result)} data points")
+        metric_data[metric_name] = result or []
+        logger.debug(f"Metric '{metric_name}': {len(metric_data[metric_name])} data points")
 
     return metric_data

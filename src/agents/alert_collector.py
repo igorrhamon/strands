@@ -20,19 +20,28 @@ class AlertCollectorAgent:
     Side Effects: Logs audit events
     """
     
-    def __init__(self, grafana_client: GrafanaMCPClient):
+    def __init__(self, grafana_client: GrafanaMCPClient, prometheus_client=None):
         self.grafana_client = grafana_client
+        self.prometheus_client = prometheus_client
         self.agent_name = "AlertCollectorAgent"
     
     def collect_active_alerts(self) -> List[Alert]:
         """Collect currently firing alerts
         
         Returns:
-            List of Alert objects from Grafana
+            List of Alert objects from Prometheus (if available) or Grafana
         """
-        logger.info("Collecting active alerts from Grafana")
+        logger.info("Collecting active alerts from Prometheus/Grafana")
         
         try:
+            # Try Prometheus first if client provided
+            if self.prometheus_client:
+                alerts = self._collect_from_prometheus()
+                if alerts:
+                    logger.info(f"Collected {len(alerts)} active alerts from Prometheus")
+                    return alerts
+            
+            # Fallback to Grafana
             alerts = self.grafana_client.fetch_active_alerts()
             
             # Audit log for each alert collected
@@ -54,6 +63,60 @@ class AlertCollectorAgent:
             
         except Exception as e:
             logger.error(f"Failed to collect alerts: {e}", exc_info=True)
+            return []
+    
+    def _collect_from_prometheus(self) -> List[Alert]:
+        """Collect alerts directly from Prometheus alerts API
+        
+        Returns:
+            List of Alert objects parsed from Prometheus
+        """
+        import httpx
+        import os
+        from src.models.alert import AlertSource
+        
+        base_url = os.getenv("PROMETHEUS_URL", "http://localhost:9090")
+        try:
+            response = httpx.get(f"{base_url}/api/v1/alerts", timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            alerts = []
+            for alert_data in data.get("data", {}).get("alerts", []):
+                # Only collect firing alerts
+                if alert_data.get("state") != "firing":
+                    continue
+                    
+                labels = alert_data.get("labels", {})
+                annotations = alert_data.get("annotations", {})
+                
+                # Map to our Alert model
+                alert = Alert(
+                    timestamp=datetime.fromisoformat(alert_data["activeAt"].replace("Z", "+00:00")),
+                    fingerprint=str(hash(frozenset(labels.items()))),
+                    service=labels.get("job", "unknown"),
+                    severity=labels.get("severity", "warning").lower(),
+                    description=annotations.get("summary", labels.get("alertname", "Unknown")),
+                    labels=labels,
+                    source=AlertSource.GRAFANA  # Use existing enum value
+                )
+                alerts.append(alert)
+                
+                # Audit log
+                AuditLog.create(
+                    event_type=AuditEventType.ALERT_RECEIVED,
+                    agent_name=self.agent_name,
+                    entity_id=str(hash(frozenset(labels.items()))),
+                    event_data={
+                        "alert_name": labels.get("alertname", "Unknown"),
+                        "severity": alert.severity,
+                        "source": "prometheus"
+                    }
+                )
+            
+            return alerts
+        except Exception as e:
+            logger.warning(f"Failed to collect from Prometheus: {e}")
             return []
     
     def collect_historical_alerts(

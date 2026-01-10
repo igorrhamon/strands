@@ -104,19 +104,17 @@ class AlertCorrelationAgent:
         normalized = self._normalizer.normalize_batch(alerts)
         return self._correlation.correlate(normalized)
     
-    def correlate(self, alerts: list[NormalizedAlert], time_window_minutes: int) -> list[AlertCluster]:
+    def correlate(self, alerts: list[NormalizedAlert]) -> list[AlertCluster]:
         """
-        Correlate a list of normalized alerts with specified time window.
+        Correlate a list of normalized alerts using instance time window.
         
         Args:
             alerts: List of NormalizedAlert objects to correlate.
-            time_window_minutes: Time window for correlation.
         
         Returns:
             List of AlertCluster objects.
         """
-        engine = CorrelationEngine(CorrelationConfig(time_window_minutes=time_window_minutes))
-        return engine.correlate(alerts)
+        return self._correlation.correlate(alerts)
     
     def normalize_only(self, alerts: list[Alert]) -> list[NormalizedAlert]:
         """
