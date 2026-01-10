@@ -12,6 +12,7 @@ from src.agents.alert_normalizer import AlertNormalizerAgent
 from src.agents.alert_correlation import AlertCorrelationAgent
 from src.agents.metrics_analysis import MetricsAnalysisAgent
 from src.agents.decision_engine import DecisionEngine
+import asyncio
 from src.agents.human_review import HumanReviewAgent
 from src.config.settings import config
 
@@ -128,11 +129,30 @@ class AlertOrchestratorAgent:
         logger.info("  Step 5: Making decision...")
         # Extract trends from metrics result for decision engine
         trends = metrics_result.trends if metrics_result else {}
-        decision = self.decision_engine.decide_sync(
-            cluster=cluster,
-            trends=trends,
-            semantic_evidence=[]  # RAG/graph context planned for Phase 2
-        )
+
+        # If the decision engine has LLM enabled, run the async path so LLM fallback can be used.
+        if getattr(self.decision_engine, "_llm_enabled", False):
+            try:
+                decision = asyncio.run(
+                    self.decision_engine.decide(
+                        cluster=cluster,
+                        trends=trends,
+                        semantic_evidence=[],
+                    )
+                )
+            except Exception as e:
+                logger.warning(f"Async decision failed, falling back to sync: {e}")
+                decision = self.decision_engine.decide_sync(
+                    cluster=cluster,
+                    trends=trends,
+                    semantic_evidence=[],
+                )
+        else:
+            decision = self.decision_engine.decide_sync(
+                cluster=cluster,
+                trends=trends,
+                semantic_evidence=[],
+            )
         
         # Step 6: Human review if required
         if decision.decision_state == DecisionState.MANUAL_REVIEW:

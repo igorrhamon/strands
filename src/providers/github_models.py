@@ -21,7 +21,7 @@ class MissingTokenError(RuntimeError):
 
 
 class GitHubModels(Model):
-    def __init__(self, endpoint: str = "https://models.github.ai/inference", model_name: str = "microsoft/Phi-4-reasoning", timeout: int = 30):
+    def __init__(self, endpoint: str = "https://models.github.ai/inference", model_name: str = "openai/gpt-5-mini", timeout: int = 30):
         token = os.environ.get("GITHUB_TOKEN")
         if not token:
             raise MissingTokenError("GITHUB_TOKEN not found in environment")
@@ -238,6 +238,14 @@ class GitHubModels(Model):
 
         if assistant_text is None:
             raise RuntimeError("Could not parse assistant text from GitHub Models response")
+        # Log truncated assistant text for debugging (avoid extremely large logs)
+        try:
+            import logging
+            _log = logging.getLogger(__name__)
+            preview = assistant_text if len(assistant_text) < 1000 else assistant_text[:1000] + "...[truncated]"
+            _log.info(f"GitHubModels assistant_text preview: {preview}")
+        except Exception:
+            pass
 
         # Yield a StreamEvent with contentBlockDelta
         yield {
