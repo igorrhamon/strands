@@ -1,5 +1,6 @@
 """Example: Running the complete alert decision pipeline"""
 import logging
+import os
 try:
     from dotenv import load_dotenv
 except Exception:  # pragma: no cover - optional dependency for examples
@@ -16,7 +17,7 @@ except Exception:  # pragma: no cover - example fallback
             pass
 
 try:
-    from src.tools.prometheus_client import PrometheusClient
+    from src.tools.prometheus_queries import PrometheusClient
 except Exception:  # pragma: no cover - example fallback
     class PrometheusClient:
         def __init__(self, *args, **kwargs):
@@ -49,10 +50,11 @@ def main():
     
     # Initialize clients
     grafana_client = GrafanaMCPClient()
-    prometheus_client = PrometheusClient()
+    prometheus_url = os.environ.get("PROMETHEUS_URL", "http://localhost:9090")
+    prometheus_client = PrometheusClient(base_url=prometheus_url)
     
     # Initialize agents
-    alert_collector = AlertCollectorAgent(grafana_client)
+    alert_collector = AlertCollectorAgent(grafana_client, prometheus_client=prometheus_client)
     alert_normalizer = AlertNormalizerAgent()
     alert_correlation = AlertCorrelationAgent(time_window_minutes=15)
     metrics_analysis = MetricsAnalysisAgent(prometheus_client)
@@ -87,7 +89,6 @@ def main():
         
         for decision in decisions:
             logger.info(f"Decision ID: {decision.decision_id}")
-            logger.info(f"  Cluster: {decision.cluster_id}")
             logger.info(f"  State: {decision.decision_state.value}")
             logger.info(f"  Confidence: {decision.confidence:.2f}")
             logger.info(f"  LLM Used: {decision.llm_contribution}")

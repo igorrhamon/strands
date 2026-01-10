@@ -2,15 +2,16 @@
 	"folders": [
 		{
 			"path": ".."
-		},
-		{
-			"path": "../../../sgn/sgn-agendamento-massificado-api"
 		}
 	],
 	"settings": {
 		"chat.tools.terminal.autoApprove": {
 			".specify/scripts/bash/": true,
-			".specify/scripts/powershell/": true
+			".specify/scripts/powershell/": true,
+			"/^bash \\.specify/scripts/bash/check-prerequisites\\.sh --json --require-tasks --include-tasks$/": {
+				"approve": true,
+				"matchCommandLine": true
+			}
 		},
 		"java.compile.nullAnalysis.mode": "automatic"
 	}
