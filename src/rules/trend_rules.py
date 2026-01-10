@@ -29,7 +29,7 @@ DEFAULT_MIN_DATA_POINTS = 3  # Minimum points for trend analysis
 
 class TrendConfig:
     """Configuration for trend analysis rules."""
-    
+
     def __init__(
         self,
         degrading_threshold: float = DEFAULT_DEGRADING_THRESHOLD,
@@ -46,23 +46,23 @@ class TrendConfig:
 class TrendAnalyzer:
     """
     Analyzes time-series data to determine trend state.
-    
+
     Classification logic:
     - DEGRADING: Metric increased by > threshold over window
     - RECOVERING: Metric decreased by > threshold over window
     - STABLE: Metric within threshold bounds
     - UNKNOWN: Insufficient data for analysis
     """
-    
+
     def __init__(self, config: Optional[TrendConfig] = None):
         """
         Initialize trend analyzer.
-        
+
         Args:
             config: Trend analysis configuration.
         """
         self._config = config or TrendConfig()
-    
+
     def analyze(
         self,
         metric_name: str,
@@ -71,47 +71,48 @@ class TrendAnalyzer:
     ) -> MetricTrend:
         """
         Analyze data points to determine trend with p95 outlier filtering.
-        
+
         Enhanced workflow (FR-011):
         1. Validate data points (remove NaN/Inf)
         2. Apply p95 percentile filtering to remove outliers
         3. Classify trend using linear regression
         4. Assign confidence based on data quality
-        
+
         Args:
             metric_name: Name of the metric being analyzed.
             data_points: Time-series data points (should be sorted by timestamp).
             threshold_value: Optional threshold that triggered the alert.
-        
+
         Returns:
             MetricTrend with classification, confidence, and outlier metadata.
         """
         # Extract values and validate
         values = [dp.value for dp in data_points]
         valid_values = validate_data_points(values)
-        
+
         # Check for minimum data points (FR-005)
         if len(valid_values) < 5:
             logger.warning(
-                f"Insufficient data for {metric_name}: "
-                f"{len(valid_values)} points (need ≥5)"
+                f"Insufficient data for {metric_name}: " f"{len(valid_values)} points (need ≥5)"
             )
             return self._create_unknown_trend(
-                metric_name, data_points, threshold_value, 
-                reasoning="Insufficient data: <5 valid data points"
+                metric_name,
+                data_points,
+                threshold_value,
+                reasoning="Insufficient data: <5 valid data points",
             )
-        
+
         # Apply p95 outlier filtering (FR-011)
         filtered_values, outliers = filter_outliers_p95(valid_values)
-        
+
         # Update DataPoint objects with outlier flag
         filtered_data_points = self._mark_outliers(data_points, outliers)
-        
+
         # Calculate trend classification
         trend_state, confidence, reasoning = self._classify_trend_internal(
             filtered_values, len(valid_values)
         )
-        
+
         # Construct result with enhancement fields (FR-008)
         return MetricTrend(
             metric_name=metric_name,
@@ -129,14 +130,14 @@ class TrendAnalyzer:
             time_window_seconds=self._config.lookback_minutes * 60,
             fusion_method=None,  # Single-metric, no fusion
         )
-    
+
     def _mark_outliers(
         self, data_points: list[DataPoint], outlier_values: list[float]
     ) -> list[DataPoint]:
         """Mark DataPoint objects as outliers based on filtered values."""
         outlier_set = set(outlier_values)
         marked_points = []
-        
+
         for dp in data_points:
             is_outlier = dp.value in outlier_set
             # Create new DataPoint with is_outlier flag
@@ -147,9 +148,9 @@ class TrendAnalyzer:
                     is_outlier=is_outlier,
                 )
             )
-        
+
         return marked_points
-    
+
     def _create_unknown_trend(
         self,
         metric_name: str,
@@ -173,22 +174,22 @@ class TrendAnalyzer:
             time_window_seconds=self._config.lookback_minutes * 60,
             fusion_method=None,
         )
-    
+
     def _classify_trend_internal(
         self, values: list[float], total_valid_points: int
     ) -> tuple[TrendState, float, str]:
         """
         Classify trend using linear regression slope with tiered confidence.
-        
+
         Enhanced classification (FR-004, FR-005, FR-011):
         - Uses compute_linear_trend() for slope-based classification
         - Confidence tiers: ≥10 points → ≥0.85, 5-9 points → cap 0.70, <5 → UNKNOWN
         - Generates deterministic reasoning trace
-        
+
         Args:
             values: Filtered (post-p95) data values.
             total_valid_points: Count of valid points before filtering.
-        
+
         Returns:
             (TrendState, confidence_score, reasoning_string)
         """
@@ -198,14 +199,14 @@ class TrendAnalyzer:
                 0.0,
                 f"Insufficient filtered data: {len(values)} points after p95 filtering",
             )
-        
+
         # Compute linear trend (FR-011)
         slope, r_squared = compute_linear_trend(values)
         cv = compute_variance_coefficient(values)
-        
+
         # Classify based on slope threshold (FR-004)
         SLOPE_THRESHOLD = 0.01  # 1% increase/decrease per step
-        
+
         if slope > SLOPE_THRESHOLD:
             trend_state = TrendState.DEGRADING
             direction = "increasing"
@@ -215,10 +216,10 @@ class TrendAnalyzer:
         else:
             trend_state = TrendState.STABLE
             direction = "stable"
-        
+
         # Tiered confidence scoring (FR-005)
         base_confidence = r_squared  # Start with goodness-of-fit (0.0-1.0)
-        
+
         if len(values) >= 10:
             # High-quality data: boost confidence
             confidence = min(base_confidence + 0.15, 0.95)
@@ -231,14 +232,14 @@ class TrendAnalyzer:
             # Should not reach here (caught earlier), but defensive
             confidence = 0.0
             data_quality = "insufficient (<5 points)"
-        
+
         # Adjust confidence based on variance (high variance → lower confidence)
         if cv > 0.5:  # High coefficient of variation
             confidence *= 0.85
             variance_note = " (high variance penalty applied)"
         else:
             variance_note = ""
-        
+
         # Generate deterministic reasoning (FR-008)
         reasoning = (
             f"Trend: {direction} (slope={slope:.4f}, threshold=±{SLOPE_THRESHOLD}). "
@@ -246,36 +247,34 @@ class TrendAnalyzer:
             f"cv={cv:.2f}{variance_note}). "
             f"Points: {len(values)} used from {total_valid_points} valid."
         )
-        
+
         return trend_state, confidence, reasoning
 
-    def _calculate_trend(
-        self, data_points: list[DataPoint]
-    ) -> tuple[TrendState, float]:
+    def _calculate_trend(self, data_points: list[DataPoint]) -> tuple[TrendState, float]:
         """
         Calculate trend state and confidence from data points.
-        
+
         Uses linear regression slope to determine direction.
         """
         if not data_points:
             return TrendState.UNKNOWN, 0.0
-        
+
         # Calculate percentage change from first to last
         first_value = data_points[0].value
         last_value = data_points[-1].value
-        
+
         if first_value == 0:
             # Avoid division by zero
             if last_value > 0:
                 return TrendState.DEGRADING, 0.8
             return TrendState.STABLE, 0.5
-        
+
         pct_change = (last_value - first_value) / first_value
-        
+
         # Calculate average for variance analysis
         avg_value = sum(dp.value for dp in data_points) / len(data_points)
         variance = sum((dp.value - avg_value) ** 2 for dp in data_points) / len(data_points)
-        
+
         # Determine trend state
         if pct_change > self._config.degrading_threshold:
             trend_state = TrendState.DEGRADING
@@ -287,61 +286,56 @@ class TrendAnalyzer:
             trend_state = TrendState.STABLE
             # Higher confidence for low variance
             confidence = 0.7 if variance < avg_value * 0.1 else 0.5
-        
+
         return trend_state, confidence
-    
+
     def analyze_multiple(
         self,
         metrics: dict[str, list[DataPoint]],
     ) -> dict[str, MetricTrend]:
         """
         Analyze multiple metrics at once.
-        
+
         Args:
             metrics: Dict mapping metric names to their data points.
-        
+
         Returns:
             Dict mapping metric names to their trend analysis.
         """
-        return {
-            name: self.analyze(name, points)
-            for name, points in metrics.items()
-        }
+        return {name: self.analyze(name, points) for name, points in metrics.items()}
 
 
-def fuse_trends(
-    trends: list[tuple[TrendState, float]]
-) -> tuple[TrendState, float]:
+def fuse_trends(trends: list[tuple[TrendState, float]]) -> tuple[TrendState, float]:
     """
     Fuse multiple metric trends using priority-based logic (FR-009).
-    
+
     Priority ordering: DEGRADING (3) > RECOVERING (2) > STABLE (1) > UNKNOWN (0)
     Weighted confidence: 70% weight for matching priority, 30% for others.
-    
+
     Args:
         trends: List of (TrendState, confidence) tuples from individual metrics.
-    
+
     Returns:
         (fused_trend_state, fused_confidence)
-    
+
     Examples:
         >>> fuse_trends([(TrendState.DEGRADING, 0.9), (TrendState.STABLE, 0.8)])
         (TrendState.DEGRADING, 0.87)  # 0.9 * 0.7 + 0.8 * 0.3
-        
+
         >>> fuse_trends([(TrendState.STABLE, 0.7), (TrendState.STABLE, 0.8)])
         (TrendState.STABLE, 0.82)  # (0.7 + 0.8) * 0.7 / 2 + ...
     """
     if not trends:
         return TrendState.UNKNOWN, 0.0
-    
+
     # Find max priority trend (DEGRADING > RECOVERING > STABLE > UNKNOWN)
     max_priority = max(state for state, _ in trends)
     fused_state = TrendState(max_priority)
-    
+
     # Separate trends into matching and non-matching priority
     matching_trends = [conf for state, conf in trends if state == fused_state]
     other_trends = [conf for state, conf in trends if state != fused_state]
-    
+
     # Weighted confidence calculation
     if matching_trends:
         matching_avg = sum(matching_trends) / len(matching_trends)
@@ -349,95 +343,92 @@ def fuse_trends(
     else:
         matching_avg = 0.0
         matching_weight = 0.0
-    
+
     if other_trends:
         other_avg = sum(other_trends) / len(other_trends)
         other_weight = 0.3
     else:
         other_avg = 0.0
         other_weight = 0.0
-    
+
     # Normalize weights if we don't have both types
     total_weight = matching_weight + other_weight
     if total_weight > 0:
-        fused_confidence = (
-            matching_avg * (matching_weight / total_weight) +
-            other_avg * (other_weight / total_weight)
+        fused_confidence = matching_avg * (matching_weight / total_weight) + other_avg * (
+            other_weight / total_weight
         )
     else:
         fused_confidence = 0.0
-    
+
     # Ensure confidence is in valid range
     fused_confidence = max(0.0, min(1.0, fused_confidence))
-    
+
     return fused_state, fused_confidence
 
 
 class TrendRules:
     """
     Deterministic rules for interpreting trend analysis.
-    
+
     Provides actionable insights based on trend states.
     """
-    
+
     @staticmethod
     def should_escalate(trends: list[MetricTrend]) -> bool:
         """
         Determine if trends warrant escalation.
-        
+
         Escalate if:
         - Multiple critical metrics are DEGRADING
         - Any metric is DEGRADING with high confidence
         """
         degrading_count = sum(
-            1 for t in trends 
-            if t.trend_state == TrendState.DEGRADING and t.confidence >= 0.7
+            1 for t in trends if t.trend_state == TrendState.DEGRADING and t.confidence >= 0.7
         )
-        
+
         return degrading_count >= 2 or any(
-            t.trend_state == TrendState.DEGRADING and t.confidence >= 0.9
-            for t in trends
+            t.trend_state == TrendState.DEGRADING and t.confidence >= 0.9 for t in trends
         )
-    
+
     @staticmethod
     def can_auto_close(trends: list[MetricTrend]) -> bool:
         """
         Determine if trends suggest auto-close is safe.
-        
+
         Auto-close if:
         - All metrics are STABLE or RECOVERING
         - No metrics are UNKNOWN (need data)
         """
         if not trends:
             return False
-        
+
         for trend in trends:
             if trend.trend_state == TrendState.DEGRADING:
                 return False
             if trend.trend_state == TrendState.UNKNOWN:
                 return False
-        
+
         return True
-    
+
     @staticmethod
     def get_trend_summary(trends: list[MetricTrend]) -> str:
         """
         Generate human-readable summary of trends.
-        
+
         Args:
             trends: List of MetricTrend objects.
-        
+
         Returns:
             Summary string for decision justification.
         """
         if not trends:
             return "No metric data available for analysis."
-        
+
         degrading = [t for t in trends if t.trend_state == TrendState.DEGRADING]
         recovering = [t for t in trends if t.trend_state == TrendState.RECOVERING]
         stable = [t for t in trends if t.trend_state == TrendState.STABLE]
         unknown = [t for t in trends if t.trend_state == TrendState.UNKNOWN]
-        
+
         parts = []
         if degrading:
             names = ", ".join(t.metric_name for t in degrading)
@@ -450,7 +441,7 @@ class TrendRules:
         if unknown:
             names = ", ".join(t.metric_name for t in unknown)
             parts.append(f"UNKNOWN (insufficient data): {names}")
-        
+
         return "; ".join(parts)
 
 
@@ -461,12 +452,12 @@ def analyze_metric_trend(
 ) -> MetricTrend:
     """
     Convenience function to analyze a single metric.
-    
+
     Args:
         metric_name: Name of the metric.
         data_points: Time-series data.
         threshold_value: Optional alert threshold.
-    
+
     Returns:
         MetricTrend with analysis results.
     """

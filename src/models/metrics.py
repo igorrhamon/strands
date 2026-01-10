@@ -1,4 +1,5 @@
 """Metrics and trend analysis models"""
+
 from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Optional
@@ -10,6 +11,7 @@ from src.models.metric_trend import MetricTrend as MetricTrendEnhanced, TrendSta
 
 class TrendClassification(str, Enum):
     """Metric trend classifications"""
+
     DEGRADING = "degrading"
     STABLE = "stable"
     RECOVERING = "recovering"
@@ -18,6 +20,7 @@ class TrendClassification(str, Enum):
 
 class MetricTrend(BaseModel):
     """Analyzed metric trend"""
+
     metric_name: str = Field(..., description="Prometheus metric name")
     query: str = Field(..., description="PromQL query used")
     classification: TrendClassification
@@ -28,7 +31,7 @@ class MetricTrend(BaseModel):
     time_range_seconds: int = Field(..., description="Time range of analysis")
     analyzed_at: datetime = Field(default_factory=datetime.utcnow)
     outliers_removed: int = Field(0, description="Number of outliers filtered (p95)")
-    
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -40,32 +43,39 @@ class MetricTrend(BaseModel):
                 "p_value": 0.001,
                 "data_points": 120,
                 "time_range_seconds": 3600,
-                "outliers_removed": 3
+                "outliers_removed": 3,
             }
         }
 
 
 class MetricsAnalysisResult(BaseModel):
     """Complete metrics analysis for an alert cluster (FR-008 enhanced)"""
+
     cluster_id: str
     service: str = Field(..., description="Primary service being analyzed")
-    trends: Dict[str, MetricTrendEnhanced] = Field(..., description="Dict mapping metric type to analyzed trend")
+    trends: Dict[str, MetricTrendEnhanced] = Field(
+        ..., description="Dict mapping metric type to analyzed trend"
+    )
     overall_health: TrendClassification = Field(..., description="Aggregate health status")
     overall_confidence: float = Field(..., ge=0.0, le=1.0)
     query_latency_ms: int = Field(..., description="Total query latency in milliseconds (FR-008)")
     metrics_available_count: int = Field(..., description="Number of metrics requested")
     metrics_queried_count: int = Field(..., description="Number of metrics successfully queried")
-    prometheus_errors: List[str] = Field(default_factory=list, description="List of errors encountered (FR-008)")
-    retry_summary: Dict = Field(default_factory=dict, description="Retry statistics from Prometheus client (FR-008)")
+    prometheus_errors: List[str] = Field(
+        default_factory=list, description="List of errors encountered (FR-008)"
+    )
+    retry_summary: Dict = Field(
+        default_factory=dict, description="Retry statistics from Prometheus client (FR-008)"
+    )
     analyzed_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
     @property
     def has_degrading_metrics(self) -> bool:
         """Check if any metrics are degrading"""
         if isinstance(self.trends, dict):
             return any(t.trend_state == TrendState.DEGRADING for t in self.trends.values())
         return False
-    
+
     @property
     def is_reliable(self) -> bool:
         """Check if analysis is reliable (confidence > 0.7)"""

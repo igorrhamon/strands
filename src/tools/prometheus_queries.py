@@ -30,20 +30,21 @@ logger = logging.getLogger(__name__)
 
 class PrometheusQueryError(Exception):
     """Raised when Prometheus query fails."""
+
     pass
 
 
 class PromQLBuilder:
     """
     Builder for constructing PromQL queries.
-    
+
     Provides a fluent interface for building safe, structured queries.
     """
-    
+
     def __init__(self, metric_name: str):
         """
         Initialize builder with metric name.
-        
+
         Args:
             metric_name: Base metric name (e.g., 'cpu_usage', 'request_latency_seconds').
         """
@@ -52,81 +53,79 @@ class PromQLBuilder:
         self._aggregation: Optional[str] = None
         self._rate_window: Optional[str] = None
         self._by_labels: list[str] = []
-    
+
     def with_label(self, key: str, value: str) -> "PromQLBuilder":
         """Add a label filter."""
         self._labels[key] = value
         return self
-    
+
     def with_labels(self, labels: dict[str, str]) -> "PromQLBuilder":
         """Add multiple label filters."""
         self._labels.update(labels)
         return self
-    
+
     def rate(self, window: str = "5m") -> "PromQLBuilder":
         """Apply rate() function over window."""
         self._rate_window = window
         return self
-    
+
     def sum_by(self, *labels: str) -> "PromQLBuilder":
         """Apply sum aggregation grouped by labels."""
         self._aggregation = "sum"
         self._by_labels = list(labels)
         return self
-    
+
     def avg_by(self, *labels: str) -> "PromQLBuilder":
         """Apply avg aggregation grouped by labels."""
         self._aggregation = "avg"
         self._by_labels = list(labels)
         return self
-    
+
     def max_by(self, *labels: str) -> "PromQLBuilder":
         """Apply max aggregation grouped by labels."""
         self._aggregation = "max"
         self._by_labels = list(labels)
         return self
-    
+
     def build(self) -> str:
         """
         Build the final PromQL expression.
-        
+
         Returns:
             Valid PromQL query string.
         """
         # Build base selector
         if self._labels:
-            label_matchers = ", ".join(
-                f'{k}="{v}"' for k, v in self._labels.items()
-            )
-            selector = f'{self._metric}{{{label_matchers}}}'
+            label_matchers = ", ".join(f'{k}="{v}"' for k, v in self._labels.items())
+            selector = f"{self._metric}{{{label_matchers}}}"
         else:
             selector = self._metric
-        
+
         # Apply rate if specified
         if self._rate_window:
-            selector = f'rate({selector}[{self._rate_window}])'
-        
+            selector = f"rate({selector}[{self._rate_window}])"
+
         # Apply aggregation if specified
         if self._aggregation:
             if self._by_labels:
                 by_clause = ", ".join(self._by_labels)
-                selector = f'{self._aggregation} by ({by_clause}) ({selector})'
+                selector = f"{self._aggregation} by ({by_clause}) ({selector})"
             else:
-                selector = f'{self._aggregation}({selector})'
-        
+                selector = f"{self._aggregation}({selector})"
+
         return selector
 
 
 class PrometheusClient:
     """
     Client for executing Prometheus queries via MCP.
-    
+
     Enhanced with exponential backoff retry logic (FR-012):
     - 3 retries with delays: 1s, 2s, 4s
     - Retries on ConnectError and TimeoutException
     - Tracks retry count and query latency
     """
-    
+
     def __init__(
         self,
         datasource_uid: Optional[str] = None,
@@ -136,7 +135,7 @@ class PrometheusClient:
     ):
         """
         Initialize Prometheus client.
-        
+
         Args:
             datasource_uid: UID of Prometheus datasource in Grafana.
             default_step_seconds: Default step size for range queries (default: 30s).
@@ -147,11 +146,11 @@ class PrometheusClient:
         self._default_step = default_step_seconds
         self._timeout = timeout_seconds
         self._base_url = base_url
-        
+
         # Track retry metadata
         self._last_retry_count = 0
         self._last_query_latency_ms = 0
-        
+
         # Initialize async HTTP client if base_url provided
         if base_url:
             transport = httpx.AsyncHTTPTransport(retries=0)  # Manual retry via tenacity
@@ -162,7 +161,7 @@ class PrometheusClient:
             )
         else:
             self._http_client = None
-    
+
     def query_instant(
         self,
         expr: str,
@@ -170,30 +169,30 @@ class PrometheusClient:
     ) -> list[DataPoint]:
         """
         Execute an instant query at a single point in time.
-        
+
         Args:
             expr: PromQL expression.
             time: Query time (defaults to now).
-        
+
         Returns:
             List of DataPoint objects.
         """
         if time is None:
             time = datetime.now(timezone.utc)
-        
+
         try:
             # In real implementation, call mcp_sgn-agendamen_query_prometheus
             # with queryType="instant"
             logger.info(f"Instant query: {expr} at {time.isoformat()}")
-            
+
             # Placeholder - real implementation would parse MCP response
             raw_result = self._call_mcp_query()
-            
+
             return self._parse_instant_result(raw_result, time)
-        
+
         except Exception as e:
             raise PrometheusQueryError(f"Instant query failed: {e}") from e
-    
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=4),  # 1s, 2s, 4s
@@ -210,16 +209,16 @@ class PrometheusClient:
     ) -> list[DataPoint]:
         """
         Execute a range query over a time window with retry logic.
-        
+
         Args:
             expr: PromQL expression.
             start: Query start time (defaults to 15 minutes ago).
             end: Query end time (defaults to now).
             step_seconds: Step size in seconds.
-        
+
         Returns:
             List of DataPoint objects ordered by timestamp.
-        
+
         Raises:
             PrometheusQueryError: If query fails after all retries.
         """
@@ -229,15 +228,15 @@ class PrometheusClient:
             start = end - timedelta(minutes=15)
         if step_seconds is None:
             step_seconds = self._default_step
-        
+
         query_start_time = time.perf_counter()
-        
+
         try:
             logger.info(
                 f"Range query: {expr} from {start.isoformat()} to {end.isoformat()} "
                 f"(step={step_seconds}s)"
             )
-            
+
             if self._http_client:
                 # Direct HTTP API mode
                 response = await self._http_client.get(
@@ -254,19 +253,19 @@ class PrometheusClient:
             else:
                 # MCP mode (fallback)
                 raw_result = self._call_mcp_query()
-            
+
             data_points = self._parse_range_result(raw_result)
-            
+
             # Track latency
             query_end_time = time.perf_counter()
             self._last_query_latency_ms = int((query_end_time - query_start_time) * 1000)
-            
+
             logger.info(
                 f"Query completed: {len(data_points)} points in {self._last_query_latency_ms}ms"
             )
-            
+
             return data_points
-        
+
         except (httpx.ConnectError, httpx.TimeoutException) as e:
             logger.error(f"Prometheus connection error: {e}")
             raise
@@ -277,7 +276,7 @@ class PrometheusClient:
             raise PrometheusQueryError(f"HTTP {e.response.status_code}: {e}") from e
         except Exception as e:
             raise PrometheusQueryError(f"Range query failed: {e}") from e
-    
+
     def query_range(
         self,
         expr: str,
@@ -287,13 +286,13 @@ class PrometheusClient:
     ) -> list[DataPoint]:
         """
         Execute a range query over a time window (synchronous wrapper).
-        
+
         Args:
             expr: PromQL expression.
             start: Query start time (defaults to 15 minutes ago).
             end: Query end time (defaults to now).
             step_seconds: Step size in seconds.
-        
+
         Returns:
             List of DataPoint objects ordered by timestamp.
         """
@@ -302,17 +301,19 @@ class PrometheusClient:
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 # Already in async context - create task
-                logger.warning("query_range called from async context, use query_range_async instead")
+                logger.warning(
+                    "query_range called from async context, use query_range_async instead"
+                )
                 return asyncio.create_task(self.query_range_async(expr, start, end, step_seconds))
         except RuntimeError:
             pass
-        
+
         return asyncio.run(self.query_range_async(expr, start, end, step_seconds))
-    
+
     def _call_mcp_query(self) -> dict:
         """
         Internal method to call MCP Prometheus tool.
-        
+
         Returns raw query result from MCP.
         """
         # Real implementation would call:
@@ -325,13 +326,11 @@ class PrometheusClient:
         #     stepSeconds=step_seconds,
         # )
         return {"data": {"result": []}}
-    
-    def _parse_instant_result(
-        self, raw: dict, time: datetime
-    ) -> list[DataPoint]:
+
+    def _parse_instant_result(self, raw: dict, time: datetime) -> list[DataPoint]:
         """Parse instant query result to DataPoints."""
         data_points = []
-        
+
         result = raw.get("data", {}).get("result", [])
         for item in result:
             value = item.get("value", [])
@@ -342,13 +341,13 @@ class PrometheusClient:
                         value=float(value[1]),
                     )
                 )
-        
+
         return data_points
-    
+
     def _parse_range_result(self, raw: dict) -> list[DataPoint]:
         """Parse range query result to DataPoints."""
         data_points = []
-        
+
         result = raw.get("data", {}).get("result", [])
         for item in result:
             values = item.get("values", [])
@@ -359,7 +358,7 @@ class PrometheusClient:
                         value=float(val),
                     )
                 )
-        
+
         # Sort by timestamp
         data_points.sort(key=lambda dp: dp.timestamp)
         return data_points
@@ -406,22 +405,22 @@ async def query_multiple_metrics(
 ) -> Dict[str, List[DataPoint]]:
     """
     Query multiple Prometheus metrics in parallel (FR-012 optimization).
-    
+
     Uses asyncio.gather to fetch all metrics concurrently, reducing total
     query latency compared to sequential queries.
-    
+
     Args:
         client: PrometheusClient instance with retry logic.
         service_id: Service identifier for label filtering.
         metric_names: List of metric types to query (e.g., ["cpu", "memory", "error_rate"]).
         lookback_minutes: Time window for queries (default: 15 minutes).
         step_seconds: Step interval for range queries (default: 30 seconds).
-    
+
     Returns:
         Dictionary mapping metric_name to list of DataPoints.
         Exceptions from individual queries are caught and logged; failed metrics
         return empty lists (graceful degradation).
-    
+
     Example:
         >>> client = PrometheusClient(base_url="http://prometheus:9090")
         >>> results = await query_multiple_metrics(
@@ -432,7 +431,7 @@ async def query_multiple_metrics(
     """
     end_time = datetime.now(timezone.utc)
     start_time = end_time - timedelta(minutes=lookback_minutes)
-    
+
     # Build PromQL queries for each metric
     queries = {}
     for metric_name in metric_names:
@@ -440,13 +439,13 @@ async def query_multiple_metrics(
         # Assumes naming convention: {service_id}_{metric_name}
         full_metric_name = f"{service_id}_{metric_name}"
         queries[metric_name] = full_metric_name
-    
+
     # Execute queries in parallel
     logger.info(
         f"Querying {len(metric_names)} metrics in parallel for service '{service_id}' "
         f"(window={lookback_minutes}m, step={step_seconds}s)"
     )
-    
+
     tasks = [
         client.query_range_async(
             expr=query_expr,
@@ -456,10 +455,10 @@ async def query_multiple_metrics(
         )
         for query_expr in queries.values()
     ]
-    
+
     # return_exceptions=True prevents one failure from blocking others
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    
+
     # Parse results and handle exceptions
     metric_data = {}
     for metric_name, result in zip(metric_names, results):
@@ -471,5 +470,5 @@ async def query_multiple_metrics(
         else:
             metric_data[metric_name] = result
             logger.debug(f"Metric '{metric_name}': {len(result)} data points")
-    
+
     return metric_data

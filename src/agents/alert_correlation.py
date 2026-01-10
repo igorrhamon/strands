@@ -56,14 +56,12 @@ class AlertCorrelationAgent:
     async def collect_and_correlate(
         self,
         lookback_minutes: int = 60,
-        severity_filter: Optional[list[str]] = None,
     ) -> list[AlertCluster]:
         """
         Full pipeline: collect → normalize → correlate.
         
         Args:
             lookback_minutes: Time window for alert collection.
-            severity_filter: Optional severity filter.
         
         Returns:
             List of correlated AlertCluster objects.
@@ -72,9 +70,7 @@ class AlertCorrelationAgent:
         
         # Step 1: Collect raw alerts
         try:
-            raw_alerts = await self._grafana.fetch_alerts(
-                severity_filter=severity_filter
-            )
+            raw_alerts = self._grafana.fetch_alerts()
             logger.info(f"[{self.AGENT_NAME}] Collected {len(raw_alerts)} raw alerts")
         except GrafanaClientError as e:
             logger.error(f"[{self.AGENT_NAME}] Failed to collect alerts: {e}")
