@@ -28,10 +28,10 @@ async def main():
     
     # Mocking Repo to avoid needing Neo4j live for this script script unless env var set
     class MockRepo:
-        def save_decision_candidate(self, c): 
+        def save_decision_candidate(self, _c): 
             logger.info("Use Neo4jRepository for real persistence.")
             return str(uuid4())
-        def record_decision_outcome(self, v): 
+        def record_decision_outcome(self, _v): 
             logger.info("Recorded decision outcome.")
             
     repo = MockRepo()

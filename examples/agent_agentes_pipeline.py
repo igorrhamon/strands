@@ -69,7 +69,7 @@ def run_example():
             text = ev["contentBlockDelta"]["delta"]["text"]
             print(text)
 
-    async def demo_via_strands_agent():
+    def demo_via_strands_agent():
         if Agent is None:
             print("\n⚠️  strands.agent.Agent not available in this environment")
             return

@@ -1,4 +1,4 @@
-"""Example: Running the complete alert decision pipeline"""
+"""Example: Running the complete alert decision pipeline WITH mock alerts for testing"""
 import logging
 import os
 try:
@@ -7,8 +7,8 @@ except Exception:  # pragma: no cover - optional dependency for examples
     def load_dotenv(*args, **kwargs) -> bool:
         return False
 
+from datetime import datetime, timezone
 from src.tools.grafana_client import GrafanaMCPClient
-
 from src.tools.prometheus_queries import PrometheusClient
 from src.agents.alert_collector import AlertCollectorAgent
 from src.agents.alert_normalizer import AlertNormalizerAgent
@@ -19,6 +19,7 @@ from src.agents.decision_engine import DecisionEngine
 from src.agents.human_review import HumanReviewAgent
 from src.agents.orchestrator import AlertOrchestratorAgent
 from src.rules.policy_engine import PolicyEngine
+from src.models.alert import Alert, AlertSource
 
 
 # Configure logging
@@ -29,8 +30,50 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+class MockAlertCollectorAgent(AlertCollectorAgent):
+    """Test version that returns synthetic alerts"""
+    
+    def collect_active_alerts(self):
+        """Return test alerts instead of querying Grafana/Prometheus"""
+        logger.info("Collecting test alerts (MOCK MODE)")
+        
+        test_alerts = [
+            Alert(
+                timestamp=datetime.now(timezone.utc),
+                fingerprint="test-alert-1",
+                service="payment_service",
+                severity="critical",
+                description="High CPU usage on payment service (95%)",
+                labels={
+                    "alertname": "HighCPUUsage",
+                    "severity": "critical",
+                    "service": "payment_service"
+                },
+                status="firing",
+                source=AlertSource.GRAFANA
+            ),
+            Alert(
+                timestamp=datetime.now(timezone.utc),
+                fingerprint="test-alert-2",
+                service="payment_service",
+                severity="warning",
+                description="High memory usage on payment service (85%)",
+                labels={
+                    "alertname": "HighMemoryUsage",
+                    "severity": "warning",
+                    "service": "payment_service"
+                },
+                status="firing",
+                source=AlertSource.GRAFANA
+            ),
+        ]
+        
+        logger.info(f"Generated {len(test_alerts)} test alerts")
+        return test_alerts
+
+
 def main():
-    """Run the alert decision pipeline"""
+    """Run the alert decision pipeline with mock alerts"""
     load_dotenv()
     
     logger.info("Initializing pipeline components...")
@@ -40,8 +83,8 @@ def main():
     prometheus_url = os.environ.get("PROMETHEUS_URL", "http://localhost:9090")
     prometheus_client = PrometheusClient(base_url=prometheus_url)
     
-    # Initialize agents
-    alert_collector = AlertCollectorAgent(grafana_client, prometheus_client=prometheus_client)
+    # Initialize agents (with MOCK alert collector)
+    alert_collector = MockAlertCollectorAgent(grafana_client, prometheus_client=prometheus_client)
     alert_normalizer = AlertNormalizerAgent()
     alert_correlation = AlertCorrelationAgent(time_window_minutes=15)
     metrics_analysis = MetricsAnalysisAgent(prometheus_client)
