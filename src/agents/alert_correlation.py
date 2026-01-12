@@ -10,7 +10,6 @@ from typing import Optional
 
 from src.models.alert import Alert, NormalizedAlert
 from src.models.cluster import AlertCluster
-from src.models.cluster import AlertCluster
 from src.tools.grafana_mcp import GrafanaMCPClient, GrafanaClientError
 from src.utils.alert_normalizer import AlertNormalizer
 from src.rules.correlation_rules import CorrelationEngine, CorrelationConfig
@@ -53,9 +52,10 @@ class AlertCorrelationAgent:
             CorrelationConfig(time_window_minutes=time_window_minutes)
         )
     
-    async def collect_and_correlate(
+    def collect_and_correlate(
         self,
         lookback_minutes: int = 60,
+        severity_filter: Optional[list[str]] = None,
     ) -> list[AlertCluster]:
         """
         Full pipeline: collect → normalize → correlate.
@@ -70,7 +70,8 @@ class AlertCorrelationAgent:
         
         # Step 1: Collect raw alerts
         try:
-            raw_alerts = self._grafana.fetch_alerts()
+            # Use the Grafana client active alerts method
+            raw_alerts = self._grafana.fetch_active_alerts()
             logger.info(f"[{self.AGENT_NAME}] Collected {len(raw_alerts)} raw alerts")
         except GrafanaClientError as e:
             logger.error(f"[{self.AGENT_NAME}] Failed to collect alerts: {e}")
@@ -82,6 +83,8 @@ class AlertCorrelationAgent:
         
         # Step 2: Normalize alerts
         normalized = self._normalizer.normalize_batch(raw_alerts)
+        if severity_filter:
+            normalized = [a for a in normalized if a.severity in severity_filter]
         valid_count = sum(1 for a in normalized if a.validation_status.value == "VALID")
         logger.info(f"[{self.AGENT_NAME}] Normalized {len(normalized)} alerts ({valid_count} valid)")
         
@@ -104,19 +107,17 @@ class AlertCorrelationAgent:
         normalized = self._normalizer.normalize_batch(alerts)
         return self._correlation.correlate(normalized)
     
-    def correlate(self, alerts: list[NormalizedAlert], time_window_minutes: int) -> list[AlertCluster]:
+    def correlate(self, alerts: list[NormalizedAlert]) -> list[AlertCluster]:
         """
-        Correlate a list of normalized alerts with specified time window.
+        Correlate a list of normalized alerts using instance time window.
         
         Args:
             alerts: List of NormalizedAlert objects to correlate.
-            time_window_minutes: Time window for correlation.
         
         Returns:
             List of AlertCluster objects.
         """
-        engine = CorrelationEngine(CorrelationConfig(time_window_minutes=time_window_minutes))
-        return engine.correlate(alerts)
+        return self._correlation.correlate(alerts)
     
     def normalize_only(self, alerts: list[Alert]) -> list[NormalizedAlert]:
         """

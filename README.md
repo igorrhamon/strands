@@ -85,3 +85,28 @@ Notes
 - If you have a model from GitHub Models, first serve it with a model server
   (Ollama, Llama-API, custom FastAPI wrapping a transformers pipeline, etc.)
   and then point `HTTPModel.endpoint_url` to that server.
+
+Distributed Diagnostic Swarm (Feature 009)
+------------------------------------------
+**Status: Implemented & Verified**
+
+A parallel multi-agent analysis architecture that ingests alerts, spawns specialized agents to investigate in parallel, and consolidates findings into a single decision candidate.
+
+- **Architecture**: Swarm of 5 specialist agents (Metrics, Code, Graph, Vector, Correlator)
+- **Orchestration**: `SwarmOrchestrator` uses `asyncio` for parallel, independent execution.
+- **Data Model**: `DecisionCandidate` captures the primary hypothesis, risks, and conflicts.
+- **Governance**: Human-in-the-Loop review process via `HumanReviewAgent`.
+- **Learning**: Post-mortem generation and Graph/Vector lineage recording.
+
+**Quick Demo:**
+```bash
+# Uses mocked repository and agents for demonstration
+python examples/demo_graph_swarm.py
+```
+
+**Key Components:**
+- `src/agents/swarm/orchestrator.py`: Parallel dispatch logic.
+- `src/agents/governance/decision_engine.py`: Conflict resolution and hypothesis synthesis.
+- `src/graph/neo4j_repo.py`: Graph persistence (Neo4j).
+- `specs/009-diagnostic-swarm-graph/spec.md`: Full specification.
+

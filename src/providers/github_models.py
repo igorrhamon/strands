@@ -21,7 +21,7 @@ class MissingTokenError(RuntimeError):
 
 
 class GitHubModels(Model):
-    def __init__(self, endpoint: str = "https://models.github.ai/inference", model_name: str = "microsoft/Phi-4-reasoning", timeout: int = 30):
+    def __init__(self, endpoint: str = "https://models.github.ai/inference", model_name: str = "openai/gpt-5-mini", timeout: int = 30):
         token = os.environ.get("GITHUB_TOKEN")
         if not token:
             raise MissingTokenError("GITHUB_TOKEN not found in environment")
@@ -95,6 +95,15 @@ class GitHubModels(Model):
                 ) from e
             raise
 
+    def _build_chat_messages(self, messages: Messages, system_prompt: Optional[str]) -> list:
+        """Small helper to assemble chat messages payload (reduces complexity in stream)."""
+        chat_messages = []
+        if system_prompt:
+            chat_messages.append({"role": "system", "content": system_prompt})
+        for m in messages:
+            chat_messages.append(m)
+        return chat_messages
+
     def _parse_response(self, response) -> Optional[str]:
         # azure-ai-inference returns ChatCompletions with choices[*].message.content
         # but be defensive about multiple shapes.
@@ -135,72 +144,82 @@ class GitHubModels(Model):
             return True
         return getattr(choice, "finish_reason", None) is not None
 
-    def _extract_message_content(self, msg) -> Optional[str]:
-        def _normalize(c):
-            # Normalize many possible shapes into a single string when possible
-            if c is None:
-                return None
-            if isinstance(c, str):
-                return c
-            # dict with text-like fields
-            if isinstance(c, dict):
-                for key in ("text", "content", "value"):
-                    v = c.get(key)
-                    if isinstance(v, str):
-                        return v
-                    if isinstance(v, list) or isinstance(v, dict):
-                        nested = _normalize(v)
-                        if nested:
-                            return nested
-                return None
-            # list: concatenate text pieces or extract text fields from dict items
-            if isinstance(c, (list, tuple)):
-                parts = []
-                for item in c:
-                    if isinstance(item, str):
-                        parts.append(item)
-                    elif isinstance(item, dict):
-                        s = _normalize(item)
-                        if s:
-                            parts.append(s)
-                    else:
-                        # try attribute access on objects
-                        text = getattr(item, "text", None)
-                        if isinstance(text, str):
-                            parts.append(text)
-                        else:
-                            cont = getattr(item, "content", None)
-                            if isinstance(cont, str):
-                                parts.append(cont)
-                return "".join(parts) if parts else None
-            # Fallback: try common attributes on objects
-            text = getattr(c, "text", None)
-            if isinstance(text, str):
-                return text
-            content = getattr(c, "content", None)
-            if isinstance(content, str):
-                return content
-            # nothing useful found
+    def _normalize_value(self, c) -> Optional[str]:
+        """Normalize various types into string. Helper for content extraction."""
+        if c is None:
             return None
+        if isinstance(c, str):
+            return c
+        if isinstance(c, dict):
+            return self._normalize_dict(c)
+        if isinstance(c, (list, tuple)):
+            return self._normalize_list(c)
+        return self._normalize_object(c)
 
+    def _normalize_dict(self, c: dict) -> Optional[str]:
+        """Extract text from dict structure."""
+        for key in ("text", "content", "value"):
+            v = c.get(key)
+            if isinstance(v, str):
+                return v
+            if isinstance(v, (list, dict)):
+                nested = self._normalize_value(v)
+                if nested:
+                    return nested
+        return None
+
+    def _extract_item_text(self, item) -> Optional[str]:
+        """Extract text from a single list item."""
+        if isinstance(item, str):
+            return item
+        if isinstance(item, dict):
+            return self._normalize_value(item)
+        # try attribute access on objects
+        text = getattr(item, "text", None)
+        if isinstance(text, str):
+            return text
+        cont = getattr(item, "content", None)
+        if isinstance(cont, str):
+            return cont
+        return None
+
+    def _normalize_list(self, c) -> Optional[str]:
+        """Extract and concatenate text from list structure."""
+        parts = []
+        for item in c:
+            text = self._extract_item_text(item)
+            if text:
+                parts.append(text)
+        return "".join(parts) if parts else None
+
+    def _normalize_object(self, c) -> Optional[str]:
+        """Extract text from object attributes."""
+        for attr in ("text", "content"):
+            val = getattr(c, attr, None)
+            if isinstance(val, str):
+                return val
+        return None
+
+    def _extract_message_content(self, msg) -> Optional[str]:
+        """Extract text content from message in various formats."""
         if msg is None:
             return None
 
         # dict-like message
         if isinstance(msg, dict):
-            return _normalize(msg.get("content") or msg.get("text") or msg)
+            return self._normalize_value(msg.get("content") or msg.get("text") or msg)
 
         # object-like message: try attributes first, then attempt normalization
         content = getattr(msg, "content", None)
         if content is not None:
-            return _normalize(content)
+            return self._normalize_value(content)
 
         text = getattr(msg, "text", None)
         if isinstance(text, str):
             return text
 
         # final attempt: try to normalize the message object itself
-        return _normalize(msg)
+        return self._normalize_value(msg)
 
     def _parse_from_messages(self, response) -> Optional[str]:
         msgs = getattr(response, "messages", None)
@@ -225,19 +244,16 @@ class GitHubModels(Model):
     async def stream(self, messages: Messages, tool_specs=None, system_prompt: Optional[str] = None, **kwargs) -> AsyncIterable[StreamEvent]:
         # Synchronous provider: call the SDK synchronously via thread or simple blocking call
 
-        # Build chat messages payload
-        chat_messages = []
-        if system_prompt:
-            chat_messages.append({"role": "system", "content": system_prompt})
-        for m in messages:
-            chat_messages.append(m)
-
         client = self._get_client()
+        chat_messages = self._build_chat_messages(messages, system_prompt)
         response = self._make_request(client, chat_messages)
         assistant_text = self._parse_response(response)
 
         if assistant_text is None:
             raise RuntimeError("Could not parse assistant text from GitHub Models response")
+        # Log truncated assistant text for debugging (avoid extremely large logs)
+        # Log truncated assistant text for debugging (avoid extremely large logs)
+        self._log_preview(assistant_text)
 
         # Yield a StreamEvent with contentBlockDelta
         yield {
@@ -246,3 +262,13 @@ class GitHubModels(Model):
                 "delta": {"text": assistant_text}
             }
         }
+
+    def _log_preview(self, assistant_text: str) -> None:
+        try:
+            import logging
+            _log = logging.getLogger(__name__)
+            preview = assistant_text if len(assistant_text) < 1000 else assistant_text[:1000] + "...[truncated]"
+            _log.info(f"GitHubModels assistant_text preview: {preview}")
+        except Exception:
+            # best-effort logging only
+            pass

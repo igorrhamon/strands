@@ -12,6 +12,7 @@ from src.agents.alert_normalizer import AlertNormalizerAgent
 from src.agents.alert_correlation import AlertCorrelationAgent
 from src.agents.metrics_analysis import MetricsAnalysisAgent
 from src.agents.decision_engine import DecisionEngine
+import asyncio
 from src.agents.human_review import HumanReviewAgent
 from src.config.settings import config
 
@@ -122,18 +123,39 @@ class AlertOrchestratorAgent:
         
         # Step 4: Analyze metrics
         logger.info("  Step 4: Analyzing metrics...")
-        metrics_result = self.metrics_analysis.analyze(cluster)
+        metrics_result = self.metrics_analysis.analyze_cluster_sync(cluster)
         
         # Step 5: Make decision
         logger.info("  Step 5: Making decision...")
-        decision = self.decision_engine.decide(
-            cluster=cluster,
-            metrics_result=metrics_result,
-            context={}  # RAG/graph context planned for Phase 2
-        )
+        # Extract trends from metrics result for decision engine
+        trends = metrics_result.trends if metrics_result else {}
+
+        # If the decision engine has LLM enabled, run the async path so LLM fallback can be used.
+        if getattr(self.decision_engine, "_llm_enabled", False):
+            try:
+                decision = asyncio.run(
+                    self.decision_engine.decide(
+                        cluster=cluster,
+                        trends=trends,
+                        semantic_evidence=[],
+                    )
+                )
+            except Exception as e:
+                logger.warning(f"Async decision failed, falling back to sync: {e}")
+                decision = self.decision_engine.decide_sync(
+                    cluster=cluster,
+                    trends=trends,
+                    semantic_evidence=[],
+                )
+        else:
+            decision = self.decision_engine.decide_sync(
+                cluster=cluster,
+                trends=trends,
+                semantic_evidence=[],
+            )
         
         # Step 6: Human review if required
-        if decision.decision_state == DecisionState.HUMAN_REVIEW_REQUIRED:
+        if decision.decision_state == DecisionState.MANUAL_REVIEW:
             logger.info("  Step 6: Human review required")
             review_id = self.human_review.request_review(decision)
             logger.info(f"  Review requested: {review_id}")

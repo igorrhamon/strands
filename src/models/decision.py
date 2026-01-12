@@ -107,3 +107,46 @@ class DecisionValidation(BaseModel):
 
     class Config:
         frozen = False
+
+
+###############################################################################
+#             NEW MODELS FOR DIAGNOSTIC SWARM ARCHITECTURE
+###############################################################################
+
+class DecisionStatus(str, Enum):
+    """Lifecycle status of a DecisionCandidate."""
+    PROPOSED = "PROPOSED"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    EXECUTED = "EXECUTED"
+
+
+class AutomationLevel(str, Enum):
+    """Permitted level of automation for the decision."""
+    FULL = "FULL"
+    ASSISTED = "ASSISTED"
+    MANUAL = "MANUAL"
+
+
+class DecisionCandidate(BaseModel):
+    """
+    Consolidated hypothesis and plan awaiting approval.
+    """
+    decision_id: UUID = Field(default_factory=uuid4, description="Unique decision candidate identifier")
+    alert_reference: str = Field(..., description="Fingerprint of the alert being addressed")
+    summary: str = Field(..., description="High level summary of the decision")
+    status: DecisionStatus = Field(default=DecisionStatus.PROPOSED, description="Current lifecycle status")
+    
+    primary_hypothesis: str = Field(..., description="The winning hypothesis from Swarm")
+    risk_assessment: str = Field(..., description="Risk analysis of the proposed action")
+    automation_level: AutomationLevel = Field(..., description="Suggested automation level")
+    
+    # Links to analysis
+    supporting_evidence: list[str] = Field(default_factory=list, description="IDs or summaries of supporting evidence")
+    conflicting_hypotheses: list[str] = Field(default_factory=list, description="Summaries of rejected hypotheses")
+    
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    class Config:
+        frozen = False
+

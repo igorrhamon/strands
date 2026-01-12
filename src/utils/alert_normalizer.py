@@ -85,6 +85,32 @@ class AlertNormalizer:
         """
         return [self.normalize(alert) for alert in alerts]
     
+    def _validate_severity(self, alert: Alert, errors: list[str]) -> None:
+        """Validate severity field."""
+        try:
+            if alert.severity is None or alert.severity.lower() not in self.VALID_SEVERITIES:
+                errors.append(f"Invalid severity: {alert.severity}")
+        except Exception:
+            errors.append("Invalid severity value")
+
+    def _validate_timestamp(self, alert: Alert, errors: list[str]) -> None:
+        """Validate and coerce timestamp to UTC."""
+        ts = alert.timestamp
+        if ts is None:
+            errors.append("Missing timestamp")
+            return
+        
+        # Check if naive datetime
+        if getattr(ts, "tzinfo", None) is None or getattr(ts.tzinfo, "utcoffset", lambda x: None)(ts) is None:
+            try:
+                ts = ts.replace(tzinfo=timezone.utc)
+            except Exception:
+                errors.append("Invalid timestamp format")
+                return
+
+        if ts > datetime.now(timezone.utc):
+            errors.append("Timestamp is in the future")
+
     def _validate(self, alert: Alert) -> Optional[list[str]]:
         """
         Validate alert fields.
@@ -92,26 +118,19 @@ class AlertNormalizer:
         Returns:
             List of validation errors, or None if valid.
         """
-        errors = []
-        
-        # Check required fields
-        if not alert.fingerprint or not alert.fingerprint.strip():
-            errors.append("Missing or empty fingerprint")
-        
-        if not alert.service or not alert.service.strip():
-            errors.append("Missing or empty service")
-        
-        if not alert.description or not alert.description.strip():
-            errors.append("Missing or empty description")
-        
-        # Validate severity
-        if alert.severity.lower() not in self.VALID_SEVERITIES:
-            errors.append(f"Invalid severity: {alert.severity}")
-        
-        # Validate timestamp
-        if alert.timestamp > datetime.now(timezone.utc):
-            errors.append("Timestamp is in the future")
-        
+        errors: list[str] = []
+
+        def _check_present(field_val: str, msg: str) -> None:
+            if not field_val or not field_val.strip():
+                errors.append(msg)
+
+        _check_present(alert.fingerprint, "Missing or empty fingerprint")
+        _check_present(alert.service, "Missing or empty service")
+        _check_present(alert.description, "Missing or empty description")
+
+        self._validate_severity(alert, errors)
+        self._validate_timestamp(alert, errors)
+
         return errors if errors else None
     
     def _normalize_service(self, service: str) -> str:

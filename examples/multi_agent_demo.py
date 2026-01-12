@@ -86,20 +86,20 @@ def format_report(report: dict) -> str:
         return "\n".join(output)
     
     summary = report.get("summary", {})
-    output.append(f"\n📊 Summary:")
+    output.append("\n📊 Summary:")
     output.append(f"   Total Clusters: {summary.get('total_clusters', 0)}")
     output.append(f"   ⚠️  Escalate:     {summary.get('escalate', 0)}")
     output.append(f"   🔍 Observe:      {summary.get('observe', 0)}")
     output.append(f"   ✋ Manual Review: {summary.get('manual_review', 0)}")
     
     if summary.get("next_steps"):
-        output.append(f"\n📋 Next Steps:")
+        output.append("\n📋 Next Steps:")
         for step in summary["next_steps"]:
             output.append(f"   - {step}")
     
     cluster_reports = report.get("cluster_reports", [])
     if cluster_reports:
-        output.append(f"\n📌 Cluster Details:")
+        output.append("\n📌 Cluster Details:")
         for cluster in cluster_reports:
             output.append(f"\n   Cluster: {cluster.get('cluster_id', 'unknown')}")
             output.append(f"   Service: {cluster.get('service', 'unknown')}")
@@ -112,7 +112,7 @@ def format_report(report: dict) -> str:
             output.append(f"      Reasoning: {rec.get('reasoning', 'N/A')}")
             
             details = cluster.get("details", {})
-            output.append(f"   Details:")
+            output.append("   Details:")
             output.append(f"      Metric Trends: {details.get('metric_trends', 0)}")
             output.append(f"      Semantic Matches: {details.get('semantic_matches', 0)}")
     

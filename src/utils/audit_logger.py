@@ -72,28 +72,34 @@ class AuditLogger:
         Returns:
             The AuditLog entry that was written.
         """
-        # Extract semantic evidence IDs
+        # Extract semantic evidence IDs as strings
         semantic_evidence_ids = [
-            str(e.decision_id) for e in decision.semantic_evidence
+            str(e.decision_id) for e in getattr(decision, "semantic_evidence", [])
         ]
-        
+
+        # Build a minimal decision_output payload (keep the full object for replay)
+        decision_output = decision
+
+        # Agent identity - try env var then fallback
+        import os
+        agent_id = os.getenv("AGENT_ID", "agent-unknown")
+
+        # Execution duration: decision may provide it, otherwise default to 0
+        execution_duration_ms = getattr(decision, "execution_duration_ms", 0) or 0
+
         # Build audit log
         audit_log = AuditLog(
             timestamp=datetime.now(timezone.utc),
             agent_version=agent_version,
             decision_id=decision.decision_id,
-            cluster_id=cluster_id,
-            alert_fingerprints=alert_fingerprints,
-            decision_state=decision.decision_state.value,
-            confidence=decision.confidence,
-            rules_applied=decision.rules_applied,
+            alert_ids=alert_fingerprints,
+            cluster_id=str(cluster_id) if cluster_id is not None else None,
+            metric_context=getattr(decision, "metric_context", {}),
             semantic_evidence_ids=semantic_evidence_ids,
-            llm_contribution=decision.llm_contribution,
-            llm_reason=decision.llm_reason,
-            human_validation_status=decision.human_validation_status.value,
-            validated_by=decision.validated_by,
-            validated_at=decision.validated_at,
-            justification=decision.justification,
+            decision_output=decision_output,
+            agent_id=agent_id,
+            execution_duration_ms=int(execution_duration_ms),
+            human_validation_status=getattr(decision, "human_validation_status", None) or decision.human_validation_status,
         )
         
         # Write to log file
@@ -171,27 +177,30 @@ class AuditLogger:
         """
         try:
             with open(self._log_path, "a", encoding="utf-8") as f:
+                # Use getattr to tolerate variations in AuditLog shape
+                decision_out = getattr(audit_log, "decision_output", None)
+                # Flatten some fields for JSONL
                 log_dict = {
                     "event_type": "decision",
-                    "log_id": str(audit_log.log_id),
-                    "timestamp": audit_log.timestamp.isoformat(),
-                    "agent_version": audit_log.agent_version,
-                    "decision_id": str(audit_log.decision_id),
-                    "cluster_id": audit_log.cluster_id,
-                    "alert_fingerprints": audit_log.alert_fingerprints,
-                    "decision_state": audit_log.decision_state,
-                    "confidence": audit_log.confidence,
-                    "rules_applied": audit_log.rules_applied,
-                    "semantic_evidence_ids": audit_log.semantic_evidence_ids,
-                    "llm_contribution": audit_log.llm_contribution,
-                    "llm_reason": audit_log.llm_reason,
-                    "human_validation_status": audit_log.human_validation_status,
-                    "validated_by": audit_log.validated_by,
+                    "log_id": str(getattr(audit_log, "log_id", "")),
+                    "timestamp": getattr(audit_log, "timestamp", datetime.now(timezone.utc)).isoformat(),
+                    "agent_version": getattr(audit_log, "agent_version", None),
+                    "decision_id": str(getattr(audit_log, "decision_id", getattr(decision_out, "decision_id", ""))),
+                    "cluster_id": getattr(audit_log, "cluster_id", None),
+                    "alert_fingerprints": getattr(audit_log, "alert_ids", getattr(audit_log, "alert_fingerprints", [])),
+                    "decision_state": getattr(decision_out, "decision_state", None) if decision_out else None,
+                    "confidence": getattr(decision_out, "confidence", None) if decision_out else None,
+                    "rules_applied": getattr(decision_out, "rules_applied", [] ) if decision_out else [],
+                    "semantic_evidence_ids": getattr(audit_log, "semantic_evidence_ids", []),
+                    "llm_contribution": getattr(decision_out, "llm_contribution", None) if decision_out else None,
+                    "llm_reason": getattr(decision_out, "llm_reason", None) if decision_out else None,
+                    "human_validation_status": getattr(audit_log, "human_validation_status", None),
+                    "validated_by": getattr(decision_out, "validated_by", None) if decision_out else None,
                     "validated_at": (
-                        audit_log.validated_at.isoformat()
-                        if audit_log.validated_at else None
+                        getattr(decision_out, "validated_at", None).isoformat()
+                        if getattr(decision_out, "validated_at", None) else None
                     ),
-                    "justification": audit_log.justification,
+                    "justification": getattr(decision_out, "justification", None) if decision_out else None,
                 }
                 f.write(json.dumps(log_dict) + "\n")
         

@@ -2,20 +2,19 @@
 Repository Context Agent - RAG Logic
 
 Provides historical context for alerts by combining:
-1. Semantic similarity search (EmbeddingAgent)
-2. Repository metadata (GitHub MCP)
+1. Semantic similarity search (Ollama embeddings)
+2. Vector store (Qdrant)
+3. Repository metadata (GitHub MCP)
 
 Part of the multi-agent pipeline for enriched decision-making.
 """
 
 import logging
-from typing import Optional
-from uuid import UUID
+from typing import Any, Optional
 
 from src.models.cluster import AlertCluster
-from src.models.embedding import SimilarityResult
 from src.models.decision import SemanticEvidence
-from src.agents.embedding_agent import EmbeddingAgent, EmbeddingAgentError
+from src.pipeline.refrag_pipeline import create_refrag_repository
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +22,8 @@ logger = logging.getLogger(__name__)
 class RepositoryContextAgent:
     """
     Agent responsible for:
-    1. Building context from semantic similarity search
-    2. Enriching with repository metadata
+    1. Building context from semantic similarity search via Ollama
+    2. Enriching with repository metadata from GitHub MCP
     3. Preparing historical evidence for DecisionEngine
     
     This agent provides RAG functionality for alert decisions.
@@ -35,7 +34,7 @@ class RepositoryContextAgent:
     
     def __init__(
         self,
-        embedding_agent: Optional[EmbeddingAgent] = None,
+        refrag_repo: Optional[Any] = None,
         top_k: int = 5,
         score_threshold: float = 0.75,
     ):
@@ -43,14 +42,12 @@ class RepositoryContextAgent:
         Initialize repository context agent.
         
         Args:
-            embedding_agent: EmbeddingAgent for semantic search.
+            refrag_repo: RefragRepository for semantic search and repo context.
             top_k: Maximum similar results to retrieve.
             score_threshold: Minimum similarity score.
         """
-        self._embedding_agent = embedding_agent or EmbeddingAgent(
-            top_k=top_k,
-            score_threshold=score_threshold,
-        )
+        self._refrag_repo = refrag_repo or create_refrag_repository()  # type: ignore[attr-defined]
+        self._top_k = top_k
         self._score_threshold = score_threshold
     
     async def get_context(
@@ -73,35 +70,39 @@ class RepositoryContextAgent:
             f"[{self.AGENT_NAME}] Getting context for cluster {cluster.cluster_id}"
         )
         
-        # Build query from cluster alerts
-        query_text = self._build_query_text(cluster)
-        
-        # Search semantic memory
         try:
-            similar_results = self._embedding_agent.search_similar(
-                alert_description=query_text,
-                service=cluster.primary_service,
+            context = await self._refrag_repo.get_semantic_context(  # type: ignore[attr-defined]
+                cluster,
+                top_k=self._top_k,
+                score_threshold=self._score_threshold,
             )
-        except EmbeddingAgentError as e:
-            logger.warning(f"[{self.AGENT_NAME}] Semantic search failed: {e}")
-            similar_results = []
+        except Exception as e:
+            logger.error(f"[{self.AGENT_NAME}] Context retrieval failed: {e}")
+            context = {
+                "semantic_evidence": [],
+                "repository_context": {},
+                "context_quality": 0.0,
+            }
         
-        # Convert to SemanticEvidence
-        semantic_evidence = self._convert_to_evidence(similar_results)
-        
-        # Calculate context quality
-        context_quality = self._calculate_quality(similar_results)
+        semantic_evidence = [
+            SemanticEvidence(
+                decision_id=e["decision_id"],
+                similarity_score=e["similarity_score"],
+                summary=e["summary"],
+            )
+            for e in context.get("semantic_evidence", [])
+        ]
         
         logger.info(
             f"[{self.AGENT_NAME}] Found {len(semantic_evidence)} evidence items "
-            f"(quality: {context_quality:.2f})"
+            f"(quality: {context.get('context_quality', 0.0):.2f})"
         )
         
         return {
             "semantic_evidence": semantic_evidence,
-            "repository_context": await self._get_repo_metadata(cluster.primary_service),
-            "context_quality": context_quality,
-            "similar_count": len(similar_results),
+            "repository_context": context.get("repository_context", {}),
+            "context_quality": context.get("context_quality", 0.0),
+            "similar_count": len(semantic_evidence),
         }
     
     def get_context_sync(self, cluster: AlertCluster) -> dict:
@@ -119,7 +120,6 @@ class RepositoryContextAgent:
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                # If already in async context, return empty results
                 logger.warning(f"[{self.AGENT_NAME}] Cannot run async in event loop")
                 return {
                     "semantic_evidence": [],
@@ -132,80 +132,38 @@ class RepositoryContextAgent:
         
         return asyncio.run(self.get_context(cluster))
     
-    def _build_query_text(self, cluster: AlertCluster) -> str:
-        """Build query text from cluster for similarity search."""
-        # Combine all alert descriptions
-        descriptions = [a.description for a in cluster.alerts]
-        combined = " | ".join(descriptions[:5])  # Limit to first 5
-        
-        return f"Service: {cluster.primary_service} | Severity: {cluster.primary_severity} | {combined}"
-    
-    def _convert_to_evidence(
-        self, results: list[SimilarityResult]
-    ) -> list[SemanticEvidence]:
-        """Convert SimilarityResult to SemanticEvidence for decision context."""
-        return [
-            SemanticEvidence(
-                decision_id=r.decision_id,
-                similarity_score=r.similarity_score,
-                summary=self._summarize_source_text(r.source_text),
-            )
-            for r in results
-            if r.similarity_score >= self._score_threshold
-        ]
-    
-    def _summarize_source_text(self, source_text: str, max_length: int = 150) -> str:
-        """Create a brief summary of the source text."""
-        if len(source_text) <= max_length:
-            return source_text
-        return source_text[:max_length] + "..."
-    
-    def _calculate_quality(self, results: list[SimilarityResult]) -> float:
-        """
-        Calculate context quality score.
-        
-        Quality factors:
-        - Number of results
-        - Average similarity score
-        - Presence of high-confidence matches
+    def close(self) -> None:
+        """Close repository connections."""
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Save the created task to avoid premature garbage collection
+                _task = asyncio.create_task(self._refrag_repo.close())  # type: ignore[attr-defined]
+            else:
+                asyncio.run(self._refrag_repo.close())  # type: ignore[attr-defined]
+        except RuntimeError:
+            asyncio.run(self._refrag_repo.close())  # type: ignore[attr-defined]
+    def _calculate_quality(self, results: list[dict]) -> float:
+        """Calculate context quality score from vector search results.
+
+        Accepts a list of dicts with key `similarity_score` and returns a
+        normalized quality score in [0.0, 1.0].
         """
         if not results:
             return 0.0
-        
-        # Average score
-        avg_score = sum(r.similarity_score for r in results) / len(results)
-        
-        # Bonus for high-confidence matches
-        high_confidence = sum(1 for r in results if r.similarity_score >= 0.9)
+
+        avg_score = sum(r.get("similarity_score", 0.0) for r in results) / len(results)
+        high_confidence = sum(1 for r in results if r.get("similarity_score", 0.0) >= 0.9)
         confidence_bonus = min(0.2, high_confidence * 0.05)
-        
-        # Count factor (more results = more confidence, up to a point)
-        count_factor = min(1.0, len(results) / 3)  # Max at 3 results
-        
+        count_factor = min(1.0, len(results) / 3)
+
         quality = (avg_score * 0.6) + (count_factor * 0.2) + confidence_bonus
         return min(1.0, quality)
-    
+
     async def _get_repo_metadata(self, service: str) -> dict:
-        """
-        Get repository metadata for a service.
-        
-        Args:
-            service: Service name to look up.
-        
-        Returns:
-            Dict with repository information.
-        """
-        # Placeholder - would use github_mcp.py in real implementation
-        return {
-            "service": service,
-            "repository": f"org/{service}",
-            "team": "platform",
-            "on_call": None,  # Would be populated by OnCall integration
-        }
-    
-    def close(self) -> None:
-        """Close agent connections."""
-        self._embedding_agent.close()
+        """Get repository metadata for a service."""
+        return await self._refrag_repo.github_repo.get_repository_info(service)  # type: ignore[attr-defined]
 
 
 # Strands agent tool definition

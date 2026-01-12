@@ -9,6 +9,7 @@ Constitution Principle II: Determinismo - Rules BEFORE LLM.
 """
 
 import logging
+import json
 from typing import Optional
 from uuid import UUID
 
@@ -16,6 +17,7 @@ from src.models.cluster import AlertCluster
 from src.models.metric_trend import MetricTrend
 from src.models.decision import Decision, DecisionState, HumanValidationStatus, SemanticEvidence
 from src.rules.decision_rules import RuleEngine, RuleResult
+from src.providers.github_models import GitHubModels, MissingTokenError
 
 logger = logging.getLogger(__name__)
 
@@ -108,14 +110,14 @@ class DecisionEngine:
                 f"[{self.AGENT_NAME}] Confidence {rule_result.confidence:.2f} < "
                 f"{self._llm_threshold}, invoking LLM fallback"
             )
-            
+
             llm_result = await self._invoke_llm_fallback(
                 cluster=cluster,
                 trends=trends,
                 semantic_evidence=semantic_evidence,
                 rule_result=rule_result,
             )
-            
+
             if llm_result:
                 rule_result = llm_result
                 llm_contribution = True
@@ -139,7 +141,7 @@ class DecisionEngine:
         
         return decision
     
-    def _invoke_llm_fallback(
+    async def _invoke_llm_fallback(
         self,
         cluster: AlertCluster,
         trends: dict[str, MetricTrend],
@@ -160,32 +162,75 @@ class DecisionEngine:
         Returns:
             Enhanced RuleResult or None if LLM fails.
         """
+        # Build context for LLM
+        context = self._build_llm_context(
+            cluster=cluster,
+            trends=trends,
+            semantic_evidence=semantic_evidence,
+            rule_result=rule_result,
+        )
+
+        logger.info(f"[{self.AGENT_NAME}] LLM context: {len(context)} chars")
+
+        # Compose prompt with instruction to return JSON
+        system_prompt = (
+            "You are an automated assistant that recommends an action for an alert.\n"
+            "Return only a JSON object with fields: decision_state (CLOSE/OBSERVE/ESCALATE/MANUAL_REVIEW),"
+            " confidence (float 0.0-1.0), justification (short string)."
+        )
+
+        user_prompt = context + "\n\nBased on the above, provide the JSON response as described."
+
+        # Try to call GitHubModels provider; if not available, fall back to simulated reply
         try:
-            # Build context for LLM
-            context = self._build_llm_context(
-                cluster=cluster,
-                trends=trends,
-                semantic_evidence=semantic_evidence,
-                rule_result=rule_result,
-            )
-            
-            # In real implementation, this would call an LLM
-            # For now, enhance confidence slightly or defer to MANUAL_REVIEW
-            
-            logger.info(f"[{self.AGENT_NAME}] LLM context: {len(context)} chars")
-            
-            # Placeholder LLM response - in production, call actual LLM
-            # Return MANUAL_REVIEW if LLM cannot determine
-            return RuleResult(
-                decision_state=DecisionState.MANUAL_REVIEW,
-                confidence=0.70,
-                rule_id="llm_fallback",
-                justification=f"LLM analysis: {rule_result.justification}. Recommending manual review for confirmation.",
-            )
-        
+            gh = GitHubModels()
+            # Use provider stream API to get assistant text
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+
+            assistant_text = ""
+            async for ev in gh.stream(messages):
+                # collect deltas (provider yields a single event in current impl)
+                cb = ev.get("contentBlockDelta", {})
+                delta = cb.get("delta", {})
+                text = delta.get("text") if isinstance(delta, dict) else None
+                if text:
+                    assistant_text += text
+
+            # Attempt to parse JSON from assistant_text
+            try:
+                payload = json.loads(assistant_text)
+                ds = payload.get("decision_state")
+                conf = float(payload.get("confidence", 0.0))
+                just = str(payload.get("justification", ""))
+
+                # Validate decision_state
+                if ds not in {s.value for s in DecisionState}:
+                    raise ValueError(f"Invalid decision_state from LLM: {ds}")
+
+                return RuleResult(
+                    decision_state=DecisionState(ds),
+                    confidence=conf,
+                    rule_id="llm_fallback",
+                    justification=f"LLM: {just}",
+                )
+            except Exception as e:
+                logger.warning(f"[{self.AGENT_NAME}] Failed to parse LLM output: {e}; output: {assistant_text}")
+
+        except MissingTokenError as me:
+            logger.warning(f"[{self.AGENT_NAME}] GitHubModels token missing: {me}; using simulated LLM response")
         except Exception as e:
-            logger.warning(f"[{self.AGENT_NAME}] LLM fallback failed: {e}")
-            return None
+            logger.warning(f"[{self.AGENT_NAME}] GitHubModels call failed: {e}; using simulated LLM response")
+
+        # Fallback simulated LLM behavior: recommend MANUAL_REVIEW with modest confidence
+        return RuleResult(
+            decision_state=DecisionState.MANUAL_REVIEW,
+            confidence=0.70,
+            rule_id="llm_fallback_simulated",
+            justification=f"Simulated LLM analysis: {rule_result.justification}. Recommend manual review.",
+        )
     
     def _build_llm_context(
         self,

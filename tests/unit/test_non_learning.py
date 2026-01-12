@@ -17,6 +17,7 @@ from datetime import datetime
 from src.models.alert import NormalizedAlert, ValidationStatus
 from src.models.cluster import AlertCluster
 from src.models.decision import Decision, DecisionState
+from src.models.embedding import VectorEmbedding
 from src.agents.embedding_agent import EmbeddingAgent, EmbeddingAgentError
 from src.agents.report_agent import ReportAgent
 from src.tools.vector_store import VectorStore, VectorStoreError
@@ -145,7 +146,7 @@ class TestVectorStoreNonLearning:
         """
         mock_qdrant = Mock()
         mock_embedding_client = Mock()
-        mock_embedding_client.generate_embedding.return_value = [0.1] * 384
+        mock_embedding_client.embed.return_value = [0.1] * 384
         
         store = VectorStore(
             qdrant_client=mock_qdrant,
@@ -170,7 +171,7 @@ class TestVectorStoreNonLearning:
         mock_qdrant.upsert_point.return_value = "point-456"
         
         mock_embedding_client = Mock()
-        mock_embedding_client.generate_embedding.return_value = [0.1] * 384
+        mock_embedding_client.embed.return_value = [0.1] * 384
         
         store = VectorStore(
             qdrant_client=mock_qdrant,
@@ -182,7 +183,9 @@ class TestVectorStoreNonLearning:
             cluster=sample_cluster,
         )
         
-        assert point_id == "point-456"
+        # persist_decision returns a VectorEmbedding object
+        assert isinstance(point_id, VectorEmbedding)
+        assert point_id.source_decision_id == confirmed_decision.decision_id
         mock_qdrant.upsert_point.assert_called_once()
     
     def test_persist_rejected_raises_error(
@@ -193,7 +196,7 @@ class TestVectorStoreNonLearning:
         """
         mock_qdrant = Mock()
         mock_embedding_client = Mock()
-        mock_embedding_client.generate_embedding.return_value = [0.1] * 384
+        mock_embedding_client.embed.return_value = [0.1] * 384
         
         store = VectorStore(
             qdrant_client=mock_qdrant,

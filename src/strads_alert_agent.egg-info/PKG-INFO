@@ -16,6 +16,14 @@ Requires-Dist: pyyaml>=6.0
 Requires-Dist: pytest>=7.4.0
 Requires-Dist: pytest-asyncio>=0.21.0
 Requires-Dist: pytest-mock>=3.11.0
+Requires-Dist: prometheus-api-client>=0.7.0
+Requires-Dist: jinja2>=3.1.6
+Requires-Dist: fastapi>=0.128.0
+Requires-Dist: uvicorn>=0.40.0
+Requires-Dist: azure-ai-inference>=1.0.0b9
+Requires-Dist: qdrant-client>=1.7.0
+Requires-Dist: strands-agents-tools>=0.2.19
+Requires-Dist: slack-bolt>=1.18.0
 Provides-Extra: dev
 Requires-Dist: black>=23.0.0; extra == "dev"
 Requires-Dist: ruff>=0.0.280; extra == "dev"
@@ -27,6 +35,15 @@ Requires-Dist: pytest-cov>=4.1.0; extra == "dev"
 This example shows how to create a custom `Model` provider for Strands Agents
 that forwards prompts to an HTTP endpoint (for example an open-source model
 you hosted yourself). It also includes a minimal FastAPI demo server.
+
+## Features
+
+- **Custom HTTP Model Provider**: HTTPModel implementation for Strands Agents SDK
+- **GitHub Models Provider**: Integration with Microsoft Foundry Inference SDK (see [specs/001-github-model-provider](specs/001-github-model-provider/))
+- **Ollama Provider**: Local LLM integration via Ollama API (see [src/providers/ollama_models.py](src/providers/ollama_models.py))
+- **MetricsAnalysisAgent**: Enhanced agent with p95 filtering, exponential backoff, and multi-metric fusion (see [specs/008-metrics-analysis-agent/quickstart.md](specs/008-metrics-analysis-agent/quickstart.md))
+- **Multi-Agent Pipeline**: Complete SRE workflow with 12-step orchestration (see [examples/PIPELINE_OLLAMA_README.md](examples/PIPELINE_OLLAMA_README.md))
+- **FastAPI Demo Server**: Minimal server for testing HTTP model integration
 
 Setup
 -----
@@ -59,6 +76,39 @@ Files
 - `server_fastapi.py`: Small FastAPI demo server that returns an echoed response.
 - `requirements.txt`: Packages used in the example.
 
+Multi-Agent Pipeline Examples
+------------------------------
+Complete SRE workflows demonstrating agent orchestration:
+
+### Ollama Pipeline (Local LLM)
+Full 12-step pipeline with Ollama provider:
+- **Quick Start**: `python examples/pipeline_ollama_test.py` (connectivity test)
+- **Full Pipeline**: `python examples/pipeline_ollama.py` (complete workflow)
+- **Documentation**: [examples/PIPELINE_OLLAMA_README.md](examples/PIPELINE_OLLAMA_README.md)
+- **Summary**: [examples/PIPELINE_IMPLEMENTATION_SUMMARY.md](examples/PIPELINE_IMPLEMENTATION_SUMMARY.md)
+
+Pipeline Flow:
+```
+AlertCollector → AlertNormalizer → AlertCorrelation → MetricsAnalysis
+→ RepositoryContext ⟷ GraphKnowledge (feedback loop)
+→ DecisionEngine → HumanReview → OutcomeSupervisor
+→ MemoryValidation → GraphKnowledge → AuditReport
+```
+
+Prerequisites:
+```bash
+# Install and start Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+ollama serve
+
+# Pull a model
+ollama pull llama3.1
+
+# Set environment
+export OLLAMA_HOST="http://localhost:11434"
+export OLLAMA_MODEL="llama3.1"
+```
+
 Notes
 -----
 - Production servers should implement streaming, authentication, retries,
@@ -67,3 +117,28 @@ Notes
 - If you have a model from GitHub Models, first serve it with a model server
   (Ollama, Llama-API, custom FastAPI wrapping a transformers pipeline, etc.)
   and then point `HTTPModel.endpoint_url` to that server.
+
+Distributed Diagnostic Swarm (Feature 009)
+------------------------------------------
+**Status: Implemented & Verified**
+
+A parallel multi-agent analysis architecture that ingests alerts, spawns specialized agents to investigate in parallel, and consolidates findings into a single decision candidate.
+
+- **Architecture**: Swarm of 5 specialist agents (Metrics, Code, Graph, Vector, Correlator)
+- **Orchestration**: `SwarmOrchestrator` uses `asyncio` for parallel, independent execution.
+- **Data Model**: `DecisionCandidate` captures the primary hypothesis, risks, and conflicts.
+- **Governance**: Human-in-the-Loop review process via `HumanReviewAgent`.
+- **Learning**: Post-mortem generation and Graph/Vector lineage recording.
+
+**Quick Demo:**
+```bash
+# Uses mocked repository and agents for demonstration
+python examples/demo_graph_swarm.py
+```
+
+**Key Components:**
+- `src/agents/swarm/orchestrator.py`: Parallel dispatch logic.
+- `src/agents/governance/decision_engine.py`: Conflict resolution and hypothesis synthesis.
+- `src/graph/neo4j_repo.py`: Graph persistence (Neo4j).
+- `specs/009-diagnostic-swarm-graph/spec.md`: Full specification.
+

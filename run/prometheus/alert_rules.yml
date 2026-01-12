@@ -1,0 +1,11 @@
+groups:
+  - name: payment_service_alerts
+    rules:
+      - alert: HighCPUUsage
+        expr: payment_service_cpu_usage > 80
+        for: 0s
+        labels:
+          severity: critical
+        annotations:
+          summary: "High CPU usage detected on Payment Service"
+          description: "Payment Service CPU usage is above 80% (current value: {{ $value }})"

@@ -1,32 +1,20 @@
 """Example: Running the complete alert decision pipeline"""
 import logging
+import os
 try:
     from dotenv import load_dotenv
 except Exception:  # pragma: no cover - optional dependency for examples
-    def load_dotenv(*args, **kwargs):
-        return None
+    def load_dotenv(*args, **kwargs) -> bool:
+        return False
 
-try:
-    from src.tools.grafana_client import GrafanaMCPClient
-except Exception:  # pragma: no cover - example fallback
-    class GrafanaMCPClient:
-        def __init__(self, *args, **kwargs):
-            pass
-        def close(self):
-            pass
+from src.tools.grafana_client import GrafanaMCPClient
 
-try:
-    from src.tools.prometheus_client import PrometheusClient
-except Exception:  # pragma: no cover - example fallback
-    class PrometheusClient:
-        def __init__(self, *args, **kwargs):
-            pass
-        def close(self):
-            pass
+from src.tools.prometheus_queries import PrometheusClient
 from src.agents.alert_collector import AlertCollectorAgent
 from src.agents.alert_normalizer import AlertNormalizerAgent
 from src.agents.alert_correlation import AlertCorrelationAgent
 from src.agents.metrics_analysis import MetricsAnalysisAgent
+from src.agents.repository_context import RepositoryContextAgent
 from src.agents.decision_engine import DecisionEngine
 from src.agents.human_review import HumanReviewAgent
 from src.agents.orchestrator import AlertOrchestratorAgent
@@ -49,16 +37,17 @@ def main():
     
     # Initialize clients
     grafana_client = GrafanaMCPClient()
-    prometheus_client = PrometheusClient()
+    prometheus_url = os.environ.get("PROMETHEUS_URL", "http://localhost:9090")
+    prometheus_client = PrometheusClient(base_url=prometheus_url)
     
     # Initialize agents
-    alert_collector = AlertCollectorAgent(grafana_client)
+    alert_collector = AlertCollectorAgent(grafana_client, prometheus_client=prometheus_client)
     alert_normalizer = AlertNormalizerAgent()
     alert_correlation = AlertCorrelationAgent(time_window_minutes=15)
     metrics_analysis = MetricsAnalysisAgent(prometheus_client)
+    repository_context = RepositoryContextAgent(top_k=5, score_threshold=0.75)
     
-    # Initialize decision engine (policy engine kept for backward compatibility)
-    policy_engine = PolicyEngine()
+    # Initialize decision engine
     decision_engine = DecisionEngine()
     
     # Initialize human review agent
@@ -87,7 +76,6 @@ def main():
         
         for decision in decisions:
             logger.info(f"Decision ID: {decision.decision_id}")
-            logger.info(f"  Cluster: {decision.cluster_id}")
             logger.info(f"  State: {decision.decision_state.value}")
             logger.info(f"  Confidence: {decision.confidence:.2f}")
             logger.info(f"  LLM Used: {decision.llm_contribution}")
@@ -110,6 +98,7 @@ def main():
         # Cleanup
         grafana_client.close()
         prometheus_client.close()
+        repository_context.close()
         logger.info("Pipeline execution complete")
 
 
