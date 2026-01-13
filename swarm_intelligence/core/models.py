@@ -10,6 +10,8 @@ from swarm_intelligence.policy.retry_policy import RetryPolicy
 class DecisionContext: pass
 class ConfidenceSnapshot: pass
 class RetryAttempt: pass
+class AgentExecution: pass
+class Evidence: pass
 
 class EvidenceType(Enum):
     """Enumeration for the types of evidence that can be produced."""
@@ -27,17 +29,29 @@ class HumanAction(Enum):
     OVERRIDE = "override"
 
 @dataclass
-class SwarmResult:
-    """Represents the output of a single agent execution."""
+class Evidence:
+    """Represents a piece of evidence produced by an agent execution."""
+    source_agent_execution_id: str
     agent_id: str
-    output: Any
-    confidence: float  # 0.0 to 1.0
-    actionable: bool
+    content: Any
+    confidence: float
     evidence_type: EvidenceType
+    evidence_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+
+@dataclass
+class AgentExecution:
+    """Represents a single, auditable execution of an agent."""
+    agent_id: str
+    agent_version: str
+    logic_hash: str
+    step_id: str
+    input_parameters: Dict[str, Any]
+    execution_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    output_evidence: List[Evidence] = field(default_factory=list)
     error: Optional[str] = None
+    timestamp: datetime = field(default_factory=datetime.utcnow)
 
     def is_successful(self) -> bool:
-        """Returns True if the execution was successful."""
         return self.error is None
 
 @dataclass
@@ -71,7 +85,7 @@ class Decision:
     summary: str
     action_proposed: str
     confidence: float
-    supporting_evidence: List[SwarmResult]
+    supporting_evidence: List[Evidence]
     decision_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     human_decision: Optional['HumanDecision'] = None
     context: DecisionContext = field(default_factory=DecisionContext)
@@ -120,6 +134,7 @@ class RetryAttempt:
     attempt_number: int
     delay_seconds: float
     reason: str
+    failed_execution_id: str
     attempt_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
 @dataclass

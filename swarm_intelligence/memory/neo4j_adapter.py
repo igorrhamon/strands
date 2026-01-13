@@ -5,7 +5,7 @@ from neo4j import GraphDatabase, Driver
 from typing import Dict, Any, List
 
 from swarm_intelligence.core.models import (
-    Alert, SwarmPlan, SwarmStep, SwarmResult, Decision,
+    Alert, SwarmPlan, SwarmStep, AgentExecution, Evidence, Decision,
     HumanDecision, OperationalOutcome, EvidenceType, RetryAttempt, ReplayReport
 )
 
@@ -35,213 +35,187 @@ class Neo4jAdapter:
 
     def fetch_full_run_context(self, run_id: str) -> Dict[str, Any]:
         """Fetches and reconstructs a complete SwarmRun context for deterministic replay."""
+        # This implementation is simplified for clarity. A production version would
+        # need more robust reconstruction of complex objects like policies.
         query = """
         MATCH (run:SwarmRun {id: $run_id})<-[:TRIGGERED]-(alert:Alert)
-        MATCH (run)-[:EXECUTED_STEP]->(step)-[:EXECUTED_BY]->(agent:Agent)
-        OPTIONAL MATCH (step)-[:PRODUCED]->(result:SwarmResult)
-        WITH run, alert, step, agent, collect(result) as results
-        ORDER BY result.timestamp
-        WITH run, alert, collect({step: step, agent: agent, results: results}) as step_data
-        OPTIONAL MATCH (run)-[:EXECUTED_STEP]->(any_step)-[:PRODUCED]->(any_result)-[:CAUSALLY_INFLUENCED]->(decision:Decision)
-        RETURN run, alert, step_data, decision
+        MATCH (run)-[:EXECUTED_STEP]->(step)-[:HAD_EXECUTION]->(exec:AgentExecution)-[:EXECUTED_BY]->(agent:Agent)
+        OPTIONAL MATCH (exec)-[:PRODUCED]->(ev:Evidence)
+        WITH run, alert, step, agent, exec, collect(ev) as evidences
+        WITH run, alert, step, agent, collect({execution: exec, evidences: evidences}) as executions_data
+        WITH run, alert, collect({step: step, agent: agent, executions: executions_data}) as step_data
+        OPTIONAL MATCH (decision:Decision)<-[:INFLUENCED]-(:Evidence)<-[:PRODUCED]-(:AgentExecution)<-[:HAD_EXECUTION]-(:SwarmStep)<-[:EXECUTED_STEP]-(run)
+        RETURN run, alert, step_data, decision LIMIT 1
         """
         data = self.run_read_transaction(query, {"run_id": run_id})
-        if not data:
-            return {}
+        if not data: return {}
 
         raw_run = data[0]
-
-        # Reconstruct SwarmSteps and SwarmResults
-        steps = []
-        all_results = {}
-        for item in raw_run['step_data']:
-            raw_step = item['step']
-            # Retry policy reconstruction would go here if needed
-            steps.append(SwarmStep(agent_id=item['agent']['id'], step_id=raw_step['id'], parameters=json.loads(raw_step['parameters'])))
-            for raw_result in item['results']:
-                all_results[raw_result['id']] = SwarmResult(
-                    agent_id=item['agent']['id'],
-                    output=raw_result['output'],
-                    confidence=raw_result['confidence'],
-                    actionable=raw_result['actionable'],
-                    evidence_type=EvidenceType(raw_result['evidence_type']),
-                    error=raw_result['error']
+        reconstructed_steps = []
+        reconstructed_results = {}
+        for step_info in raw_run['step_data']:
+            step_node = step_info['step']
+            reconstructed_steps.append(SwarmStep(agent_id=step_info['agent']['id'], step_id=step_node['id']))
+            for exec_info in step_info['executions']:
+                execution_node = exec_info['execution']
+                evidence_list = [Evidence(**ev) for ev in exec_info['evidences']]
+                reconstructed_results[execution_node['id']] = AgentExecution(
+                    execution_id=execution_node['id'],
+                    agent_id=step_info['agent']['id'],
+                    agent_version=execution_node['agent_version'],
+                    logic_hash=execution_node['logic_hash'],
+                    step_id=step_node['id'],
+                    input_parameters={}, # Simplified for this example
+                    output_evidence=evidence_list,
+                    error=execution_node['error']
                 )
 
-        plan = SwarmPlan(
+        reconstructed_plan = SwarmPlan(
             plan_id=raw_run['run']['id'],
             objective=raw_run['run']['objective'],
-            steps=steps
+            steps=reconstructed_steps
         )
 
         return {
-            "plan": plan,
+            "plan": reconstructed_plan,
             "alert": Alert(alert_id=raw_run['alert']['id'], data=json.loads(raw_run['alert']['data'])),
-            "results": all_results,
-            "decision": raw_run['decision']
+            "results": reconstructed_results,
+            "decision": raw_run['decision'],
+            "master_seed": raw_run['run']['master_seed']
         }
 
     def setup_schema(self):
         """Sets up the unique constraints and indexes for the graph."""
-        schema_queries = [
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (a:Alert) REQUIRE a.id IS UNIQUE",
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (r:SwarmRun) REQUIRE r.id IS UNIQUE",
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (s:SwarmStep) REQUIRE s.id IS UNIQUE",
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (a:Agent) REQUIRE a.id IS UNIQUE",
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (res:SwarmResult) REQUIRE res.id IS UNIQUE",
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (d:Decision) REQUIRE d.id IS UNIQUE",
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (hd:HumanDecision) REQUIRE hd.id IS UNIQUE",
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (o:OperationalOutcome) REQUIRE o.id IS UNIQUE",
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (dc:DecisionContext) REQUIRE dc.id IS UNIQUE",
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (cs:ConfidenceSnapshot) REQUIRE cs.id IS UNIQUE",
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (ra:RetryAttempt) REQUIRE ra.id IS UNIQUE",
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (rr:ReplayReport) REQUIRE rr.id IS UNIQUE",
+        constraints = [
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:Alert) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:SwarmRun) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:SwarmStep) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:Agent) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:AgentExecution) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:Evidence) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:Decision) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:HumanDecision) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:OperationalOutcome) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:RetryAttempt) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:ReplayReport) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:ConfidenceSnapshot) REQUIRE n.id IS UNIQUE",
         ]
-        for query in schema_queries:
+        for query in constraints:
             self.run_transaction(query)
         logging.info("Neo4j schema constraints ensured.")
 
-    def save_swarm_run(self, plan: SwarmPlan, alert: Alert, run_history: Dict[str, List[SwarmResult]], decision: Decision, retry_attempts: List[RetryAttempt]):
-        """Saves the entire swarm run, including retry attempts, in a single atomic transaction."""
-
-        steps_params = []
-        for step in plan.steps:
-            results_params = []
-            for i, result in enumerate(run_history.get(step.step_id, [])):
-                results_params.append({
-                    "result_id": f"{step.step_id}-{i}",
-                    "output": str(result.output), "confidence": result.confidence,
-                    "actionable": result.actionable, "evidence_type": result.evidence_type.value,
-                    "error": result.error
-                })
-
-            steps_params.append({
-                "step_id": step.step_id, "agent_id": step.agent_id,
-                "params": json.dumps(step.parameters),
-                "policy": json.dumps(step.retry_policy.to_dict() if step.retry_policy else {}),
-                "results": results_params
-            })
-
-        retry_params = [ra.__dict__ for ra in retry_attempts]
-
+    def save_swarm_run(self, plan: SwarmPlan, alert: Alert, executions: List[AgentExecution], decision: Decision, retry_attempts: List[RetryAttempt], master_seed: int):
+        # This complex query performs the entire save in one atomic transaction.
         query = """
-        // 1. Alert and SwarmRun
         MERGE (alert:Alert {id: $alert_id}) ON CREATE SET alert.data = $alert_data
-        MERGE (run:SwarmRun {id: $run_id}) ON CREATE SET run.objective = $objective, run.timestamp = datetime()
+        MERGE (run:SwarmRun {id: $run_id}) ON CREATE SET run.objective = $objective, run.timestamp = datetime(), run.master_seed = $master_seed
         MERGE (alert)-[:TRIGGERED]->(run)
 
-        // 2. Decision and Context
-        MERGE (dc:DecisionContext {id: $context_id}) ON CREATE SET dc.aggregation_strategy = $agg_strategy, dc.replayable = $replayable
-        MERGE (d:Decision {id: $decision_id}) ON CREATE SET d.summary = $summary, d.action_proposed = $action_proposed, d.confidence = $confidence, d.timestamp = datetime()
-        MERGE (d)-[:BASED_ON]->(dc)
+        MERGE (dec:Decision {id: $decision_id})
+        ON CREATE SET dec.summary = $summary, dec.action_proposed = $action_proposed, dec.confidence = $confidence, dec.timestamp = datetime()
 
-        // 3. Steps, Agents, and Results (using UNWIND for batch creation)
-        WITH run, d
-        UNWIND $steps as step_data
-        MERGE (agent:Agent {id: step_data.agent_id})
-        MERGE (step:SwarmStep {id: step_data.step_id}) ON CREATE SET step.parameters = step_data.params, step.retry_policy = step_data.policy
+        WITH run, dec
+        UNWIND $steps as step_param
+        MERGE (step:SwarmStep {id: step_param.step_id})
+        ON CREATE SET step.parameters = step_param.params, step.retry_policy = step_param.policy
         MERGE (run)-[:EXECUTED_STEP]->(step)
-        MERGE (step)-[:EXECUTED_BY]->(agent)
 
-        WITH d, step, step_data.results as results_data
-        UNWIND results_data as result_data
-        MERGE (result:SwarmResult {id: result_data.result_id})
-        ON CREATE SET
-            result.output = result_data.output,
-            result.confidence = result_data.confidence,
-            result.actionable = result_data.actionable,
-            result.evidence_type = result_data.evidence_type,
-            result.error = result_data.error,
-            result.timestamp = datetime()
-        MERGE (step)-[:PRODUCED]->(result)
+        MERGE (agent:Agent {id: step_param.agent_id})
 
-        // 4. Causal Links
-        WITH d, collect(result) as all_results
-        UNWIND $influencing_results as influencing_result_id
-        MATCH (res:SwarmResult {id: influencing_result_id})
-        MERGE (res)-[rel:CAUSALLY_INFLUENCED]->(d)
-        ON CREATE SET
-            rel.weight = 1.0,
-            rel.confidence_at_time = res.confidence,
-            rel.role = 'direct_evidence',
-            rel.timestamp = datetime()
-
-        // 5. Retry Attempts
-        WITH d
-        UNWIND $retry_attempts as attempt_data
-        MATCH (s:SwarmStep {id: attempt_data.step_id})
-        CREATE (ra:RetryAttempt {
-            id: attempt_data.attempt_id,
-            attempt_number: attempt_data.attempt_number,
-            delay_seconds: attempt_data.delay_seconds,
-            reason: attempt_data.reason,
+        WITH run, dec, step, agent, step_param.executions as executions_param
+        UNWIND executions_param as exec_param
+        CREATE (exec:AgentExecution {
+            id: exec_param.execution_id,
+            agent_version: exec_param.agent_version,
+            logic_hash: exec_param.logic_hash,
+            error: exec_param.error,
             timestamp: datetime()
         })
-        CREATE (s)-[:HAD_RETRY]->(ra)
+        MERGE (step)-[:HAD_EXECUTION]->(exec)
+        MERGE (agent)-[:EXECUTED]->(exec)
+
+        WITH dec, exec, exec_param.evidence as evidences_param
+        UNWIND evidences_param as ev_param
+        CREATE (ev:Evidence {
+            id: ev_param.evidence_id,
+            content: ev_param.content,
+            confidence: ev_param.confidence,
+            evidence_type: ev_param.evidence_type
+        })
+        MERGE (exec)-[:PRODUCED]->(ev)
+
+        WITH dec
+        UNWIND $influencing_evidence as ev_id
+        MATCH (evidence:Evidence {id: ev_id})
+        MERGE (evidence)-[:INFLUENCED {weight: 1.0}]->(dec)
+
+        WITH dec
+        UNWIND $retries as retry_param
+        MATCH (failed_exec:AgentExecution {id: retry_param.failed_execution_id})
+        CREATE (ra:RetryAttempt {
+            id: retry_param.attempt_id,
+            attempt_number: retry_param.attempt_number,
+            delay_seconds: retry_param.delay_seconds,
+            reason: retry_param.reason,
+            timestamp: datetime()
+        })
+        CREATE (failed_exec)-[:RETRIED_WITH]->(ra)
         """
 
-        influencing_result_ids = []
-        for result in decision.supporting_evidence:
-            step_id = next((s.step_id for s in plan.steps if s.agent_id == result.agent_id), None)
-            if step_id:
-                result_idx = len(run_history.get(step_id, [])) - 1
-                if result_idx >= 0:
-                    influencing_result_ids.append(f"{step_id}-{result_idx}")
+        steps_params = [{
+            "step_id": s.step_id,
+            "agent_id": s.agent_id,
+            "params": json.dumps(s.parameters),
+            "policy": json.dumps(s.retry_policy.to_dict() if s.retry_policy else {}),
+            "executions": [{
+                "execution_id": ex.execution_id,
+                "agent_version": ex.agent_version,
+                "logic_hash": ex.logic_hash,
+                "error": ex.error,
+                "evidence": [e.__dict__ for e in ex.output_evidence]
+            } for ex in executions if ex.step_id == s.step_id]
+        } for s in plan.steps]
 
         params = {
             "alert_id": alert.alert_id, "alert_data": json.dumps(alert.data),
             "run_id": plan.plan_id, "objective": plan.objective,
-            "context_id": decision.context.context_id, "agg_strategy": decision.context.aggregation_strategy,
-            "replayable": decision.context.replayable, "decision_id": decision.decision_id,
-            "summary": decision.summary, "action_proposed": decision.action_proposed,
-            "confidence": decision.confidence, "steps": steps_params,
-            "influencing_results": influencing_result_ids,
-            "retry_attempts": retry_params
+            "master_seed": master_seed,
+            "decision_id": decision.decision_id, "summary": decision.summary,
+            "action_proposed": decision.action_proposed, "confidence": decision.confidence,
+            "steps": steps_params,
+            "influencing_evidence": [ev.evidence_id for ev in decision.supporting_evidence],
+            "retries": [r.__dict__ for r in retry_attempts]
         }
-
         self.run_transaction(query, params)
 
-    def save_human_override(self, decision: Decision, human_decision: HumanDecision, outcome: OperationalOutcome, plan: SwarmPlan, run_history: Dict[str, List[SwarmResult]]):
-        invalidated_result_ids = []
-        for result in decision.supporting_evidence:
-            step_id = next((s.step_id for s in plan.steps if s.agent_id == result.agent_id), None)
-            if step_id:
-                result_idx = len(run_history.get(step_id, [])) - 1
-                if result_idx >= 0:
-                    invalidated_result_ids.append(f"{step_id}-{result_idx}")
-
+    def save_human_override(self, decision: Decision, human_decision: HumanDecision, outcome: OperationalOutcome):
+        """Saves the human override and its causal impact in a single atomic transaction."""
         query = """
-        // 1. Match the core Decision node
         MATCH (d:Decision {id: $decision_id})
+        CREATE (hd:HumanDecision {id: $hd_id, author: $author, reason: $reason, timestamp: datetime()})
+        CREATE (d)-[:OVERRULED]->(hd)
 
-        // 2. Create the HumanDecision and its outcome
-        MERGE (hd:HumanDecision {id: $hd_id})
-        ON CREATE SET hd.author = $author, hd.action = $action, hd.override_reason = $reason, hd.timestamp = datetime()
-        MERGE (d)-[:OVERRIDDEN_BY]->(hd)
-        MERGE (o:OperationalOutcome {id: $outcome_id})
-        ON CREATE SET o.status = $status, o.impact_level = $impact, o.resolution_time_seconds = $res_time
-        MERGE (hd)-[:RESULTED_IN]->(o)
+        CREATE (o:OperationalOutcome {id: $outcome_id, status: $status, timestamp: datetime()})
+        CREATE (hd)-[:LED_TO]->(o)
 
-        // 3. Link invalidated results and penalized agents
         WITH hd
-        UNWIND $invalidated_results as invalidated_id
-        MATCH (r:SwarmResult {id: invalidated_id})
-        MATCH (a:Agent)<-[:EXECUTED_BY]-(:SwarmStep)-[:PRODUCED]->(r)
-        MERGE (hd)-[:INVALIDATED]->(r)
-        MERGE (hd)-[:PENALIZED]->(a)
+        UNWIND $evidence_ids as ev_id
+        MATCH (ev:Evidence {id: ev_id})
+        MATCH (a:Agent)<-[:EXECUTED]-(:AgentExecution)-[:PRODUCED]->(ev)
+        CREATE (hd)-[:INVALIDATED]->(ev)
+        CREATE (hd)-[:PENALIZED]->(a)
         """
-
         params = {
-            "decision_id": decision.decision_id, "hd_id": human_decision.human_decision_id,
-            "author": human_decision.author, "action": human_decision.action.value,
+            "decision_id": decision.decision_id,
+            "hd_id": human_decision.human_decision_id,
+            "author": human_decision.author,
             "reason": human_decision.override_reason,
-            "outcome_id": outcome.outcome_id, "status": outcome.status,
-            "impact": outcome.impact_level, "res_time": outcome.resolution_time_seconds,
-            "invalidated_results": invalidated_result_ids
+            "outcome_id": outcome.outcome_id,
+            "status": outcome.status,
+            "evidence_ids": [ev.evidence_id for ev in decision.supporting_evidence]
         }
-
         self.run_transaction(query, params)
-        logging.info(f"Human override by {human_decision.author} and its outcome have been saved atomically.")
+        logging.info(f"Human override by {human_decision.author} saved atomically.")
 
     def save_replay_report(self, report: ReplayReport):
         """Saves a replay report to the graph, linking it to the involved decisions."""
@@ -254,8 +228,8 @@ class Neo4jAdapter:
             divergences: $divergences,
             timestamp: datetime()
         })
-        CREATE (rr)-[:REPLAY_OF]->(orig_d)
-        CREATE (rr)-[:GENERATED]->(replay_d)
+        CREATE (rr)-[:REPLAYED]->(orig_d)
+        CREATE (replay_d)-[:GENERATED_BY]->(rr)
         """
         params = {
             "original_id": report.original_decision_id,

@@ -32,18 +32,24 @@ class ReplayEngine:
         controller.set_replay_mode(original_run_context['results'])
 
         alert = original_run_context['alert']
-        replayed_decision, _, _ = await controller.aexecute_plan(plan_to_replay, alert)
+        original_seed = original_run_context['master_seed']
+
+        replayed_decision, _, _ = await controller.aexecute_plan(plan_to_replay, alert, run_id, master_seed=original_seed)
 
         controller.disable_replay_mode()
 
         original_decision = original_run_context['decision']
 
+        # Causal comparison
+        original_evidence_ids = {ev['id'] for ev in original_run_context.get('evidence', [])}
+        replayed_evidence_ids = {ev.evidence_id for ev in replayed_decision.supporting_evidence}
+
         divergences = []
+        if original_evidence_ids != replayed_evidence_ids:
+            divergences.append(f"Evidence set mismatch. Original: {original_evidence_ids}, Replayed: {replayed_evidence_ids}")
+
         if replayed_decision.action_proposed != original_decision['action_proposed']:
-            divergences.append(
-                f"Action mismatch: original='{original_decision['action_proposed']}', "
-                f"replayed='{replayed_decision.action_proposed}'"
-            )
+            divergences.append(f"Final action mismatch.")
 
         report = ReplayReport(
             original_decision_id=original_decision['id'],

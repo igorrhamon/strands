@@ -1,18 +1,20 @@
 
 import logging
 import asyncio
+import random
 from typing import List, Dict, Optional, Callable, Any
 from swarm_intelligence.core.models import (
     SwarmPlan,
     SwarmStep,
-    SwarmResult,
+    AgentExecution,
     Decision,
-    EvidenceType,
+    Evidence,
     Alert,
     HumanDecision,
     HumanAction,
     RetryAttempt,
 )
+from swarm_intelligence.policy.retry_policy import RetryContext
 from swarm_intelligence.core.swarm import SwarmOrchestrator
 from swarm_intelligence.services.confidence_service import ConfidenceService
 
@@ -37,7 +39,7 @@ class SwarmController:
         self.replay_mode = False
         self.replay_results: Dict[str, SwarmResult] = {}
 
-    def set_replay_mode(self, historical_results: Dict[str, SwarmResult]):
+    def set_replay_mode(self, historical_results: Dict[str, AgentExecution]):
         """Puts the controller in replay mode, using historical results instead of live execution."""
         self.replay_mode = True
         self.replay_results = historical_results
@@ -51,172 +53,135 @@ class SwarmController:
         """Registers a single, comprehensive callback for human review."""
         self.human_review_hook = review_hook
 
-    async def aexecute_plan(self, plan: SwarmPlan, alert: Alert) -> (Decision, Dict[str, List[SwarmResult]], List[RetryAttempt]):
+    async def aexecute_plan(self, plan: SwarmPlan, alert: Alert, run_id: str, master_seed: int = None) -> (Decision, List[AgentExecution], List[RetryAttempt], int):
         """
         Executes a swarm plan, evaluates results, performs retries,
         and formulates a final decision.
-
-        Returns a tuple of (Decision, run_history, retry_attempts).
         """
-        # Apply time decay to all participating agents before execution
-        for step in plan.steps:
-            self.confidence_service.apply_time_decay(step.agent_id)
+        master_seed = master_seed if master_seed is not None else random.randint(0, 1_000_000)
 
-        run_history: Dict[str, List[SwarmResult]] = {step.step_id: [] for step in plan.steps}
+        executions: List[AgentExecution] = []
         all_retry_attempts: List[RetryAttempt] = []
-        final_results: Dict[str, SwarmResult] = {}
 
         steps_to_process = list(plan.steps)
 
         while steps_to_process:
             if self.replay_mode:
-                results = [self.replay_results.get(s.step_id, SwarmResult(agent_id=s.agent_id, output="No historical result found.", confidence=0, actionable=False, evidence_type=EvidenceType.RAW_DATA, error="Missing replay data")) for s in steps_to_process]
+                # In replay mode, we fetch results, not execute them
+                new_executions = [self.replay_results.get(s.step_id) for s in steps_to_process]
             else:
-                results = await self.orchestrator.execute_swarm(steps_to_process)
+                new_executions = await self.orchestrator.execute_swarm(steps_to_process)
 
-            for res in results:
-                step = next((s for s in steps_to_process if s.agent_id == res.agent_id), None)
-                if step:
-                    run_history[step.step_id].append(res)
+            executions.extend(new_executions)
 
-            steps_to_process, new_retries = await self._evaluate_and_get_next_steps(plan.steps, run_history, final_results)
+            steps_to_process, new_retries = await self._evaluate_and_get_next_steps(
+                plan, run_id, master_seed, executions, all_retry_attempts
+            )
             all_retry_attempts.extend(new_retries)
 
             if steps_to_process:
                 logging.info(f"{len(steps_to_process)} steps require retries. Applying policies.")
 
-        # If after all retries, mandatory steps are still not met, escalate
-        decision: Decision
-        if self._still_requires_action(plan.steps, final_results) and self.llm_agent_id:
-            logging.info("Deterministic steps failed or have low confidence. Escalating to LLM.")
-            decision = await self._escalate_to_llm(plan, final_results, alert)
-        else:
-            decision = self._formulate_decision(final_results)
+        successful_executions = [ex for ex in executions if ex.is_successful()]
 
-        return self._request_human_review(decision), run_history, all_retry_attempts
+        # If after all retries, all mandatory steps are still not successful, escalate
+        if not all(s.step_id in {ex.step_id for ex in successful_executions} for s in plan.steps if s.mandatory):
+            logging.warning("Not all mandatory steps succeeded. Escalating to LLM.")
+            decision = await self._escalate_to_llm(plan, successful_executions, alert)
+        else:
+            decision = self._formulate_decision(successful_executions)
+
+        return self._request_human_review(decision), executions, all_retry_attempts, master_seed
+
     async def _evaluate_and_get_next_steps(
-        self,
-        all_plan_steps: List[SwarmStep],
-        run_history: Dict[str, List[SwarmResult]],
-        final_results: Dict[str, SwarmResult],
+        self, plan: SwarmPlan, run_id: str, master_seed: int,
+        all_executions: List[AgentExecution],
+        all_retry_attempts: List[RetryAttempt]
     ) -> (List[SwarmStep], List[RetryAttempt]):
-        """
-        Evaluates results, applies retry policies, and returns the next batch of steps to execute
-        along with a list of auditable retry attempts.
-        """
+
         steps_to_retry = []
-        retry_attempts = []
+        new_retry_attempts = []
         max_delay = 0.0
 
-        for step in all_plan_steps:
-            if step.step_id in final_results:
+        successful_steps = {ex.step_id for ex in all_executions if ex.is_successful()}
+
+        for step in plan.steps:
+            if step.step_id in successful_steps:
                 continue
 
-            latest_result = run_history[step.step_id][-1] if run_history[step.step_id] else None
-            if not latest_result:
-                continue
+            executions_for_step = [ex for ex in all_executions if ex.step_id == step.step_id]
+            retries_for_step = [r for r in all_retry_attempts if r.step_id == step.step_id]
+            total_attempts = len(executions_for_step) + len(retries_for_step)
 
-            is_successful = latest_result.is_successful()
-            meets_confidence = latest_result.confidence >= step.min_confidence
+            if step.mandatory and step.retry_policy:
+                context = RetryContext(
+                    run_id=run_id,
+                    step_id=step.step_id,
+                    agent_id=step.agent_id,
+                    attempt=total_attempts + 1,
+                    error=Exception(executions_for_step[-1].error) if executions_for_step and executions_for_step[-1].error else None,
+                    random_seed=master_seed + total_attempts # Deterministic seed
+                )
 
-            if is_successful and meets_confidence:
-                final_results[step.step_id] = latest_result
-                logging.info(f"Step {step.step_id} ({step.agent_id}) successful.")
-            elif step.mandatory and step.retry_policy:
-                attempt = len(run_history[step.step_id])
-                error = Exception(latest_result.error) if latest_result.error else None
-
-                if step.retry_policy.should_retry(attempt, error):
-                    delay = step.retry_policy.next_delay(attempt)
+                if step.retry_policy.should_retry(context):
+                    delay = step.retry_policy.next_delay(context)
                     max_delay = max(max_delay, delay)
                     steps_to_retry.append(step)
-                    retry_attempts.append(RetryAttempt(
+                    new_retry_attempts.append(RetryAttempt(
                         step_id=step.step_id,
-                        attempt_number=attempt,
+                        attempt_number=context.attempt,
                         delay_seconds=delay,
-                        reason=str(error) if error else "Confidence below threshold"
+                        reason=str(context.error),
+                        failed_execution_id=executions_for_step[-1].execution_id
                     ))
-                    logging.warning(f"Step {step.step_id} failed. Will retry after {delay:.2f}s.")
-                else:
-                    final_results[step.step_id] = latest_result
-                    logging.error(f"Step {step.step_id} failed and exhausted its retry policy.")
-            else:
-                 final_results[step.step_id] = latest_result
-                 logging.error(f"Mandatory step {step.step_id} failed with no retry policy.")
 
         if max_delay > 0:
             await asyncio.sleep(max_delay)
 
-        return steps_to_retry, retry_attempts
+        return steps_to_retry, new_retry_attempts
 
-    def _still_requires_action(self, all_plan_steps: List[SwarmStep], final_results: Dict[str, SwarmResult]) -> bool:
-        """Checks if any mandatory steps have ultimately failed."""
-        for step in all_plan_steps:
-            if step.mandatory:
-                result = final_results.get(step.step_id)
-                if not result or not result.is_successful() or result.confidence < step.min_confidence:
-                    return True
-        return False
-
-    async def _escalate_to_llm(self, plan: SwarmPlan, current_results: Dict[str, SwarmResult], alert: Alert) -> Decision:
-        """
-        When deterministic methods fail, this method is called to get a hypothesis from an LLM.
-        """
+    async def _escalate_to_llm(self, plan: SwarmPlan, successful_executions: List[AgentExecution], alert: Alert) -> Decision:
+        """Generates a hypothesis from an LLM when deterministic agents fail."""
         if not self.llm_agent_id:
-            return self._formulate_decision(current_results)
+            return self._formulate_decision(successful_executions)
 
-        llm_step = SwarmStep(
-            agent_id=self.llm_agent_id,
-            mandatory=True,
-            retryable=False,
-            parameters={
-                "objective": plan.objective,
-                "failed_steps": [res for res in current_results.values() if not res.is_successful()],
-                "alert_data": alert.data
-            }
-        )
+        llm_step = SwarmStep(agent_id=self.llm_agent_id, mandatory=True)
+        llm_execution = (await self.orchestrator.execute_swarm([llm_step]))[0]
 
-        llm_result = (await self.orchestrator.execute_swarm([llm_step]))[0]
+        all_evidence = [ev for ex in successful_executions for ev in ex.output_evidence]
+        all_evidence.extend(llm_execution.output_evidence)
 
-        # Tag LLM output as a hypothesis
-        llm_result.evidence_type = EvidenceType.HYPOTHESIS
-
-        final_evidence = list(current_results.values()) + [llm_result]
+        # Here you would typically have a more sophisticated aggregation logic
+        summary = llm_execution.output_evidence[0].content.get('summary', 'N/A')
+        action = llm_execution.output_evidence[0].content.get('action', 'manual_review')
+        confidence = llm_execution.output_evidence[0].confidence
 
         return Decision(
-            summary=f"LLM Hypothesis: {llm_result.output.get('summary', 'N/A')}",
-            action_proposed=llm_result.output.get('action', 'manual_review'),
-            confidence=llm_result.confidence,
-            supporting_evidence=final_evidence
+            summary=f"LLM Hypothesis: {summary}",
+            action_proposed=action,
+            confidence=confidence,
+            supporting_evidence=all_evidence
         )
 
-    def _formulate_decision(self, final_results: Dict[str, SwarmResult]) -> Decision:
-        """Formulates a final decision based on the collected evidence."""
-        successful_results = [res for res in final_results.values() if res.is_successful()]
+    def _formulate_decision(self, successful_executions: List[AgentExecution]) -> Decision:
+        """Formulates a final decision from the evidence of successful executions."""
+        all_evidence = [ev for ex in successful_executions for ev in ex.output_evidence]
 
-        if not successful_results:
-            return Decision(
-                summary="Complete failure. No successful agent executions.",
-                action_proposed="manual_review",
-                confidence=0.0,
-                supporting_evidence=list(final_results.values())
-            )
+        if not all_evidence:
+            return Decision(summary="No evidence produced.", action_proposed="manual_review", confidence=0.0, supporting_evidence=[])
 
-        # Simple aggregation logic: average the confidence
-        # In a real system, this could be a more complex voting or weighting mechanism
-        avg_confidence = sum(r.confidence for r in successful_results) / len(successful_results)
+        # A more sophisticated model would weigh evidence based on agent reputation (confidence snapshots)
+        avg_confidence = sum(ev.confidence for ev in all_evidence) / len(all_evidence)
 
-        # For this example, we'll just summarize the outputs
-        summary = "; ".join([str(r.output) for r in successful_results])
+        # Simple summary for demonstration
+        summary = "; ".join([str(ev.content) for ev in all_evidence])
 
-        decision = Decision(
-            summary=f"Aggregated results: {summary}",
+        return Decision(
+            summary=f"Aggregated Evidence: {summary}",
             action_proposed="auto_remediate" if avg_confidence > 0.8 else "log_for_review",
             confidence=avg_confidence,
-            supporting_evidence=list(final_results.values())
+            supporting_evidence=all_evidence
         )
-
-        return decision
 
     def _request_human_review(self, decision: Decision) -> Decision:
         """Handles the human-in-the-loop governance step, processing a structured HumanDecision."""
