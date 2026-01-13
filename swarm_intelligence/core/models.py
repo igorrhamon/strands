@@ -123,9 +123,9 @@ class ConfidenceSnapshot:
     agent_id: str
     value: float
     source_event: str  # e.g., "time_decay", "human_override", "successful_outcome"
-    linked_decision_id: Optional[str] = None
+    sequence_id: int
     snapshot_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=datetime.utcnow) # For informational purposes only
 
 @dataclass
 class RetryAttempt:

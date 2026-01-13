@@ -12,7 +12,8 @@ from swarm_intelligence.core.models import (
 from swarm_intelligence.core.swarm import Agent, SwarmOrchestrator
 from swarm_intelligence.controller import SwarmController
 from swarm_intelligence.memory.neo4j_adapter import Neo4jAdapter
-from swarm_intelligence.policy.retry_policy import ExponentialBackoffPolicy, RetryContext
+from swarm_intelligence.policy.retry_policy import ExponentialBackoffPolicy
+from swarm_intelligence.policy.confidence_policy import DefaultConfidencePolicy
 from swarm_intelligence.services.confidence_service import ConfidenceService
 from swarm_intelligence.replay import ReplayEngine
 
@@ -90,7 +91,7 @@ async def main():
         confidence_service = ConfidenceService(neo4j)
         agents = [ThreatIntelAgent("threat_intel"), LogAnalysisAgent("log_analysis")]
         orchestrator = SwarmOrchestrator(agents)
-        controller = SwarmController(orchestrator, confidence_service)
+        controller = SwarmController(orchestrator, confidence_service, confidence_policy=DefaultConfidencePolicy())
         controller.register_human_hooks(expert_human_review)
 
         retry_policy = ExponentialBackoffPolicy(max_attempts=2, base_delay=0.1)
@@ -106,7 +107,7 @@ async def main():
 
         if decision.human_decision:
             outcome = OperationalOutcome(status="success")
-            neo4j.save_human_override(decision, decision.human_decision, outcome, plan, executions)
+            neo4j.save_human_override(decision, decision.human_decision, outcome)
             logging.info("Human override persisted.")
 
         logging.info("\n--- Initiating Deterministic Replay ---")

@@ -28,6 +28,11 @@ class Neo4jAdapter:
         with self._driver.session() as session:
             session.execute_write(lambda tx: tx.run(query, parameters))
 
+    def run_write_transaction(self, query: str, parameters: Dict[str, Any] = None) -> Any:
+        with self._driver.session() as session:
+            result = session.execute_write(lambda tx: tx.run(query, parameters).single())
+        return result
+
     def run_read_transaction(self, query: str, parameters: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         with self._driver.session() as session:
             result = session.execute_read(lambda tx: tx.run(query, parameters).data())
@@ -240,3 +245,34 @@ class Neo4jAdapter:
         }
         self.run_transaction(query, params)
         logging.info(f"Replay report {report.report_id} saved.")
+
+    def create_confidence_snapshot(self, agent_id: str, value: float, source_event: str, sequence_id: int) -> str:
+        """Creates a ConfidenceSnapshot node and returns its ID."""
+        query = """
+        MATCH (a:Agent {id: $agent_id})
+        CREATE (s:ConfidenceSnapshot {
+            id: randomUUID(),
+            value: $value,
+            source_event: $source_event,
+            sequence_id: $sequence_id,
+            timestamp: datetime()
+        })
+        CREATE (a)-[:HAS_CONFIDENCE]->(s)
+        RETURN s.id as snapshot_id
+        """
+        result = self.run_write_transaction(query, {
+            "agent_id": agent_id,
+            "value": value,
+            "source_event": source_event,
+            "sequence_id": sequence_id
+        })
+        return result["snapshot_id"]
+
+    def link_snapshot_to_cause(self, snapshot_id: str, cause_id: str, cause_type: str):
+        """Creates a [:CAUSED_BY] relationship from a snapshot to its cause."""
+        query = f"""
+        MATCH (s:ConfidenceSnapshot {{id: $snapshot_id}})
+        MATCH (c:{cause_type} {{id: $cause_id}})
+        CREATE (s)-[:CAUSED_BY]->(c)
+        """
+        self.run_transaction(query, {"snapshot_id": snapshot_id, "cause_id": cause_id})
