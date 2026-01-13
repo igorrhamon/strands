@@ -157,6 +157,7 @@ class Neo4jAdapter:
         WITH dec
         UNWIND $retries as retry_param
         MATCH (failed_exec:AgentExecution {id: retry_param.failed_execution_id})
+        MATCH (s:SwarmStep {id: retry_param.step_id})
         CREATE (ra:RetryAttempt {
             id: retry_param.attempt_id,
             attempt_number: retry_param.attempt_number,
@@ -165,6 +166,7 @@ class Neo4jAdapter:
             timestamp: datetime()
         })
         CREATE (failed_exec)-[:RETRIED_WITH]->(ra)
+        CREATE (ra)-[:USED_POLICY]->(s)
         """
 
         steps_params = [{
