@@ -1,5 +1,6 @@
 
 import logging
+import asyncio
 from typing import List, Dict, Optional, Callable
 from swarm_intelligence.core.models import (
     SwarmPlan,
@@ -11,6 +12,7 @@ from swarm_intelligence.core.models import (
     HumanDecision,
 )
 from swarm_intelligence.core.swarm import SwarmOrchestrator
+from swarm_intelligence.services.confidence_service import ConfidenceService
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -23,11 +25,11 @@ class SwarmController:
     def __init__(
         self,
         orchestrator: SwarmOrchestrator,
-        max_retries: int = 2,
+        confidence_service: ConfidenceService,
         llm_agent_id: Optional[str] = "llm_agent",
     ):
         self.orchestrator = orchestrator
-        self.max_retries = max_retries
+        self.confidence_service = confidence_service
         self.llm_agent_id = llm_agent_id
         self.human_review_hook: Optional[Callable[[Decision], HumanDecision]] = None
 
@@ -45,26 +47,20 @@ class SwarmController:
         run_history: Dict[str, List[SwarmResult]] = {step.step_id: [] for step in plan.steps}
         final_results: Dict[str, SwarmResult] = {}
 
-        current_steps = list(plan.steps)
+        steps_to_process = list(plan.steps)
 
-        for i in range(self.max_retries + 1):
-            logging.info(f"Execution Cycle {i+1}/{self.max_retries + 1}. Steps to run: {len(current_steps)}")
-
-            results = await self.orchestrator.execute_swarm(current_steps)
+        while steps_to_process:
+            results = await self.orchestrator.execute_swarm(steps_to_process)
 
             for res in results:
-                step = next((s for s in current_steps if s.agent_id == res.agent_id), None)
+                step = next((s for s in steps_to_process if s.agent_id == res.agent_id), None)
                 if step:
                     run_history[step.step_id].append(res)
 
-            needs_retry = self._evaluate_results(plan.steps, run_history, final_results)
+            steps_to_process = await self._evaluate_and_get_next_steps(plan.steps, run_history, final_results)
 
-            if not needs_retry:
-                logging.info("All mandatory steps successful and meet confidence thresholds.")
-                break
-
-            current_steps = needs_retry
-            logging.warning(f"Retrying {len(current_steps)} steps.")
+            if steps_to_process:
+                logging.info(f"{len(steps_to_process)} steps require retries. Applying policies.")
 
         # If after all retries, mandatory steps are still not met, escalate
         decision: Decision
@@ -75,25 +71,23 @@ class SwarmController:
             decision = self._formulate_decision(final_results)
 
         return self._request_human_review(decision), run_history
-
-    def _evaluate_results(
+    async def _evaluate_and_get_next_steps(
         self,
         all_plan_steps: List[SwarmStep],
         run_history: Dict[str, List[SwarmResult]],
         final_results: Dict[str, SwarmResult],
     ) -> List[SwarmStep]:
         """
-        Evaluates the latest results and determines which steps need a retry.
-        Populates final_results with successful outcomes.
+        Evaluates results, applies retry policies, and returns the next batch of steps to execute.
         """
         steps_to_retry = []
+        max_delay = 0.0
 
         for step in all_plan_steps:
             if step.step_id in final_results:
-                continue  # Already have a passing result for this step
+                continue
 
             latest_result = run_history[step.step_id][-1] if run_history[step.step_id] else None
-
             if not latest_result:
                 continue
 
@@ -102,14 +96,25 @@ class SwarmController:
 
             if is_successful and meets_confidence:
                 final_results[step.step_id] = latest_result
-                logging.info(f"Step {step.step_id} ({step.agent_id}) succeeded and met confidence.")
-            elif step.mandatory:
-                if step.retryable and len(run_history[step.step_id]) <= self.max_retries:
+                logging.info(f"Step {step.step_id} ({step.agent_id}) successful.")
+            elif step.mandatory and step.retry_policy:
+                attempt = len(run_history[step.step_id])
+                error = Exception(latest_result.error) if latest_result.error else None
+
+                if step.retry_policy.should_retry(error, attempt):
+                    delay = step.retry_policy.next_delay(attempt)
+                    max_delay = max(max_delay, delay)
                     steps_to_retry.append(step)
-                    logging.warning(f"Mandatory step {step.step_id} ({step.agent_id}) failed or confidence too low. Scheduling retry.")
+                    logging.warning(f"Step {step.step_id} failed. Will retry after a delay.")
                 else:
-                    final_results[step.step_id] = latest_result # Failed permanently
-                    logging.error(f"Mandatory step {step.step_id} ({step.agent_id}) failed and is not retryable or exceeded retries.")
+                    final_results[step.step_id] = latest_result
+                    logging.error(f"Step {step.step_id} failed and exhausted its retry policy.")
+            else:
+                 final_results[step.step_id] = latest_result
+                 logging.error(f"Mandatory step {step.step_id} failed with no retry policy.")
+
+        if max_delay > 0:
+            await asyncio.sleep(max_delay)
 
         return steps_to_retry
 

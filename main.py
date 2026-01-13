@@ -1,192 +1,133 @@
 
 import asyncio
 import logging
-import random
 from typing import Dict, Any, List
 
+# Core Models and Components
 from swarm_intelligence.core.models import (
-    SwarmResult,
-    EvidenceType,
-    Alert,
-    SwarmPlan,
-    SwarmStep,
-    Decision,
-    HumanAction,
-    HumanDecision,
-    OperationalOutcome,
+    SwarmResult, EvidenceType, Alert, SwarmPlan, SwarmStep,
+    Decision, HumanAction, HumanDecision, OperationalOutcome
 )
 from swarm_intelligence.core.swarm import Agent, SwarmOrchestrator
 from swarm_intelligence.controller import SwarmController
+
+# Expert-Level Frameworks
 from swarm_intelligence.memory.neo4j_adapter import Neo4jAdapter
+from swarm_intelligence.policy.retry_policy import ExponentialBackoffRetryPolicy
+from swarm_intelligence.services.confidence_service import ConfidenceService
+from swarm_intelligence.replay import ReplayEngine
 
 # --- 1. Mock Agent Implementations ---
 
 class MetricsAgent(Agent):
-    """A deterministic agent that usually succeeds with high confidence."""
+    """A deterministic agent that succeeds reliably."""
     async def execute(self, params: Dict[str, Any]) -> SwarmResult:
-        await asyncio.sleep(0.1) # Simulate I/O
-        return SwarmResult(
-            agent_id=self.agent_id,
-            output={"cpu_usage": 0.95, "status": "critical"},
-            confidence=0.98,
-            actionable=True,
-            evidence_type=EvidenceType.METRICS,
-        )
+        await asyncio.sleep(0.05)
+        return SwarmResult(agent_id=self.agent_id, output={"cpu": 0.8}, confidence=0.99, actionable=True, evidence_type=EvidenceType.METRICS)
 
-# Global state to simulate transient failure
 semantic_agent_attempts = 0
-
 class SemanticAnalysisAgent(Agent):
-    """An agent that might fail on the first try but succeeds on retry."""
+    """An agent designed to fail twice before succeeding, to test retry policies."""
     async def execute(self, params: Dict[str, Any]) -> SwarmResult:
         global semantic_agent_attempts
         semantic_agent_attempts += 1
-
-        await asyncio.sleep(0.2) # Simulate I/O
-
-        if semantic_agent_attempts <= 1:
-            return SwarmResult(
-                agent_id=self.agent_id,
-                output=None,
-                confidence=0.2,
-                actionable=False,
-                evidence_type=EvidenceType.SEMANTIC,
-                error="Failed to connect to embedding model."
-            )
-
-        return SwarmResult(
-            agent_id=self.agent_id,
-            output={"threat_level": "high", "entities": ["login_service"]},
-            confidence=0.85,
-            actionable=True,
-            evidence_type=EvidenceType.SEMANTIC,
-        )
-
-class RuleValidationAgent(Agent):
-    """An agent that consistently fails, forcing an escalation."""
-    async def execute(self, params: Dict[str, Any]) -> SwarmResult:
-        await asyncio.sleep(0.1) # Simulate I/O
-        return SwarmResult(
-            agent_id=self.agent_id,
-            output={"reason": "Rule 'critical_cpu_and_high_threat' is misconfigured."},
-            confidence=0.4,
-            actionable=False,
-            evidence_type=EvidenceType.RULES,
-            error="Rule evaluation failed."
-        )
+        await asyncio.sleep(0.1)
+        if semantic_agent_attempts <= 2:
+            return SwarmResult(agent_id=self.agent_id, output=None, confidence=0.1, actionable=False, evidence_type=EvidenceType.SEMANTIC, error="API connection timed out")
+        return SwarmResult(agent_id=self.agent_id, output={"threat_signature": "SIG-001"}, confidence=0.8, actionable=True, evidence_type=EvidenceType.SEMANTIC)
 
 class LLMAgent(Agent):
-    """A mock LLM agent that provides a hypothesis when deterministic methods fail."""
+    """A mock LLM agent for hypothesis generation."""
     async def execute(self, params: Dict[str, Any]) -> SwarmResult:
-        await asyncio.sleep(0.5) # Simulate a slower LLM call
+        await asyncio.sleep(0.2)
+        return SwarmResult(agent_id=self.agent_id, output={"summary": "Likely crypto-mining activity.", "action": "isolate_and_scan"}, confidence=0.7, actionable=True, evidence_type=EvidenceType.HYPOTHESIS)
 
-        objective = params.get("objective")
-        failed_steps = params.get("failed_steps")
-
-        return SwarmResult(
-            agent_id=self.agent_id,
-            output={
-                "summary": f"Based on the failure of {len(failed_steps)} agents, the likely root cause is a cascading failure originating from the login service.",
-                "action": "isolate_login_service_and_reboot"
-            },
-            confidence=0.75, # LLMs provide hypotheses, so confidence is not 1.0
-            actionable=True,
-            evidence_type=EvidenceType.HYPOTHESIS,
-        )
-
-# --- 2. Human-in-the-Loop Hook Implementations ---
+# --- 2. Human-in-the-Loop Hook ---
 
 def human_review_decision(decision: Decision) -> HumanDecision:
-    """
-    Simulates a human expert reviewing the swarm's decision.
-    In this scenario, the human disagrees and provides an override.
-    """
+    """Simulates a human expert overriding the swarm's decision."""
     logging.info("--- HUMAN REVIEW REQUIRED ---")
     logging.info(f"Swarm's Proposed Action: {decision.action_proposed}")
-
-    # Simulate a human deciding the swarm's action is too risky
-    if "isolate" in decision.action_proposed:
-        logging.warning("Human disagrees with the proposed action. Providing an override.")
-        return HumanDecision(
-            action=HumanAction.OVERRIDE,
-            author="senior_engineer_jane",
-            override_reason="Isolating the service is too disruptive during peak hours. A rolling restart is safer.",
-            overridden_action_proposed="rolling_restart_login_service",
-            domain_expertise="SRE"
-        )
-
-    logging.info("Human agrees with the proposed action.")
-    return HumanDecision(action=HumanAction.ACCEPT, author="operator_john")
-
+    logging.warning("Human disagrees. Overriding with a safer, more informed action.")
+    return HumanDecision(
+        action=HumanAction.OVERRIDE,
+        author="expert_analyst_carlos",
+        override_reason="Isolating is too slow. The signature matches a known threat that requires immediate kernel-level quarantine.",
+        overridden_action_proposed="kernel_quarantine_and_reboot"
+    )
 
 # --- 3. End-to-End Execution Flow ---
 
 async def main():
-    """Main function to run the end-to-end example."""
-    logging.info("--- Starting Governed Cognitive Swarm Example ---")
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    logging.info("--- Starting Expert-Level Swarm Intelligence System ---")
 
     # --- Setup ---
-    agents = [
-        MetricsAgent("metrics_agent"),
-        SemanticAnalysisAgent("semantic_agent"),
-        RuleValidationAgent("rules_agent"),
-        LLMAgent("llm_agent"),
-    ]
-    orchestrator = SwarmOrchestrator(agents)
-    controller = SwarmController(orchestrator, max_retries=1, llm_agent_id="llm_agent")
+    # NOTE: In production, these credentials would come from a secure config.
+    neo4j_adapter = Neo4jAdapter("bolt://localhost:7687", "neo4j", "password")
+    neo4j_adapter.setup_schema()
 
-    # Register the human governance hooks
+    confidence_service = ConfidenceService(neo4j_adapter)
+
+    agents = [MetricsAgent("metrics_agent"), SemanticAnalysisAgent("semantic_agent"), LLMAgent("llm_agent")]
+    orchestrator = SwarmOrchestrator(agents)
+    controller = SwarmController(orchestrator, confidence_service, llm_agent_id="llm_agent")
     controller.register_human_hooks(human_review_decision)
 
-    # --- Data ---
-    alert = Alert(alert_id="alert-12345", data={"source_ip": "192.168.1.100"})
+    # --- Define Plan with Policies ---
+    alert = Alert(alert_id="alert-777", data={"hostname": "web-prod-1"})
 
-    # Note: The 'rules_agent' is mandatory and will fail, triggering LLM escalation.
-    # The 'semantic_agent' will fail once and then succeed on retry.
+    # The semantic_agent will use a retry policy. It will fail twice then succeed.
+    retry_policy = ExponentialBackoffRetryPolicy(max_retries=3, base_delay=0.1)
+
     plan = SwarmPlan(
-        objective="Investigate and respond to critical CPU alert on login service.",
+        objective="Investigate and neutralize potential threat on web-prod-1.",
         steps=[
-            SwarmStep(agent_id="metrics_agent", mandatory=True, min_confidence=0.9),
-            SwarmStep(agent_id="semantic_agent", mandatory=True, retryable=True, min_confidence=0.8),
-            SwarmStep(agent_id="rules_agent", mandatory=True, retryable=False),
+            SwarmStep(agent_id="metrics_agent", mandatory=True),
+            SwarmStep(agent_id="semantic_agent", mandatory=True, retry_policy=retry_policy, min_confidence=0.7),
+            # No LLM in the initial plan, it's for escalation only.
         ]
     )
 
     # --- Execution ---
-    logging.info(f"Executing swarm plan for objective: {plan.objective}")
     final_decision, run_history = await controller.aexecute_plan(plan, alert)
 
-    # --- Output ---
-    logging.info("--- Final Decision ---")
-    logging.info(f"Swarm Decision ID: {final_decision.decision_id}")
+    # --- Governance and Learning ---
     if final_decision.human_decision:
         hd = final_decision.human_decision
-        logging.info(f"Human Action: {hd.action.value}")
-        logging.info(f"Human Author: {hd.author} ({hd.domain_expertise})")
         if hd.action == HumanAction.OVERRIDE:
-            logging.info(f"  Overridden Action: {hd.overridden_action_proposed}")
-            logging.info(f"  Reason: {hd.override_reason}")
+            logging.info("Applying confidence penalty due to human override.")
+            for evidence in final_decision.supporting_evidence:
+                confidence_service.penalize_agent_after_override(evidence.agent_id)
 
-    # The final action to take is the human's override, if it exists
-    authoritative_action = (final_decision.human_decision.overridden_action_proposed
-                            if final_decision.human_decision and final_decision.human_decision.action == HumanAction.OVERRIDE
-                            else final_decision.action_proposed)
-    logging.info(f"\nAuthoritative Action to Execute: {authoritative_action}")
+    # --- Persistence ---
+    logging.info("\n--- Persisting Causal Graph to Neo4j ---")
+    neo4j_adapter.save_swarm_run(plan, alert, run_history, final_decision)
 
+    if final_decision.human_decision:
+        outcome = OperationalOutcome(status="success", impact_level="low", resolution_time_seconds=120)
+        neo4j_adapter.save_human_override(final_decision, final_decision.human_decision, outcome)
 
-    # --- 4. Neo4j Persistence (Conceptual) ---
-    neo4j = Neo4jAdapter("bolt://localhost:7687", "neo4j", "password")
-    logging.info("\n--- Persisting Swarm Run to Neo4j (Stubbed) ---")
-    neo4j.save_swarm_run(alert, plan, final_decision, run_history)
+    # --- Replay for Audit ---
+    logging.info("\n--- Initiating Decision Replay for Audit ---")
+    replay_engine = ReplayEngine(neo4j_adapter)
+    # In a real scenario, you would pass a controller with updated policies/agents
+    replay_report = await replay_engine.replay_run(plan.plan_id, controller)
 
-    if final_decision.human_decision and final_decision.human_decision.action == HumanAction.OVERRIDE:
-        logging.info("\n--- Persisting Human Override to Neo4j (Stubbed) ---")
-        # Simulate an outcome after the human's action was taken
-        outcome = OperationalOutcome(status="success", resolution_time_seconds=300.5)
-        neo4j.save_human_override(final_decision, final_decision.human_decision, outcome)
+    logging.info("--- Replay Report ---")
+    logging.info(f"Original Decision: {replay_report.original_decision}")
+    logging.info(f"Replayed Action: {replay_report.replayed_decision.action_proposed}")
+    logging.info(f"Confidence Delta: {replay_report.confidence_delta:.2f}")
+    for divergence in replay_report.divergences:
+        logging.warning(f"Divergence Found: {divergence}")
 
-    neo4j.close()
-
+    # --- Cleanup ---
+    neo4j_adapter.close()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # A running Neo4j instance is required for this example.
+    # e.g., via Docker: docker run --rm -p 7687:7687 -p 7474:7474 -e NEO4J_AUTH=neo4j/password neo4j:latest
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        logging.error(f"An error occurred: {e}. Is Neo4j running and accessible?")

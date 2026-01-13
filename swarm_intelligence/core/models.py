@@ -4,6 +4,8 @@ from typing import List, Dict, Any, Optional
 from enum import Enum
 import uuid
 from datetime import datetime
+from swarm_intelligence.policy.retry_policy import RetryPolicy
+
 class EvidenceType(Enum):
     """Enumeration for the types of evidence that can be produced."""
     RAW_DATA = "raw_data"
@@ -39,9 +41,9 @@ class SwarmStep:
     agent_id: str
     step_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     mandatory: bool = True
-    retryable: bool = True
     min_confidence: float = 0.7
     parameters: Dict[str, Any] = field(default_factory=dict)
+    retry_policy: Optional[RetryPolicy] = None
 
 @dataclass
 class SwarmPlan:
