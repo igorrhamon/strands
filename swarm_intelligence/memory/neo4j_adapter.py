@@ -6,7 +6,7 @@ from typing import Dict, Any, List
 
 from swarm_intelligence.core.models import (
     Alert, SwarmPlan, SwarmStep, SwarmResult, Decision,
-    HumanDecision, OperationalOutcome, EvidenceType
+    HumanDecision, OperationalOutcome, EvidenceType, RetryAttempt, ReplayReport
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -94,13 +94,15 @@ class Neo4jAdapter:
             "CREATE CONSTRAINT IF NOT EXISTS FOR (o:OperationalOutcome) REQUIRE o.id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (dc:DecisionContext) REQUIRE dc.id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (cs:ConfidenceSnapshot) REQUIRE cs.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (ra:RetryAttempt) REQUIRE ra.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (rr:ReplayReport) REQUIRE rr.id IS UNIQUE",
         ]
         for query in schema_queries:
             self.run_transaction(query)
         logging.info("Neo4j schema constraints ensured.")
 
-    def save_swarm_run(self, plan: SwarmPlan, alert: Alert, run_history: Dict[str, List[SwarmResult]], decision: Decision):
-        """Saves the entire swarm run in a single atomic transaction."""
+    def save_swarm_run(self, plan: SwarmPlan, alert: Alert, run_history: Dict[str, List[SwarmResult]], decision: Decision, retry_attempts: List[RetryAttempt]):
+        """Saves the entire swarm run, including retry attempts, in a single atomic transaction."""
 
         steps_params = []
         for step in plan.steps:
@@ -119,6 +121,8 @@ class Neo4jAdapter:
                 "policy": json.dumps(step.retry_policy.to_dict() if step.retry_policy else {}),
                 "results": results_params
             })
+
+        retry_params = [ra.__dict__ for ra in retry_attempts]
 
         query = """
         // 1. Alert and SwarmRun
@@ -161,6 +165,19 @@ class Neo4jAdapter:
             rel.confidence_at_time = res.confidence,
             rel.role = 'direct_evidence',
             rel.timestamp = datetime()
+
+        // 5. Retry Attempts
+        WITH d
+        UNWIND $retry_attempts as attempt_data
+        MATCH (s:SwarmStep {id: attempt_data.step_id})
+        CREATE (ra:RetryAttempt {
+            id: attempt_data.attempt_id,
+            attempt_number: attempt_data.attempt_number,
+            delay_seconds: attempt_data.delay_seconds,
+            reason: attempt_data.reason,
+            timestamp: datetime()
+        })
+        CREATE (s)-[:HAD_RETRY]->(ra)
         """
 
         influencing_result_ids = []
@@ -178,7 +195,8 @@ class Neo4jAdapter:
             "replayable": decision.context.replayable, "decision_id": decision.decision_id,
             "summary": decision.summary, "action_proposed": decision.action_proposed,
             "confidence": decision.confidence, "steps": steps_params,
-            "influencing_results": influencing_result_ids
+            "influencing_results": influencing_result_ids,
+            "retry_attempts": retry_params
         }
 
         self.run_transaction(query, params)
@@ -224,3 +242,27 @@ class Neo4jAdapter:
 
         self.run_transaction(query, params)
         logging.info(f"Human override by {human_decision.author} and its outcome have been saved atomically.")
+
+    def save_replay_report(self, report: ReplayReport):
+        """Saves a replay report to the graph, linking it to the involved decisions."""
+        query = """
+        MATCH (orig_d:Decision {id: $original_id})
+        MATCH (replay_d:Decision {id: $replayed_id})
+        CREATE (rr:ReplayReport {
+            id: $report_id,
+            confidence_delta: $delta,
+            divergences: $divergences,
+            timestamp: datetime()
+        })
+        CREATE (rr)-[:REPLAY_OF]->(orig_d)
+        CREATE (rr)-[:GENERATED]->(replay_d)
+        """
+        params = {
+            "original_id": report.original_decision_id,
+            "replayed_id": report.replayed_decision_id,
+            "report_id": report.report_id,
+            "delta": report.confidence_delta,
+            "divergences": report.causal_divergences
+        }
+        self.run_transaction(query, params)
+        logging.info(f"Replay report {report.report_id} saved.")

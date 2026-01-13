@@ -6,6 +6,7 @@ from typing import Dict, Any
 class RetryPolicy(ABC):
     """
     Abstract base class for serializable and versionable retry policies.
+    This defines the contract for deciding if and when a step should be retried.
     """
     version: str = "1.0"
 

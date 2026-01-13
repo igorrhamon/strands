@@ -11,6 +11,7 @@ from swarm_intelligence.core.models import (
     Alert,
     HumanDecision,
     HumanAction,
+    RetryAttempt,
 )
 from swarm_intelligence.core.swarm import SwarmOrchestrator
 from swarm_intelligence.services.confidence_service import ConfidenceService
@@ -50,14 +51,19 @@ class SwarmController:
         """Registers a single, comprehensive callback for human review."""
         self.human_review_hook = review_hook
 
-    async def aexecute_plan(self, plan: SwarmPlan, alert: Alert) -> (Decision, Dict[str, List[SwarmResult]]):
+    async def aexecute_plan(self, plan: SwarmPlan, alert: Alert) -> (Decision, Dict[str, List[SwarmResult]], List[RetryAttempt]):
         """
         Executes a swarm plan, evaluates results, performs retries,
         and formulates a final decision.
 
-        Returns a tuple of (Decision, run_history).
+        Returns a tuple of (Decision, run_history, retry_attempts).
         """
+        # Apply time decay to all participating agents before execution
+        for step in plan.steps:
+            self.confidence_service.apply_time_decay(step.agent_id)
+
         run_history: Dict[str, List[SwarmResult]] = {step.step_id: [] for step in plan.steps}
+        all_retry_attempts: List[RetryAttempt] = []
         final_results: Dict[str, SwarmResult] = {}
 
         steps_to_process = list(plan.steps)
@@ -73,7 +79,8 @@ class SwarmController:
                 if step:
                     run_history[step.step_id].append(res)
 
-            steps_to_process = await self._evaluate_and_get_next_steps(plan.steps, run_history, final_results)
+            steps_to_process, new_retries = await self._evaluate_and_get_next_steps(plan.steps, run_history, final_results)
+            all_retry_attempts.extend(new_retries)
 
             if steps_to_process:
                 logging.info(f"{len(steps_to_process)} steps require retries. Applying policies.")
@@ -86,17 +93,19 @@ class SwarmController:
         else:
             decision = self._formulate_decision(final_results)
 
-        return self._request_human_review(decision), run_history
+        return self._request_human_review(decision), run_history, all_retry_attempts
     async def _evaluate_and_get_next_steps(
         self,
         all_plan_steps: List[SwarmStep],
         run_history: Dict[str, List[SwarmResult]],
         final_results: Dict[str, SwarmResult],
-    ) -> List[SwarmStep]:
+    ) -> (List[SwarmStep], List[RetryAttempt]):
         """
-        Evaluates results, applies retry policies, and returns the next batch of steps to execute.
+        Evaluates results, applies retry policies, and returns the next batch of steps to execute
+        along with a list of auditable retry attempts.
         """
         steps_to_retry = []
+        retry_attempts = []
         max_delay = 0.0
 
         for step in all_plan_steps:
@@ -121,7 +130,13 @@ class SwarmController:
                     delay = step.retry_policy.next_delay(attempt)
                     max_delay = max(max_delay, delay)
                     steps_to_retry.append(step)
-                    logging.warning(f"Step {step.step_id} failed. Will retry after a delay.")
+                    retry_attempts.append(RetryAttempt(
+                        step_id=step.step_id,
+                        attempt_number=attempt,
+                        delay_seconds=delay,
+                        reason=str(error) if error else "Confidence below threshold"
+                    ))
+                    logging.warning(f"Step {step.step_id} failed. Will retry after {delay:.2f}s.")
                 else:
                     final_results[step.step_id] = latest_result
                     logging.error(f"Step {step.step_id} failed and exhausted its retry policy.")
@@ -132,7 +147,7 @@ class SwarmController:
         if max_delay > 0:
             await asyncio.sleep(max_delay)
 
-        return steps_to_retry
+        return steps_to_retry, retry_attempts
 
     def _still_requires_action(self, all_plan_steps: List[SwarmStep], final_results: Dict[str, SwarmResult]) -> bool:
         """Checks if any mandatory steps have ultimately failed."""
@@ -213,7 +228,7 @@ class SwarmController:
 
             if human_decision.action == HumanAction.OVERRIDE:
                 for evidence in decision.supporting_evidence:
-                    self.confidence_service.penalize_for_override(evidence.agent_id)
+                    self.confidence_service.penalize_for_override(evidence.agent_id, decision.decision_id)
         else:
             logging.info("No human review hook registered. Proceeding without human governance.")
 

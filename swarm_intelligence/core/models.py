@@ -9,6 +9,7 @@ from swarm_intelligence.policy.retry_policy import RetryPolicy
 # Forward declaration for type hinting
 class DecisionContext: pass
 class ConfidenceSnapshot: pass
+class RetryAttempt: pass
 
 class EvidenceType(Enum):
     """Enumeration for the types of evidence that can be produced."""
@@ -104,9 +105,29 @@ class OperationalOutcome:
 
 @dataclass
 class ConfidenceSnapshot:
-    """Records a point-in-time confidence value for an agent, enabling traceability."""
+    """Records an immutable, point-in-time confidence value for an agent."""
     agent_id: str
     value: float
-    reason: str  # e.g., "initial", "human_override_penalty", "successful_outcome_reinforcement"
+    source_event: str  # e.g., "time_decay", "human_override", "successful_outcome"
+    linked_decision_id: Optional[str] = None
     snapshot_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+
+@dataclass
+class RetryAttempt:
+    """Represents a single, auditable retry event."""
+    step_id: str
+    attempt_number: int
+    delay_seconds: float
+    reason: str
+    attempt_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+
+@dataclass
+class ReplayReport:
+    """A persistable report detailing the outcome of a decision replay for audit."""
+    original_decision_id: str
+    replayed_decision_id: str
+    report_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    causal_divergences: List[str] = field(default_factory=list)
+    confidence_delta: float = 0.0
     timestamp: datetime = field(default_factory=datetime.utcnow)
