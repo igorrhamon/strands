@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 from enum import Enum
 import uuid
-
+from datetime import datetime
 class EvidenceType(Enum):
     """Enumeration for the types of evidence that can be produced."""
     RAW_DATA = "raw_data"
@@ -12,6 +12,12 @@ class EvidenceType(Enum):
     RULES = "rules"
     HYPOTHESIS = "hypothesis"
     HUMAN_VALIDATED = "human_validated"
+
+class HumanAction(Enum):
+    """Enumeration for the actions a human can take on a swarm's decision."""
+    ACCEPT = "accept"
+    REJECT = "reject"
+    OVERRIDE = "override"
 
 @dataclass
 class SwarmResult:
@@ -52,10 +58,31 @@ class Decision:
     confidence: float
     supporting_evidence: List[SwarmResult]
     decision_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    is_human_confirmed: bool = False
+    human_decision: Optional['HumanDecision'] = None
 
 @dataclass
 class Alert:
     """Represents an incoming event that may trigger a swarm run."""
     alert_id: str
     data: Dict[str, Any] = field(default_factory=dict)
+
+@dataclass
+class HumanDecision:
+    """Represents a decision made by a human reviewer, potentially overriding the swarm."""
+    action: HumanAction
+    author: str
+    override_reason: Optional[str] = None
+    overridden_action_proposed: Optional[str] = None
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+    domain_expertise: str = "default_expert"
+    human_decision_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+
+
+@dataclass
+class OperationalOutcome:
+    """Represents the final, real-world outcome after an action is taken."""
+    status: str  # e.g., "success", "partial_success", "failure"
+    impact_level: str = "not_assessed"  # e.g., "low", "medium", "high"
+    resolution_time_seconds: Optional[float] = None
+    details: Optional[str] = None
+    outcome_id: str = field(default_factory=lambda: str(uuid.uuid4()))

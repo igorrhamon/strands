@@ -11,6 +11,9 @@ from swarm_intelligence.core.models import (
     SwarmPlan,
     SwarmStep,
     Decision,
+    HumanAction,
+    HumanDecision,
+    OperationalOutcome,
 )
 from swarm_intelligence.core.swarm import Agent, SwarmOrchestrator
 from swarm_intelligence.controller import SwarmController
@@ -93,23 +96,27 @@ class LLMAgent(Agent):
 
 # --- 2. Human-in-the-Loop Hook Implementations ---
 
-def human_confirm_decision(decision: Decision) -> bool:
-    """Simulates a human confirming a decision."""
-    logging.info("--- HUMAN CONFIRMATION REQUIRED ---")
-    logging.info(f"Summary: {decision.summary}")
-    logging.info(f"Proposed Action: {decision.action_proposed}")
-    logging.info(f"Confidence: {decision.confidence:.2f}")
-    # In a real system, this would involve a UI or a chat message.
-    # For this example, we'll auto-approve.
-    user_input = "yes"
-    logging.info(f"Human response: {user_input}")
-    return user_input.lower() == "yes"
+def human_review_decision(decision: Decision) -> HumanDecision:
+    """
+    Simulates a human expert reviewing the swarm's decision.
+    In this scenario, the human disagrees and provides an override.
+    """
+    logging.info("--- HUMAN REVIEW REQUIRED ---")
+    logging.info(f"Swarm's Proposed Action: {decision.action_proposed}")
 
-def human_reject_decision(decision: Decision):
-    """Simulates a human rejecting a decision."""
-    logging.error("--- HUMAN REJECTED DECISION ---")
-    logging.error(f"Reason for rejection can be logged here.")
-    # This could trigger an alert to a human operator.
+    # Simulate a human deciding the swarm's action is too risky
+    if "isolate" in decision.action_proposed:
+        logging.warning("Human disagrees with the proposed action. Providing an override.")
+        return HumanDecision(
+            action=HumanAction.OVERRIDE,
+            author="senior_engineer_jane",
+            override_reason="Isolating the service is too disruptive during peak hours. A rolling restart is safer.",
+            overridden_action_proposed="rolling_restart_login_service",
+            domain_expertise="SRE"
+        )
+
+    logging.info("Human agrees with the proposed action.")
+    return HumanDecision(action=HumanAction.ACCEPT, author="operator_john")
 
 
 # --- 3. End-to-End Execution Flow ---
@@ -129,7 +136,7 @@ async def main():
     controller = SwarmController(orchestrator, max_retries=1, llm_agent_id="llm_agent")
 
     # Register the human governance hooks
-    controller.register_human_hooks(human_confirm_decision, human_reject_decision)
+    controller.register_human_hooks(human_review_decision)
 
     # --- Data ---
     alert = Alert(alert_id="alert-12345", data={"source_ip": "192.168.1.100"})
@@ -151,30 +158,34 @@ async def main():
 
     # --- Output ---
     logging.info("--- Final Decision ---")
-    logging.info(f"ID: {final_decision.decision_id}")
-    logging.info(f"Summary: {final_decision.summary}")
-    logging.info(f"Action Proposed: {final_decision.action_proposed}")
-    logging.info(f"Confidence: {final_decision.confidence:.2f}")
-    logging.info(f"Is Human Confirmed: {final_decision.is_human_confirmed}")
-    logging.info("Supporting Evidence:")
-    for evidence in final_decision.supporting_evidence:
-        logging.info(f"  - Agent: {evidence.agent_id}, Success: {evidence.is_successful()}, Confidence: {evidence.confidence:.2f}, Type: {evidence.evidence_type.value}")
+    logging.info(f"Swarm Decision ID: {final_decision.decision_id}")
+    if final_decision.human_decision:
+        hd = final_decision.human_decision
+        logging.info(f"Human Action: {hd.action.value}")
+        logging.info(f"Human Author: {hd.author} ({hd.domain_expertise})")
+        if hd.action == HumanAction.OVERRIDE:
+            logging.info(f"  Overridden Action: {hd.overridden_action_proposed}")
+            logging.info(f"  Reason: {hd.override_reason}")
+
+    # The final action to take is the human's override, if it exists
+    authoritative_action = (final_decision.human_decision.overridden_action_proposed
+                            if final_decision.human_decision and final_decision.human_decision.action == HumanAction.OVERRIDE
+                            else final_decision.action_proposed)
+    logging.info(f"\nAuthoritative Action to Execute: {authoritative_action}")
 
 
     # --- 4. Neo4j Persistence (Conceptual) ---
-    if final_decision.is_human_confirmed:
-        logging.info("\n--- Persisting to Neo4j (Stubbed) ---")
-        neo4j = Neo4jAdapter("bolt://localhost:7687", "neo4j", "password")
+    neo4j = Neo4jAdapter("bolt://localhost:7687", "neo4j", "password")
+    logging.info("\n--- Persisting Swarm Run to Neo4j (Stubbed) ---")
+    neo4j.save_swarm_run(alert, plan, final_decision, run_history)
 
-        # Get and print schema
-        schema = neo4j.get_schema_constraints()
-        logging.info("Neo4j Schema would be applied:\n" + schema)
+    if final_decision.human_decision and final_decision.human_decision.action == HumanAction.OVERRIDE:
+        logging.info("\n--- Persisting Human Override to Neo4j (Stubbed) ---")
+        # Simulate an outcome after the human's action was taken
+        outcome = OperationalOutcome(status="success", resolution_time_seconds=300.5)
+        neo4j.save_human_override(final_decision, final_decision.human_decision, outcome)
 
-        # Save the run
-        neo4j.save_swarm_run(alert, plan, final_decision, run_history)
-        neo4j.close()
-    else:
-        logging.warning("\n--- Decision not confirmed. Skipping persistence. ---")
+    neo4j.close()
 
 
 if __name__ == "__main__":

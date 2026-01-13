@@ -7,6 +7,8 @@ from swarm_intelligence.core.models import (
     SwarmStep,
     SwarmResult,
     Decision,
+    HumanDecision,
+    OperationalOutcome,
 )
 
 # Configure logging
@@ -53,11 +55,59 @@ class Neo4jAdapter:
         CREATE CONSTRAINT ON (ss:SwarmStep) ASSERT ss.step_id IS UNIQUE;
         CREATE CONSTRAINT ON (ae:AgentExecution) ASSERT ae.execution_id IS UNIQUE;
         CREATE CONSTRAINT ON (d:Decision) ASSERT d.decision_id IS UNIQUE;
+        CREATE CONSTRAINT ON (hd:HumanDecision) ASSERT hd.human_decision_id IS UNIQUE;
+        CREATE CONSTRAINT ON (oo:OperationalOutcome) ASSERT oo.outcome_id IS UNIQUE;
+        CREATE CONSTRAINT ON (or:OverrideReason) ASSERT or.text IS UNIQUE; // Natural key for reasons
 
         // Indexes for faster lookups on non-unique properties
-        CREATE INDEX ON (e:Evidence) (evidence_type);
-        CREATE INDEX ON (ae:AgentExecution) (agent_id);
+        CREATE INDEX ON (e:Evidence) (e.evidence_type);
+        CREATE INDEX ON (ae:AgentExecution) (ae.agent_id);
+        CREATE INDEX ON (hd:HumanDecision) (hd.author);
         """
+    def save_human_override(self, swarm_decision: Decision, human_decision: HumanDecision, outcome: OperationalOutcome):
+        """Saves the human override and its outcome to the graph."""
+        if not human_decision.override_reason:
+            logging.warning("No override reason provided. Skipping reason linkage.")
+            return
+
+        self._execute_query(
+            """
+            MATCH (sd:Decision {decision_id: $swarm_decision_id})
+            MERGE (hd:HumanDecision {human_decision_id: $hd_id})
+            ON CREATE SET
+                hd.author = $author,
+                hd.action = $action,
+                hd.timestamp = $timestamp,
+                hd.domain_expertise = $domain_expertise
+
+            MERGE (hd)-[:OVERRIDES]->(sd)
+
+            MERGE (or:OverrideReason {text: $reason})
+            MERGE (hd)-[:JUSTIFIED_BY]->(or)
+
+            MERGE (oo:OperationalOutcome {outcome_id: $outcome_id})
+            ON CREATE SET
+                oo.status = $status,
+                oo.impact_level = $impact_level,
+                oo.resolution_time_seconds = $resolution_time
+
+            MERGE (hd)-[:RESULTED_IN]->(oo)
+            """,
+            parameters={
+                "swarm_decision_id": swarm_decision.decision_id,
+                "hd_id": human_decision.human_decision_id,
+                "author": human_decision.author,
+                "action": human_decision.action.value,
+                "timestamp": str(human_decision.timestamp),
+                "domain_expertise": human_decision.domain_expertise,
+                "reason": human_decision.override_reason,
+                "outcome_id": outcome.outcome_id,
+                "status": outcome.status,
+                "impact_level": outcome.impact_level,
+                "resolution_time": outcome.resolution_time_seconds,
+            },
+        )
+        logging.info(f"Human override by {human_decision.author} saved to Neo4j (stubbed).")
 
     def save_swarm_run(
         self,
@@ -131,6 +181,7 @@ class Neo4jAdapter:
                 )
 
         # 3. Create Decision and Evidence nodes and link them
+        human_action = decision.human_decision.action.value if decision.human_decision else None
         self._execute_query(
             """
             MATCH (sr:SwarmRun {run_id: $run_id})
@@ -139,7 +190,7 @@ class Neo4jAdapter:
                 d.summary = $summary,
                 d.action_proposed = $action_proposed,
                 d.confidence = $confidence,
-                d.is_human_confirmed = $is_human_confirmed
+                d.human_action_taken = $human_action
             MERGE (sr)-[:RESULTED_IN]->(d)
             """,
             parameters={
@@ -148,7 +199,7 @@ class Neo4jAdapter:
                 "summary": decision.summary,
                 "action_proposed": decision.action_proposed,
                 "confidence": decision.confidence,
-                "is_human_confirmed": decision.is_human_confirmed,
+                "human_action": human_action,
             },
         )
 

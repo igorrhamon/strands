@@ -8,6 +8,7 @@ from swarm_intelligence.core.models import (
     Decision,
     EvidenceType,
     Alert,
+    HumanDecision,
 )
 from swarm_intelligence.core.swarm import SwarmOrchestrator
 
@@ -28,17 +29,11 @@ class SwarmController:
         self.orchestrator = orchestrator
         self.max_retries = max_retries
         self.llm_agent_id = llm_agent_id
-        self.human_confirm_hook: Optional[Callable[[Decision], bool]] = None
-        self.human_reject_hook: Optional[Callable[[Decision], None]] = None
+        self.human_review_hook: Optional[Callable[[Decision], HumanDecision]] = None
 
-    def register_human_hooks(
-        self,
-        confirm_hook: Callable[[Decision], bool],
-        reject_hook: Callable[[Decision], None],
-    ):
-        """Registers callbacks for human-in-the-loop governance."""
-        self.human_confirm_hook = confirm_hook
-        self.human_reject_hook = reject_hook
+    def register_human_hooks(self, review_hook: Callable[[Decision], HumanDecision]):
+        """Registers a single, comprehensive callback for human review."""
+        self.human_review_hook = review_hook
 
     async def aexecute_plan(self, plan: SwarmPlan, alert: Alert) -> (Decision, Dict[str, List[SwarmResult]]):
         """
@@ -79,7 +74,7 @@ class SwarmController:
         else:
             decision = self._formulate_decision(final_results)
 
-        return self._request_human_confirmation(decision), run_history
+        return self._request_human_review(decision), run_history
 
     def _evaluate_results(
         self,
@@ -187,19 +182,14 @@ class SwarmController:
 
         return decision
 
-    def _request_human_confirmation(self, decision: Decision) -> Decision:
-        """Handles the human-in-the-loop governance step."""
-        if self.human_confirm_hook and self.human_reject_hook:
-            logging.info("Decision requires human confirmation.")
-            is_confirmed = self.human_confirm_hook(decision)
-            if is_confirmed:
-                decision.is_human_confirmed = True
-                logging.info("Human confirmed the decision.")
-            else:
-                self.human_reject_hook(decision)
-                decision.is_human_confirmed = False
-                logging.warning("Human rejected the decision.")
+    def _request_human_review(self, decision: Decision) -> Decision:
+        """Handles the human-in-the-loop governance step, processing a structured HumanDecision."""
+        if self.human_review_hook:
+            logging.info("Decision requires human review.")
+            human_decision = self.human_review_hook(decision)
+            decision.human_decision = human_decision
+            logging.info(f"Human reviewed the decision: {human_decision.action.value}")
         else:
-            logging.info("No human hooks registered. Proceeding without confirmation.")
+            logging.info("No human review hook registered. Proceeding without human governance.")
 
         return decision
