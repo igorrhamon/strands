@@ -1,64 +1,68 @@
 
 from dataclasses import dataclass, field
 from typing import List, Dict, Any
-from swarm_intelligence.core.models import Decision, SwarmPlan
+from swarm_intelligence.core.models import Decision, SwarmPlan, Alert
 from swarm_intelligence.memory.neo4j_adapter import Neo4jAdapter
+from swarm_intelligence.controller import SwarmController
 
 @dataclass
 class ReplayReport:
-    """A report detailing the outcome of a decision replay."""
-    original_decision: Dict[str, Any]
-    replayed_decision: Decision
+    """A detailed report comparing an original decision with a replayed one."""
+    run_id: str
+    original_action: str
+    replayed_action: str
+    confidence_delta: float
     divergences: List[str] = field(default_factory=list)
-    confidence_delta: float = 0.0
 
 class ReplayEngine:
     """
-    Engine for replaying past swarm runs to audit decisions and test new policies.
+    Executes a deterministic replay of a past swarm run to audit decisions
+    and evaluate the impact of new policies or agent versions.
     """
     def __init__(self, neo4j_adapter: Neo4jAdapter):
         self.neo4j_adapter = neo4j_adapter
 
-    def fetch_past_run(self, run_id: str) -> Dict[str, Any]:
+    async def replay_decision(
+        self,
+        run_id: str,
+        controller: SwarmController,
+        new_plan: SwarmPlan = None
+    ) -> ReplayReport:
         """
-        Fetches all data related to a past swarm run from Neo4j.
-        This is a conceptual method; a full implementation would require
-        a comprehensive Cypher query to reconstruct the entire run context.
+        Replays a decision, optionally with a new plan or policies.
+        It uses historical results from Neo4j to ensure determinism.
         """
-        # In a real implementation, this would execute a query like:
-        # MATCH (run:SwarmRun {id: $run_id})-[:EXECUTED_STEP]->(step)-[:PRODUCED]->(result)
-        # ... and join all related data.
-        return {"run_id": run_id, "mock_data": "This is a placeholder for fetched run data."}
+        # 1. Fetch the historical context
+        original_run_context = self.neo4j_adapter.fetch_full_run_context(run_id)
+        if not original_run_context:
+            raise ValueError(f"No data found for run_id: {run_id}")
 
-    async def replay_run(self, run_id: str, controller) -> ReplayReport:
-        """
-        Re-executes a past swarm run and compares the new decision with the original.
-        """
-        past_run_data = self.fetch_past_run(run_id)
+        # 2. Use the new plan if provided, otherwise use the original
+        plan_to_replay = new_plan if new_plan else original_run_context['plan']
 
-        # For this example, we'll create a mock plan and alert
-        # In a real system, these would be reconstructed from past_run_data
-        mock_plan = SwarmPlan(objective="Replay of run " + run_id, steps=[])
-        mock_alert = {"alert_id": "replay-alert", "data": {}}
+        # 3. Set the controller to replay mode
+        controller.set_replay_mode(original_run_context['results'])
 
-        # Re-execute the plan
-        # The controller would use its current policies and agent configurations
-        replayed_decision, _ = await controller.aexecute_plan(mock_plan, mock_alert)
+        # 4. Re-execute with the historical context
+        alert = original_run_context['alert']
+        replayed_decision, _ = await controller.aexecute_plan(plan_to_replay, alert)
 
-        # Compare results
-        original_decision = past_run_data.get("decision", {})
-        confidence_delta = replayed_decision.confidence - original_decision.get("confidence", 0.0)
+        # 5. Reset controller mode and generate report
+        controller.disable_replay_mode()
+
+        original_decision = original_run_context['decision']
 
         divergences = []
-        if replayed_decision.action_proposed != original_decision.get("action_proposed"):
+        if replayed_decision.action_proposed != original_decision['action_proposed']:
             divergences.append(
-                f"Action mismatch: original='{original_decision.get('action_proposed')}', "
+                f"Action mismatch: original='{original_decision['action_proposed']}', "
                 f"replayed='{replayed_decision.action_proposed}'"
             )
 
         return ReplayReport(
-            original_decision=original_decision,
-            replayed_decision=replayed_decision,
-            divergences=divergences,
-            confidence_delta=confidence_delta
+            run_id=run_id,
+            original_action=original_decision['action_proposed'],
+            replayed_action=replayed_decision.action_proposed,
+            confidence_delta=(replayed_decision.confidence - original_decision['confidence']),
+            divergences=divergences
         )

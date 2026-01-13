@@ -1,7 +1,7 @@
 
 import logging
 import asyncio
-from typing import List, Dict, Optional, Callable
+from typing import List, Dict, Optional, Callable, Any
 from swarm_intelligence.core.models import (
     SwarmPlan,
     SwarmStep,
@@ -10,6 +10,7 @@ from swarm_intelligence.core.models import (
     EvidenceType,
     Alert,
     HumanDecision,
+    HumanAction,
 )
 from swarm_intelligence.core.swarm import SwarmOrchestrator
 from swarm_intelligence.services.confidence_service import ConfidenceService
@@ -32,6 +33,18 @@ class SwarmController:
         self.confidence_service = confidence_service
         self.llm_agent_id = llm_agent_id
         self.human_review_hook: Optional[Callable[[Decision], HumanDecision]] = None
+        self.replay_mode = False
+        self.replay_results: Dict[str, SwarmResult] = {}
+
+    def set_replay_mode(self, historical_results: Dict[str, SwarmResult]):
+        """Puts the controller in replay mode, using historical results instead of live execution."""
+        self.replay_mode = True
+        self.replay_results = historical_results
+
+    def disable_replay_mode(self):
+        """Disables replay mode."""
+        self.replay_mode = False
+        self.replay_results = {}
 
     def register_human_hooks(self, review_hook: Callable[[Decision], HumanDecision]):
         """Registers a single, comprehensive callback for human review."""
@@ -50,7 +63,10 @@ class SwarmController:
         steps_to_process = list(plan.steps)
 
         while steps_to_process:
-            results = await self.orchestrator.execute_swarm(steps_to_process)
+            if self.replay_mode:
+                results = [self.replay_results.get(s.step_id, SwarmResult(agent_id=s.agent_id, output="No historical result found.", confidence=0, actionable=False, evidence_type=EvidenceType.RAW_DATA, error="Missing replay data")) for s in steps_to_process]
+            else:
+                results = await self.orchestrator.execute_swarm(steps_to_process)
 
             for res in results:
                 step = next((s for s in steps_to_process if s.agent_id == res.agent_id), None)
@@ -101,7 +117,7 @@ class SwarmController:
                 attempt = len(run_history[step.step_id])
                 error = Exception(latest_result.error) if latest_result.error else None
 
-                if step.retry_policy.should_retry(error, attempt):
+                if step.retry_policy.should_retry(attempt, error):
                     delay = step.retry_policy.next_delay(attempt)
                     max_delay = max(max_delay, delay)
                     steps_to_retry.append(step)
@@ -194,6 +210,10 @@ class SwarmController:
             human_decision = self.human_review_hook(decision)
             decision.human_decision = human_decision
             logging.info(f"Human reviewed the decision: {human_decision.action.value}")
+
+            if human_decision.action == HumanAction.OVERRIDE:
+                for evidence in decision.supporting_evidence:
+                    self.confidence_service.penalize_for_override(evidence.agent_id)
         else:
             logging.info("No human review hook registered. Proceeding without human governance.")
 

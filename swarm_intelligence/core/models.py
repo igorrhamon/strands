@@ -6,6 +6,10 @@ import uuid
 from datetime import datetime
 from swarm_intelligence.policy.retry_policy import RetryPolicy
 
+# Forward declaration for type hinting
+class DecisionContext: pass
+class ConfidenceSnapshot: pass
+
 class EvidenceType(Enum):
     """Enumeration for the types of evidence that can be produced."""
     RAW_DATA = "raw_data"
@@ -53,6 +57,14 @@ class SwarmPlan:
     plan_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
 @dataclass
+class DecisionContext:
+    """Captures the context in which a decision was made. For replay and audit."""
+    context_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    aggregation_strategy: str = "default_average"
+    policy_versions: Dict[str, str] = field(default_factory=dict)
+    replayable: bool = True
+
+@dataclass
 class Decision:
     """Represents a final decision made by the SwarmController."""
     summary: str
@@ -61,6 +73,7 @@ class Decision:
     supporting_evidence: List[SwarmResult]
     decision_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     human_decision: Optional['HumanDecision'] = None
+    context: DecisionContext = field(default_factory=DecisionContext)
 
 @dataclass
 class Alert:
@@ -88,3 +101,12 @@ class OperationalOutcome:
     resolution_time_seconds: Optional[float] = None
     details: Optional[str] = None
     outcome_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+
+@dataclass
+class ConfidenceSnapshot:
+    """Records a point-in-time confidence value for an agent, enabling traceability."""
+    agent_id: str
+    value: float
+    reason: str  # e.g., "initial", "human_override_penalty", "successful_outcome_reinforcement"
+    snapshot_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp: datetime = field(default_factory=datetime.utcnow)
