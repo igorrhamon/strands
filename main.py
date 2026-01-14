@@ -101,9 +101,9 @@ async def main():
         alert = Alert(alert_id="sec-alert-101", data={"hostname": "web-prod-03"})
         run_id = f"run-{alert.alert_id}"
 
-        decision, executions, retries, master_seed = await controller.aexecute_plan(plan, alert, run_id)
+        decision, executions, retries, retry_decisions, master_seed = await controller.aexecute_plan(plan, alert, run_id)
 
-        neo4j.save_swarm_run(plan, alert, executions, decision, retries, master_seed)
+        neo4j.save_swarm_run(plan, alert, executions, decision, retries, retry_decisions, master_seed)
 
         if decision.human_decision:
             outcome = OperationalOutcome(status="success")

@@ -6,7 +6,7 @@ from typing import Dict, Any, List
 
 from swarm_intelligence.core.models import (
     Alert, SwarmPlan, SwarmStep, AgentExecution, Evidence, Decision,
-    HumanDecision, OperationalOutcome, EvidenceType, RetryAttempt, ReplayReport
+    HumanDecision, OperationalOutcome, EvidenceType, RetryAttempt, ReplayReport, RetryDecision
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -102,6 +102,7 @@ class Neo4jAdapter:
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:HumanDecision) REQUIRE n.id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:OperationalOutcome) REQUIRE n.id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:RetryAttempt) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:RetryDecision) REQUIRE n.id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:RetryPolicy) REQUIRE n.logic_hash IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:ReplayReport) REQUIRE n.id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:ConfidenceSnapshot) REQUIRE n.id IS UNIQUE",
@@ -110,7 +111,7 @@ class Neo4jAdapter:
             self.run_transaction(query)
         logging.info("Neo4j schema constraints ensured.")
 
-    def save_swarm_run(self, plan: SwarmPlan, alert: Alert, executions: List[AgentExecution], decision: Decision, retry_attempts: List[RetryAttempt], master_seed: int):
+    def save_swarm_run(self, plan: SwarmPlan, alert: Alert, executions: List[AgentExecution], decision: Decision, retry_attempts: List[RetryAttempt], retry_decisions: List[RetryDecision], master_seed: int):
         # This complex query performs the entire save in one atomic transaction.
         query = """
         MERGE (alert:Alert {id: $alert_id}) ON CREATE SET alert.data = $alert_data
@@ -183,6 +184,23 @@ class Neo4jAdapter:
         FOREACH (_ IN CASE WHEN policy IS NOT NULL THEN [1] ELSE [] END |
             MERGE (ra)-[:USED_POLICY]->(policy)
         )
+
+        WITH run
+        UNWIND $retry_decisions as rd_param
+        MATCH (attempt:RetryAttempt {step_id: rd_param.step_id})
+        MATCH (failed_exec:AgentExecution {id: attempt.failed_execution_id})
+        MATCH (policy:RetryPolicy {logic_hash: rd_param.policy_logic_hash})
+        MATCH (step:SwarmStep {id: rd_param.step_id})
+
+        CREATE (rd:RetryDecision {
+            id: rd_param.decision_id,
+            reason: rd_param.reason,
+            timestamp: datetime()
+        })
+        CREATE (failed_exec)-[:TRIGGERED]->(rd)
+        CREATE (rd)-[:USED_POLICY]->(policy)
+        CREATE (rd)-[:RESULTED_IN]->(attempt)
+        CREATE (attempt)-[:REEXECUTED]->(step)
         """
 
         steps_params = [{
@@ -207,7 +225,8 @@ class Neo4jAdapter:
             "action_proposed": decision.action_proposed, "confidence": decision.confidence,
             "steps": steps_params,
             "influencing_evidence": [ev.evidence_id for ev in decision.supporting_evidence],
-            "retries": [r.__dict__ for r in retry_attempts]
+        "retries": [r.__dict__ for r in retry_attempts],
+        "retry_decisions": [rd.__dict__ for rd in retry_decisions]
         }
         self.run_transaction(query, params)
 

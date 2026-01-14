@@ -12,6 +12,7 @@ class ConfidenceSnapshot: pass
 class RetryAttempt: pass
 class AgentExecution: pass
 class Evidence: pass
+class RetryDecision: pass
 
 @dataclass
 class Evidence:
@@ -130,4 +131,15 @@ class ReplayReport:
     report_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     causal_divergences: List[str] = field(default_factory=list)
     confidence_delta: float = 0.0
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+
+@dataclass
+class RetryDecision:
+    """Represents an explicit, auditable decision to retry a step."""
+    step_id: str
+    reason: str
+    policy_name: str
+    policy_version: str
+    policy_logic_hash: str
+    decision_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: datetime = field(default_factory=datetime.utcnow)
