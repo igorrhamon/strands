@@ -68,8 +68,7 @@ class SwarmRunCoordinator:
         steps_to_process = list(plan.steps)
 
         for step in steps_to_process:
-            sequence_id += 1
-            self.confidence_service.apply_time_decay(step.agent_id, sequence_id, 0.001)
+            self.confidence_service.apply_time_decay(step.agent_id, 0.001)
 
         while steps_to_process:
             new_executions = await self.execution_controller.execute(
@@ -89,7 +88,7 @@ class SwarmRunCoordinator:
 
             all_retry_attempts.extend(retry_eval.retry_attempts)
             all_retry_decisions.extend(retry_eval.retry_decisions)
-            successful_step_ids.update(retry_eval.successful_step_ids)
+            successful_step_ids.update(retry_eval.newly_successful_step_ids)
             steps_to_process = retry_eval.steps_to_retry
 
             if retry_eval.max_delay_seconds > 0:
@@ -115,7 +114,6 @@ class SwarmRunCoordinator:
             human_hook,
             run_id,
             master_seed,
-            sequence_id,
         )
 
         return (

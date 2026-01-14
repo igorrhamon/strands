@@ -1,3 +1,4 @@
+import uuid
 from typing import List, Dict, Optional, Set
 from swarm_intelligence.core.models import (
     SwarmPlan,
@@ -30,10 +31,13 @@ class SwarmRetryController:
         steps_to_retry = []
         new_retry_attempts = []
         new_retry_decisions = []
+        newly_successful_step_ids = set()
         max_delay = 0.0
 
+        executed_step_ids = {ex.step_id for ex in executions}
+
         for step in plan.steps:
-            if step.step_id in successful_step_ids:
+            if step.step_id in successful_step_ids or step.step_id not in executed_step_ids:
                 continue
 
             latest_execution = next(
@@ -43,7 +47,7 @@ class SwarmRetryController:
                 continue
 
             if latest_execution.is_successful():
-                successful_step_ids.add(step.step_id)
+                newly_successful_step_ids.add(step.step_id)
                 continue
 
             if step.mandatory and step.retry_policy:
@@ -57,7 +61,7 @@ class SwarmRetryController:
                     step_id=step.step_id,
                     agent_id=step.agent_id,
                     attempt=attempt_num,
-                    error=Exception(latest_execution.error),
+                    error=latest_execution.error,
                     random_seed=master_seed + attempt_num,
                     last_confidence=confidence_service.get_last_confidence(
                         step.agent_id
@@ -69,12 +73,15 @@ class SwarmRetryController:
                     delay = step.retry_policy.next_delay(context)
                     max_delay = max(max_delay, delay)
 
+                    attempt_id = str(uuid.uuid4())
+
                     decision = RetryDecision(
                         step_id=step.step_id,
                         reason=str(context.error),
                         policy_name=step.retry_policy.__class__.__name__,
                         policy_version=step.retry_policy.version,
                         policy_logic_hash=step.retry_policy.logic_hash,
+                        attempt_id=attempt_id,
                     )
                     new_retry_decisions.append(decision)
 
@@ -85,6 +92,7 @@ class SwarmRetryController:
                             delay_seconds=delay,
                             reason=str(context.error),
                             failed_execution_id=latest_execution.execution_id,
+                            attempt_id=attempt_id,
                         )
                     )
                     steps_to_retry.append(step)
@@ -94,5 +102,5 @@ class SwarmRetryController:
             retry_attempts=new_retry_attempts,
             retry_decisions=new_retry_decisions,
             max_delay_seconds=max_delay,
-            successful_step_ids=successful_step_ids,
+            newly_successful_step_ids=newly_successful_step_ids,
         )

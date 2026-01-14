@@ -27,12 +27,11 @@ class SwarmDecisionController:
         human_hook: Optional[Callable[[Decision], HumanDecision]],
         run_id: str,
         master_seed: int,
-        sequence_id: int,
     ) -> Decision:
         decision = self._formulate_decision(successful_executions)
 
         return self._request_human_review(
-            decision, human_hook, confidence_service, confidence_policy, sequence_id
+            decision, human_hook, confidence_service, confidence_policy
         )
 
     def _formulate_decision(
@@ -70,7 +69,6 @@ class SwarmDecisionController:
         human_hook: Optional[Callable[[Decision], HumanDecision]],
         confidence_service: ConfidenceService,
         confidence_policy: ConfidencePolicy,
-        sequence_id: int,
     ) -> Decision:
         from swarm_intelligence.core.models import HumanAction
         if human_hook:
@@ -78,11 +76,9 @@ class SwarmDecisionController:
             decision.human_decision = human_decision
             if human_decision.action == HumanAction.OVERRIDE:
                 for evidence in decision.supporting_evidence:
-                    sequence_id += 1
                     confidence_service.penalize_for_override(
                         evidence.agent_id,
                         decision.decision_id,
-                        sequence_id,
                         confidence_policy,
                     )
         return decision

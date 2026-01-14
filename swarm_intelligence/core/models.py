@@ -34,7 +34,7 @@ class AgentExecution:
     input_parameters: Dict[str, Any]
     execution_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     output_evidence: List[Evidence] = field(default_factory=list)
-    error: Optional[str] = None
+    error: Optional[Exception] = None
     timestamp: datetime = field(default_factory=datetime.utcnow)
 
     def is_successful(self) -> bool:
@@ -141,6 +141,7 @@ class RetryDecision:
     policy_name: str
     policy_version: str
     policy_logic_hash: str
+    attempt_id: str
     decision_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: datetime = field(default_factory=datetime.utcnow)
 
@@ -151,4 +152,4 @@ class RetryEvaluationResult:
     retry_attempts: List[RetryAttempt]
     retry_decisions: List[RetryDecision]
     max_delay_seconds: float
-    successful_step_ids: set
+    newly_successful_step_ids: set

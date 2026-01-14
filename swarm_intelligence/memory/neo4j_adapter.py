@@ -187,7 +187,7 @@ class Neo4jAdapter:
 
         WITH run
         UNWIND $retry_decisions as rd_param
-        MATCH (attempt:RetryAttempt {step_id: rd_param.step_id})
+        MATCH (attempt:RetryAttempt {id: rd_param.attempt_id})
         MATCH (failed_exec:AgentExecution {id: attempt.failed_execution_id})
         MATCH (policy:RetryPolicy {logic_hash: rd_param.policy_logic_hash})
         MATCH (step:SwarmStep {id: rd_param.step_id})

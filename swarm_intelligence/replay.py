@@ -4,6 +4,7 @@ from typing import List, Dict, Any
 from swarm_intelligence.core.models import Decision, SwarmPlan, Alert, ReplayReport
 from swarm_intelligence.memory.neo4j_adapter import Neo4jAdapter
 from swarm_intelligence.coordinators.swarm_run_coordinator import SwarmRunCoordinator
+from swarm_intelligence.policy.confidence_policy import DefaultConfidencePolicy
 
 class ReplayEngine:
     """
@@ -38,6 +39,8 @@ class ReplayEngine:
             plan_to_replay,
             alert,
             run_id,
+            confidence_policy=DefaultConfidencePolicy(),
+            human_hook=None,
             master_seed=original_seed,
             replay_mode=True,
             replay_results=original_run_context['results']
