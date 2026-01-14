@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any
 from swarm_intelligence.core.models import Decision, SwarmPlan, Alert, ReplayReport
 from swarm_intelligence.memory.neo4j_adapter import Neo4jAdapter
-from swarm_intelligence.controller import SwarmController
+from swarm_intelligence.coordinators.swarm_run_coordinator import SwarmRunCoordinator
 
 class ReplayEngine:
     """
@@ -16,7 +16,7 @@ class ReplayEngine:
     async def replay_decision(
         self,
         run_id: str,
-        controller: SwarmController,
+        coordinator: SwarmRunCoordinator,
         new_plan: SwarmPlan = None
     ) -> ReplayReport:
         """
@@ -29,14 +29,21 @@ class ReplayEngine:
 
         plan_to_replay = new_plan if new_plan else original_run_context['plan']
 
-        controller.set_replay_mode(original_run_context['results'])
+        # coordinator.set_replay_mode(original_run_context['results'])
 
         alert = original_run_context['alert']
         original_seed = original_run_context['master_seed']
 
-        replayed_decision, _, _ = await controller.aexecute_plan(plan_to_replay, alert, run_id, master_seed=original_seed)
+        replayed_decision, _, _, _, _ = await coordinator.run(
+            plan_to_replay,
+            alert,
+            run_id,
+            master_seed=original_seed,
+            replay_mode=True,
+            replay_results=original_run_context['results']
+        )
 
-        controller.disable_replay_mode()
+        # coordinator.disable_replay_mode()
 
         original_decision = original_run_context['decision']
 

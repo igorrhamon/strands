@@ -143,3 +143,12 @@ class RetryDecision:
     policy_logic_hash: str
     decision_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: datetime = field(default_factory=datetime.utcnow)
+
+@dataclass(frozen=True)
+class RetryEvaluationResult:
+    """Represents the outcome of a retry evaluation cycle."""
+    steps_to_retry: List[SwarmStep]
+    retry_attempts: List[RetryAttempt]
+    retry_decisions: List[RetryDecision]
+    max_delay_seconds: float
+    successful_step_ids: set
