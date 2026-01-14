@@ -102,6 +102,7 @@ class Neo4jAdapter:
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:HumanDecision) REQUIRE n.id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:OperationalOutcome) REQUIRE n.id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:RetryAttempt) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:RetryPolicy) REQUIRE n.logic_hash IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:ReplayReport) REQUIRE n.id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:ConfidenceSnapshot) REQUIRE n.id IS UNIQUE",
         ]
@@ -122,8 +123,16 @@ class Neo4jAdapter:
         WITH run, dec
         UNWIND $steps as step_param
         MERGE (step:SwarmStep {id: step_param.step_id})
-        ON CREATE SET step.parameters = step_param.params, step.retry_policy = step_param.policy
+        ON CREATE SET step.parameters = step_param.params
         MERGE (run)-[:EXECUTED_STEP]->(step)
+
+        // Create RetryPolicy node if a policy is defined for the step
+        WITH run, dec, step, step_param
+        FOREACH (policy IN CASE WHEN step_param.policy IS NOT NULL THEN [step_param.policy] ELSE [] END |
+            MERGE (rp:RetryPolicy {logic_hash: policy.logic_hash})
+            ON CREATE SET rp.name = policy.policy_name, rp.version = policy.policy_version, rp.parameters = policy.parameters
+            MERGE (step)-[:CONFIGURED_WITH]->(rp)
+        )
 
         MERGE (agent:Agent {id: step_param.agent_id})
 
@@ -154,9 +163,12 @@ class Neo4jAdapter:
         MATCH (evidence:Evidence {id: ev_id})
         MERGE (evidence)-[:INFLUENCED {weight: 1.0}]->(dec)
 
-        WITH dec
+        WITH run
         UNWIND $retries as retry_param
+        MATCH (step:SwarmStep {id: retry_param.step_id})
         MATCH (failed_exec:AgentExecution {id: retry_param.failed_execution_id})
+        OPTIONAL MATCH (step)-[:CONFIGURED_WITH]->(policy:RetryPolicy)
+
         CREATE (ra:RetryAttempt {
             id: retry_param.attempt_id,
             attempt_number: retry_param.attempt_number,
@@ -164,14 +176,20 @@ class Neo4jAdapter:
             reason: retry_param.reason,
             timestamp: datetime()
         })
-        CREATE (failed_exec)-[:RETRIED_WITH]->(ra)
+        CREATE (step)-[:RETRIED_WITH]->(ra)
+        CREATE (ra)-[:FAILED_EXECUTION]->(failed_exec)
+
+        // If a policy was used, link the attempt to it
+        FOREACH (_ IN CASE WHEN policy IS NOT NULL THEN [1] ELSE [] END |
+            MERGE (ra)-[:USED_POLICY]->(policy)
+        )
         """
 
         steps_params = [{
             "step_id": s.step_id,
             "agent_id": s.agent_id,
             "params": json.dumps(s.parameters),
-            "policy": json.dumps(s.retry_policy.to_dict() if s.retry_policy else {}),
+            "policy": s.retry_policy.to_dict() if s.retry_policy else None,
             "executions": [{
                 "execution_id": ex.execution_id,
                 "agent_version": ex.agent_version,

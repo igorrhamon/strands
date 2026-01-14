@@ -58,104 +58,68 @@ class SwarmController:
 
     async def aexecute_plan(self, plan: SwarmPlan, alert: Alert, run_id: str, master_seed: int = None) -> (Decision, List[AgentExecution], List[RetryAttempt], int):
         """
-        Executes a swarm plan, evaluates results, performs retries,
-        and formulates a final decision.
+        Executes a swarm plan, evaluates results, and formulates a final decision.
+        The SwarmOrchestrator now handles all retry logic internally.
         """
         master_seed = master_seed if master_seed is not None else random.randint(0, 1_000_000)
         sequence_id = 0
 
-        executions: List[AgentExecution] = []
-        all_retry_attempts: List[RetryAttempt] = []
-
-        steps_to_process = list(plan.steps)
-
         # Initial time decay application
-        for step in steps_to_process:
+        for step in plan.steps:
             sequence_id += 1
             self.confidence_service.apply_time_decay(step.agent_id, sequence_id, 0.001) # Example decay rate
 
-        while steps_to_process:
-            if self.replay_mode:
-                # In replay mode, we fetch results, not execute them
-                new_executions = [self.replay_results.get(s.step_id) for s in steps_to_process]
-            else:
-                new_executions = await self.orchestrator.execute_swarm(steps_to_process)
+        steps_context = {
+            step.step_id: {
+                "last_confidence": self.confidence_service.get_last_confidence(step.agent_id),
+                "domain_hints": [] # Placeholder for future domain inference logic
+            }
+            for step in plan.steps
+        }
 
-            executions.extend(new_executions)
-
-            steps_to_process, new_retries = await self._evaluate_and_get_next_steps(
-                plan, run_id, master_seed, executions, all_retry_attempts
-            )
-            all_retry_attempts.extend(new_retries)
-
-            if steps_to_process:
-                logging.info(f"{len(steps_to_process)} steps require retries. Applying policies.")
-
-        successful_executions = [ex for ex in executions if ex.is_successful()]
-
-        # If after all retries, all mandatory steps are still not successful, escalate
-        if not all(s.step_id in {ex.step_id for ex in successful_executions} for s in plan.steps if s.mandatory):
-            logging.warning("Not all mandatory steps succeeded. Escalating to LLM.")
-            decision = await self._escalate_to_llm(plan, successful_executions, alert)
+        if self.replay_mode:
+            # In replay mode, we assume historical results include all retries
+            executions = list(self.replay_results.values())
+            all_retry_attempts = [] # This needs to be enhanced for full replay fidelity
         else:
-            decision = self._formulate_decision(successful_executions)
+            executions, all_retry_attempts = await self.orchestrator.execute_swarm(
+                plan.steps, run_id, master_seed, steps_context
+            )
+
+        # Filter for the final, successful execution for each step for decision making
+        final_successful_executions = []
+        processed_steps = set()
+        # Iterate in reverse to find the last successful execution first
+        for ex in reversed(executions):
+            if ex.step_id not in processed_steps and ex.is_successful():
+                final_successful_executions.append(ex)
+                processed_steps.add(ex.step_id)
+
+        # If any mandatory step is not in the set of successful steps, escalate
+        successful_step_ids = {ex.step_id for ex in final_successful_executions}
+        if not all(s.step_id in successful_step_ids for s in plan.steps if s.mandatory):
+            logging.warning("Not all mandatory steps succeeded after retries. Escalating to LLM.")
+            decision = await self._escalate_to_llm(plan, final_successful_executions, alert, run_id, master_seed)
+        else:
+            decision = self._formulate_decision(final_successful_executions)
 
         return self._request_human_review(decision, sequence_id), executions, all_retry_attempts, master_seed
 
-    async def _evaluate_and_get_next_steps(
-        self, plan: SwarmPlan, run_id: str, master_seed: int,
-        all_executions: List[AgentExecution],
-        all_retry_attempts: List[RetryAttempt]
-    ) -> (List[SwarmStep], List[RetryAttempt]):
-
-        steps_to_retry = []
-        new_retry_attempts = []
-        max_delay = 0.0
-
-        successful_steps = {ex.step_id for ex in all_executions if ex.is_successful()}
-
-        for step in plan.steps:
-            if step.step_id in successful_steps:
-                continue
-
-            executions_for_step = [ex for ex in all_executions if ex.step_id == step.step_id]
-            retries_for_step = [r for r in all_retry_attempts if r.step_id == step.step_id]
-            total_attempts = len(executions_for_step) + len(retries_for_step)
-
-            if step.mandatory and step.retry_policy:
-                context = RetryContext(
-                    run_id=run_id,
-                    step_id=step.step_id,
-                    agent_id=step.agent_id,
-                    attempt=total_attempts + 1,
-                    error=Exception(executions_for_step[-1].error) if executions_for_step and executions_for_step[-1].error else None,
-                    random_seed=master_seed + total_attempts # Deterministic seed
-                )
-
-                if step.retry_policy.should_retry(context):
-                    delay = step.retry_policy.next_delay(context)
-                    max_delay = max(max_delay, delay)
-                    steps_to_retry.append(step)
-                    new_retry_attempts.append(RetryAttempt(
-                        step_id=step.step_id,
-                        attempt_number=context.attempt,
-                        delay_seconds=delay,
-                        reason=str(context.error),
-                        failed_execution_id=executions_for_step[-1].execution_id
-                    ))
-
-        if max_delay > 0:
-            await asyncio.sleep(max_delay)
-
-        return steps_to_retry, new_retry_attempts
-
-    async def _escalate_to_llm(self, plan: SwarmPlan, successful_executions: List[AgentExecution], alert: Alert) -> Decision:
+    async def _escalate_to_llm(self, plan: SwarmPlan, successful_executions: List[AgentExecution], alert: Alert, run_id: str, master_seed: int) -> Decision:
         """Generates a hypothesis from an LLM when deterministic agents fail."""
         if not self.llm_agent_id:
             return self._formulate_decision(successful_executions)
 
         llm_step = SwarmStep(agent_id=self.llm_agent_id, mandatory=True)
-        llm_execution = (await self.orchestrator.execute_swarm([llm_step]))[0]
+        llm_context = {
+            llm_step.step_id: {
+                "last_confidence": self.confidence_service.get_last_confidence(self.llm_agent_id),
+                "domain_hints": []
+            }
+        }
+        # The call to the orchestrator for the LLM step must also be consistent
+        llm_executions, _ = await self.orchestrator.execute_swarm([llm_step], run_id, master_seed, llm_context)
+        llm_execution = llm_executions[0]
 
         all_evidence = [ev for ex in successful_executions for ev in ex.output_evidence]
         all_evidence.extend(llm_execution.output_evidence)
