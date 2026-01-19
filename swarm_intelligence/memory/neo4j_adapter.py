@@ -6,7 +6,8 @@ from typing import Dict, Any, List
 
 from swarm_intelligence.core.models import (
     Alert, SwarmPlan, SwarmStep, AgentExecution, Evidence, Decision,
-    HumanDecision, OperationalOutcome, EvidenceType, RetryAttempt, ReplayReport
+    HumanDecision, OperationalOutcome, EvidenceType, RetryAttempt, ReplayReport,
+    Domain, SwarmRun
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -104,17 +105,21 @@ class Neo4jAdapter:
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:RetryAttempt) REQUIRE n.id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:ReplayReport) REQUIRE n.id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:ConfidenceSnapshot) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:Domain) REQUIRE n.id IS UNIQUE",
         ]
         for query in constraints:
             self.run_transaction(query)
         logging.info("Neo4j schema constraints ensured.")
 
-    def save_swarm_run(self, plan: SwarmPlan, alert: Alert, executions: List[AgentExecution], decision: Decision, retry_attempts: List[RetryAttempt], master_seed: int):
+    def save_swarm_run(self, swarm_run: SwarmRun, alert: Alert, retry_attempts: List[RetryAttempt]):
         # This complex query performs the entire save in one atomic transaction.
         query = """
         MERGE (alert:Alert {id: $alert_id}) ON CREATE SET alert.data = $alert_data
         MERGE (run:SwarmRun {id: $run_id}) ON CREATE SET run.objective = $objective, run.timestamp = datetime(), run.master_seed = $master_seed
         MERGE (alert)-[:TRIGGERED]->(run)
+
+        MATCH (domain:Domain {id: $domain_id})
+        MERGE (run)-[:BELONGS_TO]->(domain)
 
         MERGE (dec:Decision {id: $decision_id})
         ON CREATE SET dec.summary = $summary, dec.action_proposed = $action_proposed, dec.confidence = $confidence, dec.timestamp = datetime()
@@ -178,17 +183,18 @@ class Neo4jAdapter:
                 "logic_hash": ex.logic_hash,
                 "error": ex.error,
                 "evidence": [e.__dict__ for e in ex.output_evidence]
-            } for ex in executions if ex.step_id == s.step_id]
-        } for s in plan.steps]
+            } for ex in swarm_run.executions if ex.step_id == s.step_id]
+        } for s in swarm_run.plan.steps]
 
         params = {
             "alert_id": alert.alert_id, "alert_data": json.dumps(alert.data),
-            "run_id": plan.plan_id, "objective": plan.objective,
-            "master_seed": master_seed,
-            "decision_id": decision.decision_id, "summary": decision.summary,
-            "action_proposed": decision.action_proposed, "confidence": decision.confidence,
+            "run_id": swarm_run.run_id, "objective": swarm_run.plan.objective,
+            "master_seed": swarm_run.master_seed,
+            "domain_id": swarm_run.domain.id,
+            "decision_id": swarm_run.final_decision.decision_id, "summary": swarm_run.final_decision.summary,
+            "action_proposed": swarm_run.final_decision.action_proposed, "confidence": swarm_run.final_decision.confidence,
             "steps": steps_params,
-            "influencing_evidence": [ev.evidence_id for ev in decision.supporting_evidence],
+            "influencing_evidence": [ev.evidence_id for ev in swarm_run.final_decision.supporting_evidence],
             "retries": [r.__dict__ for r in retry_attempts]
         }
         self.run_transaction(query, params)
@@ -245,6 +251,61 @@ class Neo4jAdapter:
         }
         self.run_transaction(query, params)
         logging.info(f"Replay report {report.report_id} saved.")
+
+    def save_domain(self, domain: Domain):
+        """Saves a cognitive domain to the graph."""
+        query = """
+        MERGE (d:Domain {id: $id})
+        ON CREATE SET d.name = $name, d.description = $description, d.risk_level = $risk_level
+        ON MATCH SET d.name = $name, d.description = $description, d.risk_level = $risk_level
+        """
+        params = {
+            "id": domain.id,
+            "name": domain.name,
+            "description": domain.description,
+            "risk_level": domain.risk_level.value
+        }
+        self.run_transaction(query, params)
+        logging.info(f"Domain '{domain.name}' saved.")
+
+    def link_agent_to_domain(self, agent_id: str, domain_id: str, weight: float):
+        """Creates a weighted APPLICABLE_TO relationship from an agent to a domain."""
+        query = """
+        MATCH (a:Agent {id: $agent_id})
+        MATCH (d:Domain {id: $domain_id})
+        MERGE (a)-[r:APPLICABLE_TO]->(d)
+        SET r.weight = $weight
+        """
+        self.run_transaction(query, {"agent_id": agent_id, "domain_id": domain_id, "weight": weight})
+
+    def link_policy_to_domain(self, policy_name: str, domain_id: str):
+        """Creates a VALID_IN relationship from a policy to a domain."""
+        # Note: This assumes policies are identified by name.
+        query = """
+        MERGE (p:RetryPolicy {name: $policy_name})
+        MATCH (d:Domain {id: $domain_id})
+        MERGE (p)-[:VALID_IN]->(d)
+        """
+        self.run_transaction(query, {"policy_name": policy_name, "domain_id": domain_id})
+
+    def link_metric_to_domain(self, metric_name: str, domain_id: str):
+        """Creates a RELEVANT_FOR relationship from a metric to a domain."""
+         # Note: This assumes metrics are identified by name.
+        query = """
+        MERGE (m:Metric {name: $metric_name})
+        MATCH (d:Domain {id: $domain_id})
+        MERGE (m)-[:RELEVANT_FOR]->(d)
+        """
+        self.run_transaction(query, {"metric_name": metric_name, "domain_id": domain_id})
+
+    def get_policies_for_domain(self, domain_id: str) -> List[str]:
+        """Fetches the names of retry policies valid for a given domain."""
+        query = """
+        MATCH (:Domain {id: $domain_id})<-[:VALID_IN]-(p:RetryPolicy)
+        RETURN p.name as policy_name
+        """
+        results = self.run_read_transaction(query, {"domain_id": domain_id})
+        return [result["policy_name"] for result in results]
 
     def create_confidence_snapshot(self, agent_id: str, value: float, source_event: str, sequence_id: int) -> str:
         """Creates a ConfidenceSnapshot node and returns its ID."""

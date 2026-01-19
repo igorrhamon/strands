@@ -13,11 +13,15 @@ from swarm_intelligence.core.models import (
     HumanDecision,
     HumanAction,
     RetryAttempt,
+    Domain,
+    SwarmRun
 )
 from swarm_intelligence.policy.retry_policy import RetryContext
 from swarm_intelligence.policy.confidence_policy import ConfidencePolicy, DefaultConfidencePolicy
 from swarm_intelligence.core.swarm import SwarmOrchestrator
 from swarm_intelligence.services.confidence_service import ConfidenceService
+from swarm_intelligence.memory.neo4j_adapter import Neo4jAdapter
+from swarm_intelligence.policy.policy_resolver import PolicyResolver
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -31,11 +35,14 @@ class SwarmController:
         self,
         orchestrator: SwarmOrchestrator,
         confidence_service: ConfidenceService,
+        neo4j_adapter: Neo4jAdapter,
         llm_agent_id: Optional[str] = "llm_agent",
         confidence_policy: ConfidencePolicy = None,
     ):
         self.orchestrator = orchestrator
         self.confidence_service = confidence_service
+        self.neo4j_adapter = neo4j_adapter
+        self.policy_resolver = PolicyResolver(neo4j_adapter)
         self.llm_agent_id = llm_agent_id
         self.confidence_policy = confidence_policy or DefaultConfidencePolicy()
         self.human_review_hook: Optional[Callable[[Decision], HumanDecision]] = None
@@ -56,12 +63,20 @@ class SwarmController:
         """Registers a single, comprehensive callback for human review."""
         self.human_review_hook = review_hook
 
-    async def aexecute_plan(self, plan: SwarmPlan, alert: Alert, run_id: str, master_seed: int = None) -> (Decision, List[AgentExecution], List[RetryAttempt], int):
+    async def aexecute_plan(self, domain: Domain, plan: SwarmPlan, alert: Alert, run_id: str, master_seed: int = None) -> (SwarmRun, List[RetryAttempt]):
         """
         Executes a swarm plan, evaluates results, performs retries,
         and formulates a final decision.
         """
         master_seed = master_seed if master_seed is not None else random.randint(0, 1_000_000)
+
+        swarm_run = SwarmRun(
+            run_id=run_id,
+            domain=domain,
+            plan=plan,
+            master_seed=master_seed,
+        )
+
         sequence_id = 0
 
         executions: List[AgentExecution] = []
@@ -84,7 +99,7 @@ class SwarmController:
             executions.extend(new_executions)
 
             steps_to_process, new_retries = await self._evaluate_and_get_next_steps(
-                plan, run_id, master_seed, executions, all_retry_attempts
+                plan, swarm_run, executions, all_retry_attempts
             )
             all_retry_attempts.extend(new_retries)
 
@@ -100,10 +115,13 @@ class SwarmController:
         else:
             decision = self._formulate_decision(successful_executions)
 
-        return self._request_human_review(decision, sequence_id), executions, all_retry_attempts, master_seed
+        swarm_run.executions = executions
+        swarm_run.final_decision = self._request_human_review(decision, sequence_id)
+
+        return swarm_run, all_retry_attempts
 
     async def _evaluate_and_get_next_steps(
-        self, plan: SwarmPlan, run_id: str, master_seed: int,
+        self, plan: SwarmPlan, swarm_run: SwarmRun,
         all_executions: List[AgentExecution],
         all_retry_attempts: List[RetryAttempt]
     ) -> (List[SwarmStep], List[RetryAttempt]):
@@ -122,18 +140,20 @@ class SwarmController:
             retries_for_step = [r for r in all_retry_attempts if r.step_id == step.step_id]
             total_attempts = len(executions_for_step) + len(retries_for_step)
 
-            if step.mandatory and step.retry_policy:
-                context = RetryContext(
-                    run_id=run_id,
-                    step_id=step.step_id,
-                    agent_id=step.agent_id,
-                    attempt=total_attempts + 1,
-                    error=Exception(executions_for_step[-1].error) if executions_for_step and executions_for_step[-1].error else None,
-                    random_seed=master_seed + total_attempts # Deterministic seed
-                )
+            context = RetryContext(
+                run_id=swarm_run.run_id,
+                step_id=step.step_id,
+                agent_id=step.agent_id,
+                attempt=total_attempts + 1,
+                error=Exception(executions_for_step[-1].error) if executions_for_step and executions_for_step[-1].error else None,
+                random_seed=swarm_run.master_seed + total_attempts # Deterministic seed
+            )
 
-                if step.retry_policy.should_retry(context):
-                    delay = step.retry_policy.next_delay(context)
+            policy = self.policy_resolver.resolve_policy(swarm_run.domain, context)
+
+            if step.mandatory and policy:
+                if policy.should_retry(context):
+                    delay = policy.next_delay(context)
                     max_delay = max(max_delay, delay)
                     steps_to_retry.append(step)
                     new_retry_attempts.append(RetryAttempt(

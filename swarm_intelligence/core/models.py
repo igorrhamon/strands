@@ -4,6 +4,8 @@ from typing import List, Dict, Any, Optional
 from enum import Enum
 import uuid
 from datetime import datetime
+
+from swarm_intelligence.core.enums import RiskLevel
 from swarm_intelligence.policy.retry_policy import RetryPolicy
 
 # Forward declaration for type hinting
@@ -12,6 +14,7 @@ class ConfidenceSnapshot: pass
 class RetryAttempt: pass
 class AgentExecution: pass
 class Evidence: pass
+class Decision: pass
 
 class EvidenceType(Enum):
     """Enumeration for the types of evidence that can be produced."""
@@ -54,6 +57,59 @@ class AgentExecution:
     def is_successful(self) -> bool:
         return self.error is None
 
+
+
+
+
+@dataclass(frozen=True)
+class Domain:
+    """Represents a cognitive domain of operation."""
+    id: str
+    name: str
+    description: str
+    risk_level: RiskLevel
+
+
+@dataclass
+class DecisionContext:
+    """Captures the context in which a decision was made. For replay and audit."""
+    context_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    aggregation_strategy: str = "default_average"
+    policy_versions: Dict[str, str] = field(default_factory=dict)
+    replayable: bool = True
+
+
+@dataclass
+class HumanDecision:
+    """Represents a decision made by a human reviewer, potentially overriding the swarm."""
+    action: HumanAction
+    author: str
+    override_reason: Optional[str] = None
+    overridden_action_proposed: Optional[str] = None
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+    domain_expertise: str = "default_expert"
+    human_decision_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+
+
+@dataclass
+class Decision:
+    """Represents a final decision made by the SwarmController."""
+    summary: str
+    action_proposed: str
+    confidence: float
+    supporting_evidence: List[Evidence]
+    decision_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    human_decision: Optional[HumanDecision] = None
+    context: DecisionContext = field(default_factory=DecisionContext)
+
+
+@dataclass
+class Alert:
+    """Represents an incoming event that may trigger a swarm run."""
+    alert_id: str
+    data: Dict[str, Any] = field(default_factory=dict)
+
+
 @dataclass
 class SwarmStep:
     """Defines a single step in a SwarmPlan."""
@@ -71,41 +127,18 @@ class SwarmPlan:
     steps: List[SwarmStep]
     plan_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
-@dataclass
-class DecisionContext:
-    """Captures the context in which a decision was made. For replay and audit."""
-    context_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    aggregation_strategy: str = "default_average"
-    policy_versions: Dict[str, str] = field(default_factory=dict)
-    replayable: bool = True
 
 @dataclass
-class Decision:
-    """Represents a final decision made by the SwarmController."""
-    summary: str
-    action_proposed: str
-    confidence: float
-    supporting_evidence: List[Evidence]
-    decision_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    human_decision: Optional['HumanDecision'] = None
-    context: DecisionContext = field(default_factory=DecisionContext)
-
-@dataclass
-class Alert:
-    """Represents an incoming event that may trigger a swarm run."""
-    alert_id: str
-    data: Dict[str, Any] = field(default_factory=dict)
-
-@dataclass
-class HumanDecision:
-    """Represents a decision made by a human reviewer, potentially overriding the swarm."""
-    action: HumanAction
-    author: str
-    override_reason: Optional[str] = None
-    overridden_action_proposed: Optional[str] = None
+class SwarmRun:
+    """Represents a single, complete execution of a swarm against a plan."""
+    run_id: str
+    domain: Domain
+    plan: SwarmPlan
+    master_seed: int
+    executions: List[AgentExecution] = field(default_factory=list)
+    final_decision: Optional[Decision] = None
     timestamp: datetime = field(default_factory=datetime.utcnow)
-    domain_expertise: str = "default_expert"
-    human_decision_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+
 
 
 @dataclass
