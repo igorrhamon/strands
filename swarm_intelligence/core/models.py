@@ -12,6 +12,7 @@ class ConfidenceSnapshot: pass
 class RetryAttempt: pass
 class AgentExecution: pass
 class Evidence: pass
+class SystemEvent: pass
 
 class EvidenceType(Enum):
     """Enumeration for the types of evidence that can be produced."""
@@ -145,4 +146,16 @@ class ReplayReport:
     report_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     causal_divergences: List[str] = field(default_factory=list)
     confidence_delta: float = 0.0
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass
+class SystemEvent:
+    """Represents a system-level event that can be a cause for other events."""
+    event_type: str  # e.g., TIME_DECAY, SYSTEM_REBALANCE, MANUAL_RESET
+    description: str
+    sequence_id: int
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    run_id: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
     timestamp: datetime = field(default_factory=datetime.utcnow)

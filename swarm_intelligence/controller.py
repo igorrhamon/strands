@@ -63,16 +63,24 @@ class SwarmController:
         """
         master_seed = master_seed if master_seed is not None else random.randint(0, 1_000_000)
         sequence_id = 0
+        agent_confidence_cache: Dict[str, float] = {}
 
         executions: List[AgentExecution] = []
         all_retry_attempts: List[RetryAttempt] = []
 
         steps_to_process = list(plan.steps)
 
-        # Initial time decay application
+        # Initial time decay application and cache population
         for step in steps_to_process:
             sequence_id += 1
-            self.confidence_service.apply_time_decay(step.agent_id, sequence_id, 0.001) # Example decay rate
+            last_confidence = self.confidence_service.get_last_confidence(step.agent_id)
+            new_confidence = self.confidence_service.apply_time_decay(
+                step.agent_id,
+                sequence_id,
+                0.001, # Example decay rate
+                last_confidence=last_confidence
+            )
+            agent_confidence_cache[step.agent_id] = new_confidence
 
         while steps_to_process:
             if self.replay_mode:
@@ -100,7 +108,7 @@ class SwarmController:
         else:
             decision = self._formulate_decision(successful_executions)
 
-        return self._request_human_review(decision, sequence_id), executions, all_retry_attempts, master_seed
+        return self._request_human_review(decision, sequence_id, agent_confidence_cache), executions, all_retry_attempts, master_seed
 
     async def _evaluate_and_get_next_steps(
         self, plan: SwarmPlan, run_id: str, master_seed: int,
@@ -192,7 +200,7 @@ class SwarmController:
             supporting_evidence=all_evidence
         )
 
-    def _request_human_review(self, decision: Decision, sequence_id: int) -> Decision:
+    def _request_human_review(self, decision: Decision, sequence_id: int, agent_confidence_cache: Dict[str, float]) -> Decision:
         """Handles the human-in-the-loop governance step, processing a structured HumanDecision."""
         if self.human_review_hook:
             logging.info("Decision requires human review.")
@@ -203,7 +211,27 @@ class SwarmController:
             if human_decision.action == HumanAction.OVERRIDE:
                 for evidence in decision.supporting_evidence:
                     sequence_id += 1
-                    self.confidence_service.penalize_for_override(evidence.agent_id, decision.decision_id, sequence_id, self.confidence_policy)
+                    last_confidence = agent_confidence_cache.get(evidence.agent_id)
+                    new_confidence = self.confidence_service.penalize_for_override(
+                        evidence.agent_id,
+                        decision.decision_id,
+                        sequence_id,
+                        self.confidence_policy,
+                        last_confidence=last_confidence
+                    )
+                    agent_confidence_cache[evidence.agent_id] = new_confidence
+            elif human_decision.action == HumanAction.ACCEPT:
+                for evidence in decision.supporting_evidence:
+                    sequence_id += 1
+                    last_confidence = agent_confidence_cache.get(evidence.agent_id)
+                    new_confidence = self.confidence_service.reinforce_for_success(
+                        evidence.agent_id,
+                        decision.decision_id,
+                        sequence_id,
+                        self.confidence_policy,
+                        last_confidence=last_confidence
+                    )
+                    agent_confidence_cache[evidence.agent_id] = new_confidence
         else:
             logging.info("No human review hook registered. Proceeding without human governance.")
 
