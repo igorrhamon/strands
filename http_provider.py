@@ -1,3 +1,6 @@
+import asyncio
+import itertools
+import sys
 from typing import AsyncGenerator, Any, Optional
 
 import httpx
@@ -5,6 +8,24 @@ import httpx
 from strands.models import Model
 from strands.types.content import Messages
 from strands.types.streaming import StreamEvent
+
+
+async def spinner_task(stop_event: asyncio.Event):
+    spinner = itertools.cycle(["-", "/", "|", "\\"])
+    last_line_length = 0
+    while not stop_event.is_set():
+        try:
+            line = f" {next(spinner)} Thinking..."
+            last_line_length = len(line)
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            await asyncio.sleep(0.1)
+            sys.stdout.write("\\r")
+        except asyncio.CancelledError:
+            break
+    # Clear the line
+    sys.stdout.write("\r" + " " * last_line_length + "\r")
+    sys.stdout.flush()
 
 
 class HTTPModel(Model):
@@ -47,9 +68,12 @@ class HTTPModel(Model):
 
         payload = {"prompt": "\n".join(prompt_parts), "max_tokens": kwargs.get("max_tokens", 1024)}
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.post(self.endpoint_url, json=payload)
-            resp.raise_for_status()
+        stop_spinner_event = asyncio.Event()
+        spinner = asyncio.create_task(spinner_task(stop_spinner_event))
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(self.endpoint_url, json=payload)
+                resp.raise_for_status()
             try:
                 data = resp.json()
             except Exception:
@@ -60,3 +84,6 @@ class HTTPModel(Model):
                 return
 
             yield {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": resp.text}}}
+        finally:
+            stop_spinner_event.set()
+            await spinner
