@@ -229,3 +229,4 @@ __marimo__/
 __pycache__/http_provider.cpython-312.pyc
 __pycache__/my_http_model.cpython-312.pyc
 __pycache__/server_fastapi.cpython-312.pyc
+__pycache__/
