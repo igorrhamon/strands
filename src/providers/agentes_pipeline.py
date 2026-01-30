@@ -32,7 +32,7 @@ class InvalidPipelineConfiguration(RuntimeError):
 class AgentesPipelineProvider(Model):
     """Provider que executa um pipeline sequencial de agentes via HTTP.
 
-    - Endpoint default: `http://acs-assist-inov-4047.nia.desenv.bb.com.br/acs/llms/agent`
+    - Endpoint: configurável via `AGENTES_ROI2_ENDPOINT` (default: http://localhost:8000)
     - Auth: `Authorization: Bearer <AGENTES_ROI2_TOKEN>`
     - Execução: bulk (yield único StreamEvent)
 
@@ -50,8 +50,8 @@ class AgentesPipelineProvider(Model):
         post_fn: Optional[Callable[[str, Dict[str, Any], Dict[str, str], int], Any]] = None,
         context: Optional[Dict[str, Any]] = None,
     ):
-        self.endpoint = endpoint or os.environ.get(
-            "AGENTES_ROI2_ENDPOINT", "http://acs-assist-inov-4047.nia.desenv.bb.com.br"
+        self.endpoint = (
+            endpoint or os.environ.get("AGENTES_ROI2_ENDPOINT", "http://localhost:8000")
         ).rstrip("/")
         self.path = "/acs/llms/agent"
         self.timeout = int(timeout or os.environ.get("AGENTES_ROI2_TIMEOUT", "30"))
@@ -104,10 +104,14 @@ class AgentesPipelineProvider(Model):
         return f"{self.endpoint}{self.path}"
 
     def _headers(self) -> Dict[str, str]:
-        return {
+        headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
+        token = os.environ.get("AGENTES_ROI2_TOKEN")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
 
     def _extract_initial_input(self, messages: Messages) -> str:
         if messages is None:
