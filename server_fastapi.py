@@ -58,6 +58,15 @@ async def shutdown_event():
 
 # --- API Endpoints ---
 
+class GenerateRequest(BaseModel):
+    prompt: str
+    max_tokens: Optional[int] = 1024
+
+@app.post("/generate")
+async def generate(request: GenerateRequest):
+    """Echo endpoint for agent_http.py demo."""
+    return {"text": f"Echo: {request.prompt[:100]}..."}
+
 @app.get("/metrics")
 async def metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
@@ -158,7 +167,7 @@ async def submit_review(decision_id: str, review: ReviewRequest):
             validated_at=datetime.now(timezone.utc)
         )
 
-        await human_review.process_review(stub_candidate, validation)
+        human_review.process_review(stub_candidate, validation)
         
         return {"status": "success", "decision_id": decision_id, "action": "approved" if review.is_approved else "rejected"}
 
