@@ -1,32 +1,20 @@
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
-from enum import Enum
+from typing import List, Dict, Any, Optional, Set
 import uuid
 from datetime import datetime
 from swarm_intelligence.policy.retry_policy import RetryPolicy
+from swarm_intelligence.core.enums import EvidenceType, HumanAction, ConfidenceCauseType
 
 # Forward declaration for type hinting
 class DecisionContext: pass
 class ConfidenceSnapshot: pass
 class RetryAttempt: pass
+class RetryDecision: pass
+class RetryEvaluationResult: pass
 class AgentExecution: pass
 class Evidence: pass
-
-class EvidenceType(Enum):
-    """Enumeration for the types of evidence that can be produced."""
-    RAW_DATA = "raw_data"
-    METRICS = "metrics"
-    SEMANTIC = "semantic"
-    RULES = "rules"
-    HYPOTHESIS = "hypothesis"
-    HUMAN_VALIDATED = "human_validated"
-
-class HumanAction(Enum):
-    """Enumeration for the actions a human can take on a swarm's decision."""
-    ACCEPT = "accept"
-    REJECT = "reject"
-    OVERRIDE = "override"
+class SystemEvent: pass
 
 @dataclass
 class Evidence:
@@ -48,7 +36,7 @@ class AgentExecution:
     input_parameters: Dict[str, Any]
     execution_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     output_evidence: List[Evidence] = field(default_factory=list)
-    error: Optional[str] = None
+    error: Optional[Exception] = None
     timestamp: datetime = field(default_factory=datetime.utcnow)
 
     def is_successful(self) -> bool:
@@ -146,3 +134,38 @@ class ReplayReport:
     causal_divergences: List[str] = field(default_factory=list)
     confidence_delta: float = 0.0
     timestamp: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass
+class SystemEvent:
+    """Represents a system-level event that can be a cause for other events."""
+    event_type: str  # e.g., TIME_DECAY, SYSTEM_REBALANCE, MANUAL_RESET
+    description: str
+    sequence_id: int
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    run_id: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass
+class RetryDecision:
+    """Represents an explicit, auditable decision to retry a step."""
+    step_id: str
+    reason: str
+    policy_name: str
+    policy_version: str
+    policy_logic_hash: str
+    attempt_id: str
+    decision_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass(frozen=True)
+class RetryEvaluationResult:
+    """Represents the outcome of a retry evaluation cycle."""
+    steps_to_retry: List[SwarmStep]
+    retry_attempts: List[RetryAttempt]
+    retry_decisions: List[RetryDecision]
+    max_delay_seconds: float
+    newly_successful_step_ids: Set[str]

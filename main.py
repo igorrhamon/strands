@@ -10,7 +10,10 @@ from swarm_intelligence.core.models import (
     Decision, HumanAction, HumanDecision, OperationalOutcome, RetryAttempt, AgentExecution
 )
 from swarm_intelligence.core.swarm import Agent, SwarmOrchestrator
-from swarm_intelligence.controller import SwarmController
+from swarm_intelligence.controllers.swarm_execution_controller import SwarmExecutionController
+from swarm_intelligence.controllers.swarm_retry_controller import SwarmRetryController
+from swarm_intelligence.controllers.swarm_decision_controller import SwarmDecisionController
+from swarm_intelligence.coordinators.swarm_run_coordinator import SwarmRunCoordinator
 from swarm_intelligence.memory.neo4j_adapter import Neo4jAdapter
 from swarm_intelligence.policy.retry_policy import ExponentialBackoffPolicy
 from swarm_intelligence.policy.confidence_policy import DefaultConfidencePolicy
@@ -36,7 +39,7 @@ class ThreatIntelAgent(Agent):
         )
 
         if ThreatIntelAgent._attempts <= 1:
-            execution.error = "API_TIMEOUT"
+            execution.error = Exception("API_TIMEOUT")
         else:
             evidence = Evidence(
                 source_agent_execution_id=execution.execution_id,
@@ -91,8 +94,14 @@ async def main():
         confidence_service = ConfidenceService(neo4j)
         agents = [ThreatIntelAgent("threat_intel"), LogAnalysisAgent("log_analysis")]
         orchestrator = SwarmOrchestrator(agents)
-        controller = SwarmController(orchestrator, confidence_service, confidence_policy=DefaultConfidencePolicy())
-        controller.register_human_hooks(expert_human_review)
+
+        execution_controller = SwarmExecutionController(orchestrator)
+        retry_controller = SwarmRetryController()
+        decision_controller = SwarmDecisionController()
+
+        coordinator = SwarmRunCoordinator(
+            execution_controller, retry_controller, decision_controller, confidence_service
+        )
 
         retry_policy = ExponentialBackoffPolicy(max_attempts=2, base_delay=0.1)
         plan = SwarmPlan(objective="Neutralize threat on host web-prod-03.",
@@ -101,9 +110,11 @@ async def main():
         alert = Alert(alert_id="sec-alert-101", data={"hostname": "web-prod-03"})
         run_id = f"run-{alert.alert_id}"
 
-        decision, executions, retries, master_seed = await controller.aexecute_plan(plan, alert, run_id)
+        decision, executions, retries, retry_decisions, master_seed = await coordinator.run(
+            plan, alert, run_id, DefaultConfidencePolicy(), expert_human_review
+        )
 
-        neo4j.save_swarm_run(plan, alert, executions, decision, retries, master_seed)
+        neo4j.save_swarm_run(plan, alert, executions, decision, retries, retry_decisions, master_seed)
 
         if decision.human_decision:
             outcome = OperationalOutcome(status="success")
@@ -112,7 +123,7 @@ async def main():
 
         logging.info("\n--- Initiating Deterministic Replay ---")
         replay_engine = ReplayEngine(neo4j)
-        report = await replay_engine.replay_decision(run_id, controller)
+        report = await replay_engine.replay_decision(run_id, coordinator)
         logging.info(f"Replay Report ({report.report_id}) generated and saved.")
 
     except Exception as e:

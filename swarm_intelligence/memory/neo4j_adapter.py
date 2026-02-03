@@ -6,7 +6,8 @@ from typing import Dict, Any, List
 
 from swarm_intelligence.core.models import (
     Alert, SwarmPlan, SwarmStep, AgentExecution, Evidence, Decision,
-    HumanDecision, OperationalOutcome, EvidenceType, RetryAttempt, ReplayReport
+    HumanDecision, OperationalOutcome, EvidenceType, RetryAttempt, ReplayReport,
+    RetryDecision, SystemEvent
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -102,14 +103,17 @@ class Neo4jAdapter:
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:HumanDecision) REQUIRE n.id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:OperationalOutcome) REQUIRE n.id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:RetryAttempt) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:RetryDecision) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:RetryPolicy) REQUIRE n.logic_hash IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:ReplayReport) REQUIRE n.id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:ConfidenceSnapshot) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:SystemEvent) REQUIRE n.id IS UNIQUE",
         ]
         for query in constraints:
             self.run_transaction(query)
         logging.info("Neo4j schema constraints ensured.")
 
-    def save_swarm_run(self, plan: SwarmPlan, alert: Alert, executions: List[AgentExecution], decision: Decision, retry_attempts: List[RetryAttempt], master_seed: int):
+    def save_swarm_run(self, plan: SwarmPlan, alert: Alert, executions: List[AgentExecution], decision: Decision, retry_attempts: List[RetryAttempt], retry_decisions: List[RetryDecision], master_seed: int):
         # This complex query performs the entire save in one atomic transaction.
         query = """
         MERGE (alert:Alert {id: $alert_id}) ON CREATE SET alert.data = $alert_data
@@ -267,6 +271,31 @@ class Neo4jAdapter:
             "sequence_id": sequence_id
         })
         return result["snapshot_id"]
+
+    def create_system_event(self, event: SystemEvent) -> str:
+        """Creates a SystemEvent node from a dataclass and returns its ID."""
+        query = """
+        CREATE (e:SystemEvent {
+            id: $id,
+            event_type: $event_type,
+            description: $description,
+            sequence_id: $sequence_id,
+            run_id: $run_id,
+            metadata: $metadata,
+            timestamp: datetime()
+        })
+        RETURN e.id as event_id
+        """
+        params = {
+            "id": event.id,
+            "event_type": event.event_type,
+            "description": event.description,
+            "sequence_id": event.sequence_id,
+            "run_id": event.run_id,
+            "metadata": json.dumps(event.metadata) if event.metadata else None
+        }
+        result = self.run_write_transaction(query, params)
+        return result["event_id"]
 
     def link_snapshot_to_cause(self, snapshot_id: str, cause_id: str, cause_type: str):
         """Creates a [:CAUSED_BY] relationship from a snapshot to its cause."""
