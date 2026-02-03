@@ -52,6 +52,7 @@ src/models/embedding.py
 src/models/metric_trend.py
 src/models/metrics.py
 src/models/swarm.py
+src/pipeline/refrag_pipeline.py
 src/providers/agentes_pipeline.py
 src/providers/github_models.py
 src/providers/ollama_models.py

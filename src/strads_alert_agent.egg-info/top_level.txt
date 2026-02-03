@@ -3,6 +3,7 @@ agents
 config
 graph
 models
+pipeline
 providers
 rules
 tools

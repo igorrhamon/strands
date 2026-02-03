@@ -1,6 +1,6 @@
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from swarm_intelligence.core.models import Decision, SwarmPlan, Alert, ReplayReport
 from swarm_intelligence.memory.neo4j_adapter import Neo4jAdapter
 from swarm_intelligence.coordinators.swarm_run_coordinator import SwarmRunCoordinator
@@ -18,7 +18,7 @@ class ReplayEngine:
         self,
         run_id: str,
         coordinator: SwarmRunCoordinator,
-        new_plan: SwarmPlan = None
+        new_plan: Optional[SwarmPlan] = None
     ) -> ReplayReport:
         """
         Replays a decision, optionally with a new plan or policies.
@@ -30,18 +30,16 @@ class ReplayEngine:
 
         plan_to_replay = new_plan if new_plan else original_run_context['plan']
 
-        alert = original_run_context['alert']
         original_seed = original_run_context['master_seed']
 
         replayed_decision, _, _, _, _ = await coordinator.run(
             plan_to_replay,
-            alert,
             run_id,
             confidence_policy=DefaultConfidencePolicy(),
             human_hook=None,
-            master_seed=original_seed,
             replay_mode=True,
-            replay_results=original_run_context['results']
+            replay_results=original_run_context['results'],
+            master_seed=original_seed,
         )
 
         original_decision = original_run_context['decision']
@@ -55,7 +53,7 @@ class ReplayEngine:
             divergences.append(f"Evidence set mismatch. Original: {original_evidence_ids}, Replayed: {replayed_evidence_ids}")
 
         if replayed_decision.action_proposed != original_decision['action_proposed']:
-            divergences.append(f"Final action mismatch.")
+            divergences.append("Final action mismatch.")
 
         report = ReplayReport(
             original_decision_id=original_decision['id'],
