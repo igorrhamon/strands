@@ -18,7 +18,7 @@ class SwarmRetryController:
     This controller is a stateless policy engine.
     """
 
-    async def evaluate(
+    def evaluate(
         self,
         plan: SwarmPlan,
         executions: List[AgentExecution],

@@ -2,7 +2,7 @@
 import logging
 import json
 from neo4j import GraphDatabase, Driver
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, cast, LiteralString
 
 from swarm_intelligence.core.models import (
     Alert, SwarmPlan, SwarmStep, AgentExecution, Evidence, Decision,
@@ -25,18 +25,18 @@ class Neo4jAdapter:
         self._driver.close()
         logging.info("Neo4jAdapter connection closed.")
 
-    def run_transaction(self, query: str, parameters: Dict[str, Any] = None):
+    def run_transaction(self, query: str, parameters: Optional[Dict[str, Any]] = None):
         with self._driver.session() as session:
-            session.execute_write(lambda tx: tx.run(query, parameters))
+            session.execute_write(lambda tx: tx.run(cast(LiteralString, query), parameters))
 
-    def run_write_transaction(self, query: str, parameters: Dict[str, Any] = None) -> Any:
+    def run_write_transaction(self, query: str, parameters: Optional[Dict[str, Any]] = None) -> Any:
         with self._driver.session() as session:
-            result = session.execute_write(lambda tx: tx.run(query, parameters).single())
+            result = session.execute_write(lambda tx: tx.run(cast(LiteralString, query), parameters).single())
         return result
 
-    def run_read_transaction(self, query: str, parameters: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+    def run_read_transaction(self, query: str, parameters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         with self._driver.session() as session:
-            result = session.execute_read(lambda tx: tx.run(query, parameters).data())
+            result = session.execute_read(lambda tx: tx.run(cast(LiteralString, query), parameters).data())
         return result
 
     def fetch_full_run_context(self, run_id: str) -> Dict[str, Any]:
@@ -113,7 +113,7 @@ class Neo4jAdapter:
             self.run_transaction(query)
         logging.info("Neo4j schema constraints ensured.")
 
-    def save_swarm_run(self, plan: SwarmPlan, alert: Alert, executions: List[AgentExecution], decision: Decision, retry_attempts: List[RetryAttempt], retry_decisions: List[RetryDecision], master_seed: int):
+    def save_swarm_run(self, plan: SwarmPlan, alert: Alert, executions: List[AgentExecution], decision: Decision, retry_attempts: List[RetryAttempt], master_seed: int):
         # This complex query performs the entire save in one atomic transaction.
         query = """
         MERGE (alert:Alert {id: $alert_id}) ON CREATE SET alert.data = $alert_data

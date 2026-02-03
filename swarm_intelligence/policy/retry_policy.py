@@ -2,7 +2,7 @@
 from abc import ABC, abstractmethod
 import random
 import hashlib
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from swarm_intelligence.core.enums import EvidenceType
 
@@ -13,7 +13,7 @@ class RetryContext:
     step_id: str
     agent_id: str
     attempt: int
-    error: Exception = None
+    error: Optional[Exception] = None
     random_seed: int = 0
     domain_hints: List[str] = field(default_factory=list)
     last_confidence: float = 0.0

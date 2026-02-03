@@ -48,20 +48,18 @@ class SwarmRunCoordinator:
     async def run(
         self,
         plan: SwarmPlan,
-        alert: Alert,
         run_id: str,
         confidence_policy: ConfidencePolicy,
         human_hook: Optional[Callable[[Decision], HumanDecision]],
         replay_mode: bool = False,
         replay_results: Optional[Dict[str, AgentExecution]] = None,
         master_seed: Optional[int] = None,
-    ) -> (Decision, List[AgentExecution], List[RetryAttempt], List[RetryDecision], int):
+    ) -> tuple[Decision, List[AgentExecution], List[RetryAttempt], List[RetryDecision], int]:
         master_seed = (
             master_seed
             if master_seed is not None
             else random.randint(0, 1_000_000)
         )
-        sequence_id = 0
 
         all_executions: List[AgentExecution] = []
         all_retry_attempts: List[RetryAttempt] = []
@@ -79,7 +77,7 @@ class SwarmRunCoordinator:
             )
             all_executions.extend(new_executions)
 
-            retry_eval = await self.retry_controller.evaluate(
+            retry_eval = self.retry_controller.evaluate(
                 plan,
                 all_executions,
                 all_retry_attempts,
@@ -111,7 +109,7 @@ class SwarmRunCoordinator:
         decision = await self.decision_controller.decide(
             plan,
             final_successful_executions,
-            alert,
+            Alert(alert_id=run_id, data={}),
             self.confidence_service,
             confidence_policy,
             human_hook,

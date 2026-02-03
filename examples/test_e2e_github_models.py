@@ -12,7 +12,8 @@ import asyncio
 import sys
 import os
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
+from uuid import uuid4
 
 # Setup path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -47,14 +48,14 @@ class GitHubAnalysisAgent(Agent):
         self.logic_hash = "github_analysis_v1"
         self.model = model
 
-    async def execute(self, parameters, step_id: str):
+    async def execute(self, params, step_id: str):
         """
         Execute analysis using GitHub Models.
         """
         from swarm_intelligence.core.models import AgentExecution
 
         try:
-            alert_data = parameters.get("alert_data", {})
+            alert_data = params.get("alert_data", {})
             
             prompt = f"""
 Analyze this security alert and provide structured output:
@@ -79,6 +80,7 @@ Provide:
             #     pass
 
             evidence = Evidence(
+                source_agent_execution_id=str(uuid4()),
                 agent_id=self.agent_id,
                 evidence_type=EvidenceType.HYPOTHESIS,
                 content={"analysis": response_text, "summary": "HIGH risk detected"},
@@ -90,7 +92,7 @@ Provide:
                 agent_version=self.version,
                 logic_hash=self.logic_hash,
                 step_id=step_id,
-                input_parameters=parameters,
+                input_parameters=params,
                 output_evidence=[evidence],
             )
 
@@ -103,38 +105,32 @@ Provide:
                 agent_version=self.version,
                 logic_hash=self.logic_hash,
                 step_id=step_id,
-                input_parameters=parameters,
+                input_parameters=params,
                 error=e,
             )
 
 
-async def test_e2e_github_models():
-    """
-    End-to-end test with GitHub Models.
-    """
-    print("\n" + "=" * 70)
-    print("🧪 END-TO-END TEST: GitHub Models + Swarm Orchestration")
-    print("=" * 70)
-
-    # 1. Initialize Neo4j adapter
+def _setup_neo4j():
+    """Initialize Neo4j adapter."""
     print("\n1️⃣  Initializing Neo4j...")
-    neo4j = None
     try:
         neo4j = Neo4jAdapter(
             uri="bolt://localhost:7687",
             user="neo4j",
             password="password"
         )
-        # Try to run a simple query
         neo4j.run_read_transaction("RETURN 1 as test")
         neo4j.setup_schema()
         print("   ✅ Neo4j connected")
+        return neo4j
     except Exception as e:
         print(f"   ⚠️  Neo4j not available: {type(e).__name__}")
         print("   🔄 Continuing with mocked persistence...")
-        neo4j = None
+        return None
 
-    # 2. Initialize GitHub Models provider (with mock token for demo)
+
+def _setup_github_model():
+    """Initialize GitHub Models provider."""
     print("\n2️⃣  Initializing GitHub Models...")
     token = os.environ.get("GITHUB_TOKEN")
     if token:
@@ -142,49 +138,61 @@ async def test_e2e_github_models():
         try:
             model = GitHubModels(model_name="openai/gpt-4o-mini")
             print(f"   ✅ Model: {model.model_name}")
+            return model
         except Exception as e:
             print(f"   ⚠️  GitHub Models init error: {e}")
             print("   📝 Using mock mode for demo...")
-            model = None
+            return None
     else:
         print("   ℹ️  GITHUB_TOKEN not set - using mock mode")
         print("   💡 For real API calls: export GITHUB_TOKEN='your_token'")
-        model = None
+        return None
 
-    # 3. Create agents
+
+def _create_mock_agent():
+    """Create a mock agent for testing."""
+    class MockAgent(Agent):
+        def __init__(self):
+            self.agent_id = "github_analyzer"
+            self.version = "1.0.0"
+            self.logic_hash = "github_analysis_v1"
+        
+        async def execute(self, params, step_id: str):
+            from swarm_intelligence.core.models import AgentExecution
+            evidence = Evidence(
+                source_agent_execution_id=str(uuid4()),
+                agent_id=self.agent_id,
+                evidence_type=EvidenceType.HYPOTHESIS,
+                content={"analysis": "Mock analysis result", "summary": "MOCK: HIGH risk detected"},
+                confidence=0.85,
+            )
+            return AgentExecution(
+                agent_id=self.agent_id,
+                agent_version=self.version,
+                logic_hash=self.logic_hash,
+                step_id=step_id,
+                input_parameters=params,
+                output_evidence=[evidence],
+            )
+    
+    return MockAgent()
+
+
+def _setup_agents(model):
+    """Create and setup agents."""
     print("\n3️⃣  Creating agents...")
     if model:
         github_agent = GitHubAnalysisAgent("github_analyzer", model)
         print(f"   ✅ Agent: {github_agent.agent_id} (with real GitHub Models)")
+        return github_agent
     else:
-        # Create mock agent
-        class MockAgent(Agent):
-            def __init__(self):
-                self.agent_id = "github_analyzer"
-                self.version = "1.0.0"
-                self.logic_hash = "github_analysis_v1"
-            
-            async def execute(self, parameters, step_id: str):
-                from swarm_intelligence.core.models import AgentExecution
-                evidence = Evidence(
-                    agent_id=self.agent_id,
-                    evidence_type=EvidenceType.HYPOTHESIS,
-                    content={"analysis": "Mock analysis result", "summary": "MOCK: HIGH risk detected"},
-                    confidence=0.85,
-                )
-                return AgentExecution(
-                    agent_id=self.agent_id,
-                    agent_version=self.version,
-                    logic_hash=self.logic_hash,
-                    step_id=step_id,
-                    input_parameters=parameters,
-                    output_evidence=[evidence],
-                )
-        
-        github_agent = MockAgent()
+        github_agent = _create_mock_agent()
         print(f"   ✅ Agent: {github_agent.agent_id} (MOCK - no GitHub token)")
+        return github_agent
 
-    # 4. Initialize orchestrator and controllers
+
+def _setup_orchestration(github_agent, neo4j):
+    """Setup orchestrator and controllers."""
     print("\n4️⃣  Setting up Swarm Orchestration...")
     orchestrator = SwarmOrchestrator([github_agent])
     execution_controller = SwarmExecutionController(orchestrator)
@@ -206,14 +214,18 @@ async def test_e2e_github_models():
     else:
         print("   ⚠️  Coordinator requires Neo4j for confidence tracking")
 
-    # 5. Create alert and plan
+    return orchestrator, coordinator
+
+
+def _create_alert_and_plan():
+    """Create alert and swarm plan."""
     print("\n5️⃣  Creating SwarmPlan and Alert...")
     alert = Alert(
         alert_id="SEC-E2E-001",
         data={
             "hostname": "web-prod-03",
             "event": "Suspicious login from unknown IP",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "severity": "high",
         },
     )
@@ -231,8 +243,63 @@ async def test_e2e_github_models():
         steps=[analysis_step],
     )
     print(f"   ✅ Plan: {plan.objective}")
+    return alert, plan
 
-    # 6. Execute plan
+
+def _print_execution_results(decision, executions, retries, retry_decisions):
+    """Print execution results."""
+    print("\n7️⃣  Results:")
+    print(f"   Decision ID: {decision.decision_id}")
+    print(f"   Summary: {decision.summary[:80]}...")
+    print(f"   Action: {decision.action_proposed}")
+    print(f"   Confidence: {decision.confidence:.2f}")
+
+    if executions:
+        ex = executions[0]
+        print("\n   Agent Execution:")
+        print(f"   - Agent: {ex.agent_id}")
+        print(f"   - Status: {'✅ Success' if ex.is_successful() else '❌ Failed'}")
+        print(f"   - Evidence: {len(ex.output_evidence)} pieces")
+        if ex.output_evidence:
+            ev = ex.output_evidence[0]
+            print(f"   - Evidence Type: {ev.evidence_type.value}")
+            print(f"   - Confidence: {ev.confidence:.2f}")
+
+
+def _print_direct_execution_results(executions):
+    """Print direct execution results."""
+    print("\n7️⃣  Direct Execution Results:")
+    
+    if executions:
+        for i, ex in enumerate(executions, 1):
+            print(f"\n   Execution #{i}:")
+            print(f"   - Agent: {ex.agent_id}")
+            print(f"   - Status: {'✅ Success' if ex.is_successful() else '❌ Failed'}")
+            print(f"   - Evidence: {len(ex.output_evidence)} pieces")
+            if ex.output_evidence:
+                for j, ev in enumerate(ex.output_evidence, 1):
+                    print(f"     Evidence #{j}:")
+                    print(f"       - Type: {ev.evidence_type.value}")
+                    print(f"       - Confidence: {ev.confidence:.2f}")
+                    print(f"       - Content: {str(ev.content)[:60]}...")
+
+
+async def test_e2e_github_models():
+    """
+    End-to-end test with GitHub Models.
+    """
+    print("\n" + "=" * 70)
+    print("🧪 END-TO-END TEST: GitHub Models + Swarm Orchestration")
+    print("=" * 70)
+
+    # Setup
+    neo4j = _setup_neo4j()
+    model = _setup_github_model()
+    github_agent = _setup_agents(model)
+    orchestrator, coordinator = _setup_orchestration(github_agent, neo4j)
+    alert, plan = _create_alert_and_plan()
+
+    # Execution
     print("\n6️⃣  Executing SwarmPlan...")
     run_id = f"e2e-test-{alert.alert_id}"
 
@@ -241,80 +308,46 @@ async def test_e2e_github_models():
             confidence_policy = DefaultConfidencePolicy()
 
             def human_review_hook(decision):
-                # Auto-accept for demo
                 from swarm_intelligence.core.models import HumanDecision, HumanAction
                 return HumanDecision(
                     action=HumanAction.ACCEPT,
-                    expert_name="e2e-test",
-                    justification="E2E test auto-accept",
+                    author="e2e-test",
+                    override_reason="E2E test auto-accept",
                 )
 
             decision, executions, retries, retry_decisions, master_seed = await coordinator.run(
                 plan,
-                alert,
                 run_id,
                 confidence_policy=confidence_policy,
                 human_hook=human_review_hook,
             )
 
-            print(f"\n   ✅ Execution complete!")
+            print("\n   ✅ Execution complete!")
             print(f"   📊 Executions: {len(executions)}")
             print(f"   🔄 Retries: {len(retries)}")
             print(f"   📋 Retry Decisions: {len(retry_decisions)}")
 
-            # 7. Display results
-            print("\n7️⃣  Results:")
-            print(f"   Decision ID: {decision.decision_id}")
-            print(f"   Summary: {decision.summary[:80]}...")
-            print(f"   Action: {decision.action_proposed}")
-            print(f"   Confidence: {decision.confidence:.2f}")
+            _print_execution_results(decision, executions, retries, retry_decisions)
 
-            if executions:
-                ex = executions[0]
-                print(f"\n   Agent Execution:")
-                print(f"   - Agent: {ex.agent_id}")
-                print(f"   - Status: {'✅ Success' if ex.is_successful() else '❌ Failed'}")
-                print(f"   - Evidence: {len(ex.output_evidence)} pieces")
-                if ex.output_evidence:
-                    ev = ex.output_evidence[0]
-                    print(f"   - Evidence Type: {ev.evidence_type.value}")
-                    print(f"   - Confidence: {ev.confidence:.2f}")
-
-            # 8. Persist to Neo4j if available
+            # Persist to Neo4j
             if neo4j and executions:
                 print("\n8️⃣  Persisting to Neo4j...")
                 try:
                     neo4j.save_swarm_run(
-                        plan, alert, executions, decision, retries, retry_decisions, master_seed
+                        plan, alert, executions, decision, retries, master_seed
                     )
                     print("   ✅ Saved to Neo4j")
                 except Exception as e:
                     print(f"   ⚠️  Neo4j save failed: {e}")
         else:
-            # Alternative: Direct orchestrator execution (without coordinator)
             print("\n   📝 Using direct orchestrator (no confidence tracking)...")
-            
             print(f"   📤 Executing {len(plan.steps)} steps...")
             executions = await orchestrator.execute_swarm(plan.steps)
             
-            print(f"   ✅ Execution complete!")
+            print("   ✅ Execution complete!")
             print(f"   📊 Executions: {len(executions)}")
             
-            # 7. Display results
-            print("\n7️⃣  Direct Execution Results:")
-            
-            if executions:
-                for i, ex in enumerate(executions, 1):
-                    print(f"\n   Execution #{i}:")
-                    print(f"   - Agent: {ex.agent_id}")
-                    print(f"   - Status: {'✅ Success' if ex.is_successful() else '❌ Failed'}")
-                    print(f"   - Evidence: {len(ex.output_evidence)} pieces")
-                    if ex.output_evidence:
-                        for j, ev in enumerate(ex.output_evidence, 1):
-                            print(f"     Evidence #{j}:")
-                            print(f"       - Type: {ev.evidence_type.value}")
-                            print(f"       - Confidence: {ev.confidence:.2f}")
-                            print(f"       - Content: {str(ev.content)[:60]}...")
+            _print_direct_execution_results(executions)
 
     except Exception as e:
         print(f"   ❌ Execution error: {e}")
