@@ -15,6 +15,11 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Server logs and artifacts
+uvicorn.log
+uvicorn.out
+.verification/
+
 # C extensions
 *.so
 
