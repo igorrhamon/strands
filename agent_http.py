@@ -30,7 +30,7 @@ class Spinner:
 
     def __enter__(self):
         self.busy = True
-        self./thread = Thread(target=self.spin)
+        self.thread = Thread(target=self.spin)
         self.thread.start()
         return self
 
