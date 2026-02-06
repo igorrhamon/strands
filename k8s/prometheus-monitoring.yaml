@@ -1,0 +1,163 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: strands-api
+  namespace: strands
+  labels:
+    app: strands
+spec:
+  selector:
+    matchLabels:
+      app: strands
+      component: api
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: strands-alerts
+  namespace: strands
+spec:
+  groups:
+  - name: strands.rules
+    interval: 30s
+    rules:
+    # Agent Performance Alerts
+    - alert: StrandsAgentHighLatency
+      expr: histogram_quantile(0.95, agent_execution_duration_seconds) > 5
+      for: 5m
+      labels:
+        severity: warning
+        component: agent
+      annotations:
+        summary: "Strands agent latency is high"
+        description: "Agent {{ $labels.agent_name }} p95 latency is {{ $value }}s"
+
+    - alert: StrandsAgentFailureRate
+      expr: rate(agent_errors_total[5m]) > 0.05
+      for: 5m
+      labels:
+        severity: critical
+        component: agent
+      annotations:
+        summary: "Strands agent failure rate is high"
+        description: "Agent {{ $labels.agent_name }} failure rate is {{ $value | humanizePercentage }}"
+
+    # Orchestrator Alerts
+    - alert: StrandsOrchestratorTimeout
+      expr: increase(orchestrator_timeout_events_total[5m]) > 0
+      for: 1m
+      labels:
+        severity: critical
+        component: orchestrator
+      annotations:
+        summary: "Strands orchestrator timeout detected"
+        description: "{{ $value }} timeout events in the last 5 minutes"
+
+    - alert: StrandsOrchestratorHighQueueDepth
+      expr: orchestrator_pending_tasks > 100
+      for: 5m
+      labels:
+        severity: warning
+        component: orchestrator
+      annotations:
+        summary: "Strands orchestrator queue depth is high"
+        description: "{{ $value }} tasks pending in orchestrator queue"
+
+    # Confidence Score Alerts
+    - alert: StrandsLowConfidenceScore
+      expr: decision_confidence_score < 0.5
+      for: 5m
+      labels:
+        severity: warning
+        component: decision
+      annotations:
+        summary: "Strands decision confidence is low"
+        description: "Decision confidence score is {{ $value }}"
+
+    # Database Alerts
+    - alert: StrandsNeo4jConnectionError
+      expr: increase(neo4j_connection_errors_total[5m]) > 0
+      for: 1m
+      labels:
+        severity: critical
+        component: database
+      annotations:
+        summary: "Strands Neo4j connection error"
+        description: "{{ $value }} connection errors in the last 5 minutes"
+
+    - alert: StrandsQdrantConnectionError
+      expr: increase(qdrant_connection_errors_total[5m]) > 0
+      for: 1m
+      labels:
+        severity: critical
+        component: database
+      annotations:
+        summary: "Strands Qdrant connection error"
+        description: "{{ $value }} connection errors in the last 5 minutes"
+
+    # API Alerts
+    - alert: StrandsAPIHighErrorRate
+      expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.01
+      for: 5m
+      labels:
+        severity: critical
+        component: api
+      annotations:
+        summary: "Strands API error rate is high"
+        description: "Error rate is {{ $value | humanizePercentage }}"
+
+    - alert: StrandsAPIHighLatency
+      expr: histogram_quantile(0.95, http_request_duration_seconds) > 2
+      for: 5m
+      labels:
+        severity: warning
+        component: api
+      annotations:
+        summary: "Strands API latency is high"
+        description: "p95 latency is {{ $value }}s"
+
+    # Resource Alerts
+    - alert: StrandsPodMemoryHigh
+      expr: container_memory_usage_bytes{pod=~"strands-api-.*"} / container_spec_memory_limit_bytes > 0.8
+      for: 5m
+      labels:
+        severity: warning
+        component: infrastructure
+      annotations:
+        summary: "Strands pod memory usage is high"
+        description: "Memory usage is {{ $value | humanizePercentage }}"
+
+    - alert: StrandsPodCPUHigh
+      expr: rate(container_cpu_usage_seconds_total{pod=~"strands-api-.*"}[5m]) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+        component: infrastructure
+      annotations:
+        summary: "Strands pod CPU usage is high"
+        description: "CPU usage is {{ $value | humanizePercentage }}"
+
+    # Availability Alerts
+    - alert: StrandsAPIDown
+      expr: up{job="strands-api"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        component: api
+      annotations:
+        summary: "Strands API is down"
+        description: "Strands API has been down for more than 1 minute"
+
+    - alert: StrandsHighIncidentRate
+      expr: rate(incidents_total[5m]) > 10
+      for: 5m
+      labels:
+        severity: warning
+        component: incidents
+      annotations:
+        summary: "Strands incident rate is high"
+        description: "{{ $value | humanize }} incidents per second"
