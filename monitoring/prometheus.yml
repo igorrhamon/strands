@@ -1,0 +1,36 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'strands-monitor'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+rule_files:
+  - "alert-rules.yml"
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Error Simulator
+  - job_name: 'error-simulator'
+    static_configs:
+      - targets: ['error-simulator:8001']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+
+  # Strands API (when running)
+  - job_name: 'strands-api'
+    static_configs:
+      - targets: ['strands-api:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
