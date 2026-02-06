@@ -5,9 +5,7 @@ groups:
       # High error rate alert
       - alert: HighErrorRate
         expr: |
-          (
-            rate(simulator_errors_total[5m]) > 0.1
-          )
+          rate(simulator_errors_total[5m]) > 0.01
         for: 2m
         labels:
           severity: critical
@@ -72,37 +70,13 @@ groups:
           summary: "High request latency detected"
           description: "p95 latency: {{ $value | humanizeDuration }}"
 
-      # Agent execution time alert (for Strands)
-      - alert: SlowAgentExecution
-        expr: |
-          histogram_quantile(0.95, rate(strands_agent_execution_seconds_bucket[5m])) > 5
-        for: 2m
+      # Simulator error count alert
+      - alert: SimulatorErrorCount
+        expr: simulator_errors_total > 10
+        for: 1m
         labels:
           severity: warning
-          component: strands
+          component: simulator
         annotations:
-          summary: "Slow agent execution detected"
-          description: "Agent p95 latency: {{ $value | humanizeDuration }}"
-
-      # Low decision confidence alert
-      - alert: LowDecisionConfidence
-        expr: |
-          avg(strands_decision_confidence) < 0.7
-        for: 5m
-        labels:
-          severity: warning
-          component: strands
-        annotations:
-          summary: "Low decision confidence"
-          description: "Average decision confidence: {{ $value | humanizePercentage }}"
-
-      # Queue depth alert
-      - alert: HighQueueDepth
-        expr: strands_orchestrator_queue_depth > 100
-        for: 2m
-        labels:
-          severity: warning
-          component: orchestrator
-        annotations:
-          summary: "High task queue depth"
-          description: "Queue depth: {{ $value }}"
+          summary: "Simulator error count increasing"
+          description: "Total errors: {{ $value }}"
