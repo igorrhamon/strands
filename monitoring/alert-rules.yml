@@ -1,0 +1,108 @@
+groups:
+  - name: strands_alerts
+    interval: 30s
+    rules:
+      # High error rate alert
+      - alert: HighErrorRate
+        expr: |
+          (
+            rate(simulator_errors_total[5m]) > 0.1
+          )
+        for: 2m
+        labels:
+          severity: critical
+          component: simulator
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value | humanize }} errors/sec"
+
+      # Active errors alert
+      - alert: ActiveErrorsDetected
+        expr: simulator_active_errors > 5
+        for: 1m
+        labels:
+          severity: warning
+          component: simulator
+        annotations:
+          summary: "Multiple active errors detected"
+          description: "Currently {{ $value }} active errors"
+
+      # High error rate for specific types
+      - alert: DatabaseTimeoutErrors
+        expr: rate(simulator_errors_total{error_type="database_timeout"}[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: high
+          component: database
+        annotations:
+          summary: "Database timeout errors increasing"
+          description: "Database timeout rate: {{ $value | humanize }} errors/sec"
+
+      # Network errors
+      - alert: NetworkErrors
+        expr: rate(simulator_errors_total{error_type="network_error"}[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: high
+          component: network
+        annotations:
+          summary: "Network errors detected"
+          description: "Network error rate: {{ $value | humanize }} errors/sec"
+
+      # Service unavailability
+      - alert: ServiceUnavailable
+        expr: rate(simulator_errors_total{error_type="service_unavailable"}[5m]) > 0.01
+        for: 1m
+        labels:
+          severity: critical
+          component: service
+        annotations:
+          summary: "Service unavailability detected"
+          description: "Service unavailable rate: {{ $value | humanize }} errors/sec"
+
+      # High request latency
+      - alert: HighRequestLatency
+        expr: |
+          histogram_quantile(0.95, rate(simulator_request_duration_seconds_bucket[5m])) > 2
+        for: 2m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High request latency detected"
+          description: "p95 latency: {{ $value | humanizeDuration }}"
+
+      # Agent execution time alert (for Strands)
+      - alert: SlowAgentExecution
+        expr: |
+          histogram_quantile(0.95, rate(strands_agent_execution_seconds_bucket[5m])) > 5
+        for: 2m
+        labels:
+          severity: warning
+          component: strands
+        annotations:
+          summary: "Slow agent execution detected"
+          description: "Agent p95 latency: {{ $value | humanizeDuration }}"
+
+      # Low decision confidence alert
+      - alert: LowDecisionConfidence
+        expr: |
+          avg(strands_decision_confidence) < 0.7
+        for: 5m
+        labels:
+          severity: warning
+          component: strands
+        annotations:
+          summary: "Low decision confidence"
+          description: "Average decision confidence: {{ $value | humanizePercentage }}"
+
+      # Queue depth alert
+      - alert: HighQueueDepth
+        expr: strands_orchestrator_queue_depth > 100
+        for: 2m
+        labels:
+          severity: warning
+          component: orchestrator
+        annotations:
+          summary: "High task queue depth"
+          description: "Queue depth: {{ $value }}"

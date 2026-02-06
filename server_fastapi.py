@@ -33,6 +33,12 @@ PAYMENT_SERVICE_REQUEST_RATE = Gauge('payment_service_request_rate_usage', 'Requ
 app = FastAPI(title="Strads Agents - Governance Dashboard")
 templates = Jinja2Templates(directory="templates")
 
+# Mount static files
+try:
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+except Exception as e:
+    logger.warning(f"Could not mount static files: {e}")
+
 # Dependencies (Global for demo simplicity)
 # In production, use dependency injection
 repo = Neo4jRepository()

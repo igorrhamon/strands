@@ -1,0 +1,34 @@
+# Dockerfile para Prometheus Analyzer Service
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Instalar dependências do sistema
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copiar requirements
+COPY requirements.txt .
+
+# Instalar dependências Python
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copiar código
+COPY prometheus_analyzer.py .
+
+# Variáveis de ambiente
+ENV PROMETHEUS_URL=http://prometheus:9090 \
+    OLLAMA_URL=http://ollama:11434 \
+    PYTHONUNBUFFERED=1
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8001/health || exit 1
+
+# Expor porta
+EXPOSE 8001
+
+# Comando
+CMD ["python", "prometheus_analyzer.py"]

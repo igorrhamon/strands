@@ -18,6 +18,9 @@ tenacity>=8.0.0
 prometheus-client>=0.17.0
 jinja2>=3.1.0
 
+# HTTP client used by prometheus_analyzer.py
+aiohttp>=3.8.0
+
 # Testing
 pytest-mock>=3.10.0
 pytest-asyncio>=0.21.0
