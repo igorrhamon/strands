@@ -106,24 +106,43 @@ class LogInspectorAgent:
 
     def _parse_logs(self, logs: str) -> List[str]:
         """
-        Parse logs for keywords and stack traces.
+        Parse logs for keywords and multi-line stack traces.
 
         Args:
             logs: The logs to parse.
 
         Returns:
-            A list of strings, where each string is an error or a stack trace.
+            A list of strings, where each string is an error block or a stack trace.
         """
-        keywords = ["ERROR", "CRITICAL", "Exception", "Panic"]
+        keywords = ["ERROR", "CRITICAL", "Exception", "Panic", "Traceback"]
         lines = logs.split('\n')
         errors = []
-        for i, line in enumerate(lines):
-            for keyword in keywords:
-                if keyword in line:
-                    # Capture the line and the next few lines as context
-                    context = "\n".join(lines[i:i+5])
-                    errors.append(context)
-                    break  # Move to the next line once a keyword is found
+        
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if any(keyword in line for keyword in keywords):
+                # Found an error start. Capture it.
+                error_block = [line]
+                i += 1
+                
+                # Capture subsequent lines that look like stack traces (indented or 'at ...')
+                while i < len(lines):
+                    next_line = lines[i]
+                    # Heuristic for stack traces: indented lines or lines starting with 'at ' (Java) or 'File "' (Python)
+                    if next_line.startswith((' ', '\t', 'Caused by:', 'at ', 'File "')):
+                        error_block.append(next_line)
+                        i += 1
+                    else:
+                        # Stop if we hit a new log line (usually starts with timestamp or log level)
+                        # Simple heuristic: if it doesn't look like a stack trace, break.
+                        # For robustness, we could check regex for timestamp, but this is a good approximation.
+                        break
+                
+                errors.append("\n".join(error_block))
+            else:
+                i += 1
+                
         return errors
 
     def _format_analysis(self, service_name: str, all_errors: List[Dict[str, Any]], total_pods: int) -> Dict[str, Any]:
