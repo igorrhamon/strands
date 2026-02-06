@@ -67,7 +67,6 @@ async def metrics():
 
 @app.post("/generate")
 async def generate(request: GenerateRequest):
-    """A simple endpoint used by agent_http.py for demo purposes."""
     return {"text": f"Echo: {request.prompt}"}
 
 @app.post("/simulate/alert")
