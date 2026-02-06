@@ -24,7 +24,7 @@ scrape_configs:
       - targets: ['error-simulator:8001']
     metrics_path: '/metrics'
     scrape_interval: 5s
-    scrape_timeout: 10s
+    scrape_timeout: 4s
 
   # Strands API (when running)
   - job_name: 'strands-api'

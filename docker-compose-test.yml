@@ -72,7 +72,7 @@ services:
     image: ollama/ollama:latest
     container_name: ollama
     ports:
-      - "11434:11434"
+      - "11435:11434"
     volumes:
       - ollama_data:/root/.ollama
     networks:
@@ -119,6 +119,9 @@ services:
       NEO4J_PLUGINS: '["apoc"]'
     volumes:
       - neo4j_data:/data
+      - strands_neo4j_plugins:/var/lib/neo4j/labs
+      - strands_neo4j_plugins:/var/lib/neo4j/plugins
+      - strands_neo4j_logs:/var/lib/neo4j/logs
     networks:
       - strands-net
 
@@ -142,5 +145,7 @@ volumes:
   prometheus_data:
   grafana_data:
   neo4j_data:
+  strands_neo4j_plugins:
+  strands_neo4j_logs:
   qdrant_data:
   ollama_data:
