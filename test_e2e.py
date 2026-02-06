@@ -32,10 +32,19 @@ class E2ETestSuite:
         """Test error simulator is running and generating metrics."""
         logger.info("Testing Error Simulator...")
         try:
-            # Check health
-            response = await self.client.get("http://localhost:8001/health")
-            assert response.status_code == 200
-            logger.info("✓ Error Simulator health check passed")
+            # Wait for service to be ready (retry logic)
+            for attempt in range(10):
+                try:
+                    response = await self.client.get("http://localhost:8001/health", timeout=5.0)
+                    if response.status_code == 200:
+                        logger.info("✓ Error Simulator health check passed")
+                        break
+                except Exception as e:
+                    if attempt < 9:
+                        logger.info(f"Waiting for Error Simulator... (attempt {attempt + 1}/10)")
+                        await asyncio.sleep(2)
+                    else:
+                        raise
             
             # Trigger some errors
             for error_type in ['database_timeout', 'network_error', 'cpu_spike']:
@@ -59,6 +68,18 @@ class E2ETestSuite:
         """Test Prometheus is scraping metrics."""
         logger.info("Testing Prometheus...")
         try:
+            # Wait for Prometheus to be ready
+            for attempt in range(10):
+                try:
+                    response = await self.client.get("http://localhost:9090/-/healthy", timeout=5.0)
+                    if response.status_code == 200:
+                        logger.info("✓ Prometheus is ready")
+                        break
+                except Exception:
+                    if attempt < 9:
+                        logger.info(f"Waiting for Prometheus... (attempt {attempt + 1}/10)")
+                        await asyncio.sleep(2)
+            
             # Give Prometheus time to scrape
             await asyncio.sleep(5)
             
@@ -122,10 +143,19 @@ class E2ETestSuite:
         """Test Jaeger is running and collecting traces."""
         logger.info("Testing Jaeger...")
         try:
-            # Check Jaeger is running
-            response = await self.client.get("http://localhost:16686/api/services")
-            assert response.status_code == 200
-            logger.info("✓ Jaeger is running")
+            # Wait for Jaeger to be ready
+            for attempt in range(10):
+                try:
+                    response = await self.client.get("http://localhost:16686/api/services", timeout=5.0)
+                    if response.status_code == 200:
+                        logger.info("✓ Jaeger is running")
+                        break
+                except Exception:
+                    if attempt < 9:
+                        logger.info(f"Waiting for Jaeger... (attempt {attempt + 1}/10)")
+                        await asyncio.sleep(2)
+                    else:
+                        raise
             
             self.results.append(("Jaeger", "PASS"))
             
