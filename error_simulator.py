@@ -143,19 +143,10 @@ async def simulate_error(error_type: str):
             # Simulate processing
             await asyncio.sleep(random.uniform(0.1, 2.0))
             
-            # 40% chance of actual error
-            if random.random() < 0.4:
-                simulator.failed_requests += 1
-                severity = random.choice(SEVERITIES)
-                error_counter.labels(error_type=error_type, severity=severity).inc()
-                
-                duration = time.time() - start_time
-                request_duration.labels(endpoint="/simulate", status="error").observe(duration)
-                
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Simulated {error_type} error"
-                )
+            # Always record the error in metrics
+            simulator.failed_requests += 1
+            severity = random.choice(SEVERITIES)
+            error_counter.labels(error_type=error_type, severity=severity).inc()
             
             duration = time.time() - start_time
             request_duration.labels(endpoint="/simulate", status="success").observe(duration)
