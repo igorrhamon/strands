@@ -1,8 +1,7 @@
-"""
-Isolated Integration Tests for Strands System
+"""Testes de Integração Isolados para o Sistema Strands
 
-Testa integração entre componentes de forma isolada
-"""
+Testa integração entre componentes de forma isolada, sem dependências externas.
+""""
 
 import pytest
 import sys
@@ -19,7 +18,7 @@ import asyncio
 # ============================================================================
 
 class ConfidenceStrategy(Enum):
-    """Estratégias de cálculo de confiança"""
+    """Estratégias de cálculo de confiança agregada"""
     AVERAGE = "average"
     WEIGHTED = "weighted"
     MINIMUM = "minimum"
@@ -29,7 +28,7 @@ class ConfidenceStrategy(Enum):
 
 @dataclass
 class AgentResponse:
-    """Resposta de um agente"""
+    """Resposta estruturada de um agente após análise"""
     agent_id: str
     agent_name: str
     confidence: float
@@ -38,19 +37,19 @@ class AgentResponse:
 
 
 class BaseAgent:
-    """Classe base para agentes"""
+    """Classe base abstrata para todos os agentes do sistema"""
     
     def __init__(self, name: str):
         self.name = name
         self.id = f"agent-{name.lower()}"
     
     async def analyze(self, data: dict) -> AgentResponse:
-        """Método abstrato de análise"""
+        """Método abstrato que deve ser implementado por cada agente"""
         raise NotImplementedError
 
 
 class MockMetricsAgent(BaseAgent):
-    """Mock do MetricsAnalysisAgent"""
+    """Mock do Agente de Análise de Métricas"""
     
     async def analyze(self, data: dict) -> AgentResponse:
         return AgentResponse(
@@ -63,7 +62,7 @@ class MockMetricsAgent(BaseAgent):
 
 
 class MockLogAnalyzerAgent(BaseAgent):
-    """Mock do LogAnalyzerAgent"""
+    """Mock do Agente Analisador de Logs"""
     
     async def analyze(self, data: dict) -> AgentResponse:
         return AgentResponse(
@@ -76,7 +75,7 @@ class MockLogAnalyzerAgent(BaseAgent):
 
 
 class MockRecommenderAgent(BaseAgent):
-    """Mock do RecommenderAgent"""
+    """Mock do Agente Recomendador"""
     
     async def analyze(self, data: dict) -> AgentResponse:
         return AgentResponse(
@@ -89,14 +88,14 @@ class MockRecommenderAgent(BaseAgent):
 
 
 class ConfidenceService:
-    """Serviço de cálculo de confiança"""
+    """Serviço responsável por calcular confiança agregada de múltiplos agentes"""
     
     def calculate_confidence(
         self,
         responses: List[AgentResponse],
         strategy: ConfidenceStrategy = ConfidenceStrategy.AVERAGE
     ) -> float:
-        """Calcula confiança agregada"""
+        """Calcula confiança agregada usando a estratégia especificada"""
         if not responses:
             return 0.0
         
@@ -125,14 +124,14 @@ class ConfidenceService:
 
 
 class DecisionController:
-    """Controlador de decisões"""
+    """Controlador responsável por orquestrar múltiplos agentes e gerar decisões"""
     
     async def orchestrate(
         self,
         agents: List[BaseAgent],
         alert_data: dict
     ) -> Dict[str, Any]:
-        """Orquestra múltiplos agentes"""
+        """Orquestra múltiplos agentes para analisar um alerta e gerar uma decisão"""
         if not agents:
             return None
         
@@ -167,14 +166,14 @@ class DecisionController:
 
 
 class ReplayEngine:
-    """Engine de replay de eventos"""
+    """Engine responsável por gravar e fazer replay de eventos para simulação de time-travel"""
     
     def __init__(self):
         self.events: List[Dict[str, Any]] = []
         self.timeline: List[Dict[str, Any]] = []
     
     def record_event(self, event: dict):
-        """Grava um evento"""
+        """Grava um evento na timeline com timestamp"""
         event_with_timestamp = {
             **event,
             "timestamp": len(self.events),
@@ -184,11 +183,11 @@ class ReplayEngine:
         self.timeline.append(event_with_timestamp)
     
     def replay_events(self) -> List[Dict[str, Any]]:
-        """Faz replay de todos os eventos"""
+        """Retorna cópia de todos os eventos gravados"""
         return self.events.copy()
     
     def get_state_at(self, index: int) -> Dict[str, Any]:
-        """Obtém estado em um ponto específico da timeline"""
+        """Obtém o estado do sistema em um ponto específico da timeline"""
         if 0 <= index < len(self.timeline):
             return self.timeline[index]
         return None
@@ -199,17 +198,17 @@ class ReplayEngine:
 # ============================================================================
 
 class TestBaseAgentContract:
-    """Testa contrato base de agentes"""
+    """Testa o contrato base que todos os agentes devem implementar"""
 
     def test_agent_initialization(self):
-        """Verifica inicialização de agente"""
+        """Verifica se um agente é inicializado corretamente com nome e ID"""
         agent = MockMetricsAgent("MetricsAgent")
         assert agent.name == "MetricsAgent"
         assert agent.id is not None
         assert "metrics" in agent.id.lower()
 
     def test_agent_has_required_methods(self):
-        """Verifica se agente tem métodos obrigatórios"""
+        """Verifica se o agente possui todos os métodos obrigatórios do contrato"""
         agent = MockMetricsAgent("TestAgent")
         assert hasattr(agent, 'analyze')
         assert hasattr(agent, 'id')
@@ -217,7 +216,7 @@ class TestBaseAgentContract:
 
     @pytest.mark.asyncio
     async def test_agent_analysis(self):
-        """Testa análise de agente"""
+        """Testa se o agente consegue executar análise e retornar resposta estruturada"""
         agent = MockMetricsAgent("TestAgent")
         response = await agent.analyze({"test": "data"})
         
@@ -228,15 +227,15 @@ class TestBaseAgentContract:
 
 
 class TestConfidenceService:
-    """Testa serviço de confiança"""
+    """Testa o serviço de cálculo de confiança agregada"""
 
     def test_confidence_service_initialization(self):
-        """Verifica inicialização do serviço"""
+        """Verifica se o serviço de confiança é inicializado corretamente"""
         service = ConfidenceService()
         assert service is not None
 
     def test_calculate_confidence_single_agent(self):
-        """Testa cálculo de confiança para um agente"""
+        """Testa cálculo de confiança quando há apenas um agente"""
         service = ConfidenceService()
         response = AgentResponse(
             agent_id="agent-1",
@@ -250,7 +249,7 @@ class TestConfidenceService:
         assert confidence == 0.85
 
     def test_calculate_confidence_multiple_agents(self):
-        """Testa cálculo de confiança para múltiplos agentes"""
+        """Testa agregação de confiança quando múltiplos agentes analisam os mesmos dados"""
         service = ConfidenceService()
         responses = [
             AgentResponse(
@@ -280,7 +279,7 @@ class TestConfidenceService:
         assert confidence == pytest.approx((0.9 + 0.8 + 0.7) / 3, rel=0.01)
 
     def test_confidence_strategies(self):
-        """Testa diferentes estratégias de confiança"""
+        """Testa todas as 5 estratégias diferentes de cálculo de confiança"""
         service = ConfidenceService()
         responses = [
             AgentResponse(
@@ -304,17 +303,17 @@ class TestConfidenceService:
 
 
 class TestDecisionController:
-    """Testa controlador de decisões"""
+    """Testa o controlador responsável por orquestrar agentes e gerar decisões"""
 
     @pytest.mark.asyncio
     async def test_decision_controller_initialization(self):
-        """Verifica inicialização do controlador"""
+        """Verifica se o controlador de decisões é inicializado corretamente"""
         controller = DecisionController()
         assert controller is not None
 
     @pytest.mark.asyncio
     async def test_orchestrate_agents(self):
-        """Testa orquestração de múltiplos agentes"""
+        """Testa orquestração de múltiplos agentes para analisar um alerta"""
         controller = DecisionController()
         agents = [
             MockMetricsAgent("MetricsAgent"),
@@ -337,7 +336,7 @@ class TestDecisionController:
 
     @pytest.mark.asyncio
     async def test_consensus_logic_high_confidence(self):
-        """Testa lógica de consenso com alta confiança"""
+        """Testa lógica de consenso quando todos os agentes têm alta confiança"""
         controller = DecisionController()
         
         # Agentes com alta confiança
@@ -355,23 +354,23 @@ class TestDecisionController:
 
     @pytest.mark.asyncio
     async def test_empty_agents_list(self):
-        """Testa comportamento com lista vazia de agentes"""
+        """Testa comportamento gracioso quando nenhum agente é fornecido"""
         controller = DecisionController()
         decision = await controller.orchestrate([], {"test": "data"})
         assert decision is None
 
 
 class TestReplayEngine:
-    """Testa engine de replay"""
+    """Testa o engine de replay de eventos para simulação de time-travel"""
 
     def test_replay_engine_initialization(self):
-        """Verifica inicialização do engine"""
+        """Verifica se o engine de replay é inicializado corretamente"""
         engine = ReplayEngine()
         assert engine is not None
         assert len(engine.events) == 0
 
     def test_record_event(self):
-        """Testa gravação de evento"""
+        """Testa gravação de um evento na timeline"""
         engine = ReplayEngine()
         event = {
             "type": "alert",
@@ -385,7 +384,7 @@ class TestReplayEngine:
         assert "timestamp" in engine.events[0]
 
     def test_replay_events(self):
-        """Testa replay de eventos"""
+        """Testa replay de todos os eventos gravados"""
         engine = ReplayEngine()
         
         # Gravar alguns eventos
@@ -406,7 +405,7 @@ class TestReplayEngine:
         assert replayed[2]["type"] == "decision"
 
     def test_time_travel_simulation(self):
-        """Testa simulação de time-travel"""
+        """Testa simulação de time-travel acessando estado em pontos específicos"""
         engine = ReplayEngine()
         
         # Gravar timeline
@@ -424,11 +423,11 @@ class TestReplayEngine:
 
 
 class TestAgentIntegration:
-    """Testa integração entre agentes"""
+    """Testa integração e coordenação entre múltiplos agentes"""
 
     @pytest.mark.asyncio
     async def test_multiple_agents_coordination(self):
-        """Testa coordenação entre múltiplos agentes"""
+        """Testa se múltiplos agentes conseguem trabalhar coordenadamente"""
         agents = [
             MockMetricsAgent("MetricsAgent"),
             MockLogAnalyzerAgent("LogAnalyzerAgent"),
@@ -447,7 +446,7 @@ class TestAgentIntegration:
 
     @pytest.mark.asyncio
     async def test_confidence_aggregation(self):
-        """Testa agregação de confiança entre agentes"""
+        """Testa agregação correta de confiança entre múltiplos agentes"""
         agents = [
             MockMetricsAgent("Agent1"),
             MockLogAnalyzerAgent("Agent2"),
@@ -470,11 +469,11 @@ class TestAgentIntegration:
 
 
 class TestDataFlow:
-    """Testa fluxo de dados"""
+    """Testa o fluxo completo de dados do sistema"""
 
     @pytest.mark.asyncio
     async def test_alert_to_decision_flow(self):
-        """Testa fluxo: Alerta → Análise → Decisão"""
+        """Testa fluxo completo: Alerta recebido → Análise por agentes → Decisão gerada"""
         # 1. Criar alerta
         alert = {
             "service": "payment-api",
@@ -509,7 +508,7 @@ class TestDataFlow:
 
     @pytest.mark.asyncio
     async def test_complete_workflow(self):
-        """Testa workflow completo com replay"""
+        """Testa workflow completo incluindo replay de eventos"""
         # 1. Criar engine de replay
         engine = ReplayEngine()
         
@@ -539,11 +538,11 @@ class TestDataFlow:
 
 
 class TestPerformance:
-    """Testa performance"""
+    """Testa performance e escalabilidade do sistema"""
 
     @pytest.mark.asyncio
     async def test_agent_response_time(self):
-        """Testa tempo de resposta de agente"""
+        """Testa se agente responde em tempo aceitável (< 1s)"""
         import time
         
         agent = MockMetricsAgent("TestAgent")
@@ -557,7 +556,7 @@ class TestPerformance:
 
     @pytest.mark.asyncio
     async def test_multiple_agents_parallel(self):
-        """Testa execução paralela de agentes"""
+        """Testa execução paralela de múltiplos agentes"""
         import time
         
         agents = [
@@ -576,10 +575,10 @@ class TestPerformance:
 
 
 class TestErrorHandling:
-    """Testa tratamento de erros"""
+    """Testa tratamento robusto de erros e casos extremos"""
 
     def test_invalid_confidence_values(self):
-        """Testa valores inválidos de confiança"""
+        """Testa comportamento com valores de confiança fora do intervalo [0, 1]"""
         service = ConfidenceService()
         
         # Valores fora do intervalo [0, 1] devem ser clamped
@@ -604,7 +603,7 @@ class TestErrorHandling:
 
 @pytest.fixture(scope="session")
 def event_loop():
-    """Cria event loop para testes assíncronos"""
+    """Cria event loop para execução de testes assíncronos"""
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
     loop.close()
