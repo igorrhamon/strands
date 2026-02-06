@@ -138,9 +138,13 @@ class DecisionCandidate(BaseModel):
     status: DecisionStatus = Field(default=DecisionStatus.PROPOSED, description="Current lifecycle status")
     
     primary_hypothesis: str = Field(..., description="The winning hypothesis from Swarm")
+    confidence_score: float = Field(default=0.0, description="Confidence score of the hypothesis")
     risk_assessment: str = Field(..., description="Risk analysis of the proposed action")
     automation_level: AutomationLevel = Field(..., description="Suggested automation level")
     
+    selected_action: str = Field(default="", description="The primary action selected for execution")
+    suggested_actions: list[str] = Field(default_factory=list, description="List of suggested actions")
+
     # Links to analysis
     supporting_evidence: list[str] = Field(default_factory=list, description="IDs or summaries of supporting evidence")
     conflicting_hypotheses: list[str] = Field(default_factory=list, description="Summaries of rejected hypotheses")
