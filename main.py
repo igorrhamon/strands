@@ -125,19 +125,10 @@ async def main():
             neo4j.save_human_override(decision, decision.human_decision, outcome)
             logging.info("Human override persisted.")
 
-<<<<<<< HEAD
-        # logging.info("\n--- Initiating Deterministic Replay ---")
-        # replay_engine = ReplayEngine(neo4j)
-        # The replay engine would need to be updated to work with the coordinator
-        # For now, we'll comment it out to keep the focus on the refactoring
-        # report = await replay_engine.replay_decision(run_id, coordinator)
-        # logging.info(f"Replay Report ({report.report_id}) generated and saved.")
-=======
         logging.info("\n--- Initiating Deterministic Replay ---")
         replay_engine = ReplayEngine(neo4j)
         report = await replay_engine.replay_decision(run_id, coordinator)
         logging.info(f"Replay Report ({report.report_id}) generated and saved.")
->>>>>>> 9315678 (feat: Refactor SwarmController into stateless controllers and a stateful coordinator)
 
     except Exception as e:
         logging.error(f"FATAL: {e}. Is Neo4j running?")

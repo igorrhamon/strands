@@ -1,7 +1,7 @@
 
 import asyncio
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Coroutine
+from typing import List, Dict, Any, Coroutine, Sequence
 from .models import AgentExecution, SwarmStep, Evidence
 
 class Agent(ABC):
@@ -22,7 +22,7 @@ class SwarmOrchestrator:
     The pure execution engine for the swarm. It executes a list of agents
     for given steps and returns the resulting AgentExecution events.
     """
-    def __init__(self, agents: List[Agent]):
+    def __init__(self, agents: Sequence[Agent]):
         self._agents = {agent.agent_id: agent for agent in agents}
 
     async def _execute_agent(self, step: SwarmStep) -> AgentExecution:
