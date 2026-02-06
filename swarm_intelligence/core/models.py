@@ -133,23 +133,10 @@ class ReplayReport:
     confidence_delta: float = 0.0
     timestamp: datetime = field(default_factory=datetime.utcnow)
 
-@dataclass
-class RetryDecision:
-    """Represents an explicit, auditable decision to retry a step."""
-    step_id: str
-    reason: str
-    policy_name: str
-    policy_version: str
-    policy_logic_hash: str
-    attempt_id: str
-    decision_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    timestamp: datetime = field(default_factory=datetime.utcnow)
 
-@dataclass(frozen=True)
+@dataclass
 class RetryEvaluationResult:
-    """Represents the outcome of a retry evaluation cycle."""
-    steps_to_retry: List[SwarmStep]
-    retry_attempts: List[RetryAttempt]
-    retry_decisions: List[RetryDecision]
-    max_delay_seconds: float
-    newly_successful_step_ids: set
+    """A structured result from the SwarmRetryController."""
+    steps_to_retry: List[SwarmStep] = field(default_factory=list)
+    retry_attempts: List[RetryAttempt] = field(default_factory=list)
+    max_delay_seconds: float = 0.0
