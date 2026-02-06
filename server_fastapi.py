@@ -75,6 +75,12 @@ async def shutdown_event():
 async def metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
+@app.post("/generate")
+async def generate(request: Request):
+    """Echo the prompt for agent_http.py demo."""
+    body = await request.json()
+    return {"text": f"Echo: {body.get('prompt', '')}"}
+
 @app.post("/simulate/alert")
 async def simulate_alert(request: Request, active: bool = True):
     """Simulate an alert by setting metrics on the Prometheus registry.
@@ -171,7 +177,7 @@ async def submit_review(decision_id: str, review: ReviewRequest):
             validated_at=datetime.now(timezone.utc)
         )
 
-        await human_review.process_review(stub_candidate, validation)
+        human_review.process_review(stub_candidate, validation)
         
         return {"status": "success", "decision_id": decision_id, "action": "approved" if review.is_approved else "rejected"}
 
