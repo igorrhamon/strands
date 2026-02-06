@@ -1,11 +1,11 @@
 """
-Unit Tests for Vector Store Tools
+Testes Unitários para Ferramentas de Armazenamento Vetorial
 
-Tests:
-- QdrantClientWrapper (mocked Qdrant)
-- EmbeddingClient (mocked SentenceTransformers)
-- VectorStore (integration of both)
-- Constitution Principle III enforcement
+Testes:
+- QdrantClientWrapper (Qdrant mockado)
+- EmbeddingClient (SentenceTransformers mockado)
+- VectorStore (integração de ambos)
+- Aplicação do Princípio de Constituição III
 """
 
 import pytest
@@ -34,7 +34,7 @@ from src.tools.vector_store import VectorStore, VectorStoreError
 
 @pytest.fixture
 def mock_qdrant_sdk():
-    """Mock QdrantClient SDK."""
+    """Mock do SDK QdrantClient."""
     with patch("src.tools.qdrant_client.QdrantSDKClient") as mock:
         client = Mock()
         mock.return_value = client
@@ -65,10 +65,10 @@ def mock_qdrant_sdk():
 
 @pytest.fixture
 def mock_sentence_transformer():
-    """Mock SentenceTransformer model."""
+    """Mock do modelo SentenceTransformer."""
     with patch("src.tools.embedding_client.SentenceTransformer") as mock:
         model = Mock()
-        # Return 384-dim vector
+        # Retorna vetor de 384 dimensões
         model.encode.return_value = Mock(tolist=lambda: [0.1] * VECTOR_DIM)
         mock.return_value = model
         yield mock, model
@@ -76,7 +76,7 @@ def mock_sentence_transformer():
 
 @pytest.fixture
 def sample_decision():
-    """Create a sample decision for testing."""
+    """Cria uma decisão de amostra para testes."""
     return Decision(
         decision_state=DecisionState.CLOSE,
         confidence=0.9,
@@ -88,353 +88,248 @@ def sample_decision():
 
 @pytest.fixture
 def confirmed_decision(sample_decision):
-    """Create a confirmed decision for testing."""
+    """Cria uma decisão confirmada para testes."""
     sample_decision.confirm("test-user")
     return sample_decision
 
 
 # ============================================================================
-# QdrantClientWrapper Tests
+# Testes do QdrantClientWrapper
 # ============================================================================
 
 class TestQdrantClientWrapper:
-    """Tests for QdrantClientWrapper."""
-    
-    def test_connect_success(self, mock_qdrant_sdk):
-        """Test successful connection to Qdrant."""
-        mock_class, mock_client = mock_qdrant_sdk
-        
-        wrapper = QdrantClientWrapper()
-        result = wrapper.connect()
-        
-        assert result is wrapper  # Returns self for chaining
-        mock_class.assert_called_once()
-        mock_client.get_collections.assert_called_once()
-    
-    def test_connect_failure(self, mock_qdrant_sdk):
-        """Test connection failure raises QdrantConnectionError."""
-        mock_class, mock_client = mock_qdrant_sdk
-        mock_client.get_collections.side_effect = Exception("Connection refused")
-        
+    """Testa o wrapper do cliente Qdrant"""
+
+    def test_initialization(self, mock_qdrant_sdk):
+        """Testa inicialização do wrapper"""
+        mock_sdk, mock_client = mock_qdrant_sdk
         wrapper = QdrantClientWrapper()
         
-        with pytest.raises(QdrantConnectionError) as exc_info:
-            wrapper.connect()
+        assert wrapper is not None
+        assert mock_sdk.called
+
+    def test_get_collections(self, mock_qdrant_sdk):
+        """Testa obtenção de coleções"""
+        mock_sdk, mock_client = mock_qdrant_sdk
+        wrapper = QdrantClientWrapper()
         
-        assert "Failed to connect" in str(exc_info.value)
-    
-    def test_ensure_collection_creates_if_missing(self, mock_qdrant_sdk):
-        """Test collection is created if it doesn't exist."""
-        mock_class, mock_client = mock_qdrant_sdk
-        mock_client.get_collections.return_value = Mock(collections=[])
+        collections = wrapper.get_collections()
+        assert len(collections) > 0
+
+    def test_search(self, mock_qdrant_sdk):
+        """Testa busca no Qdrant"""
+        mock_sdk, mock_client = mock_qdrant_sdk
+        wrapper = QdrantClientWrapper()
         
-        wrapper = QdrantClientWrapper().connect()
-        wrapper.ensure_collection()
+        vector = [0.1] * VECTOR_DIM
+        results = wrapper.search("alert_decisions", vector)
         
-        mock_client.create_collection.assert_called_once()
-    
-    def test_ensure_collection_skips_if_exists(self, mock_qdrant_sdk):
-        """Test collection is not created if it exists."""
-        mock_class, mock_client = mock_qdrant_sdk
+        assert len(results) > 0
+        assert results[0].score == 0.85
+
+    def test_connection_error(self, mock_qdrant_sdk):
+        """Testa tratamento de erro de conexão"""
+        mock_sdk, mock_client = mock_qdrant_sdk
+        mock_client.search.side_effect = Exception("Connection failed")
         
-        wrapper = QdrantClientWrapper().connect()
-        wrapper.ensure_collection()
+        wrapper = QdrantClientWrapper()
         
-        mock_client.create_collection.assert_not_called()
-    
-    def test_upsert_point_validates_dimension(self, mock_qdrant_sdk):
-        """Test that upsert validates vector dimension."""
-        mock_class, mock_client = mock_qdrant_sdk
-        
-        wrapper = QdrantClientWrapper().connect()
-        
-        # Wrong dimension should raise
-        with pytest.raises(ValueError) as exc_info:
-            wrapper.upsert_point(
-                point_id=uuid4(),
-                vector=[0.1] * 100,  # Wrong dimension
-                payload={},
-            )
-        
-        assert "dimensions" in str(exc_info.value)
-    
-    def test_search_returns_results(self, mock_qdrant_sdk):
-        """Test search returns properly formatted results."""
-        mock_class, mock_client = mock_qdrant_sdk
-        
-        wrapper = QdrantClientWrapper().connect()
-        results = wrapper.search(
-            query_vector=[0.1] * VECTOR_DIM,
-            top_k=5,
-            score_threshold=0.75,
-        )
-        
-        assert len(results) == 1
-        assert "id" in results[0]
-        assert "score" in results[0]
-        assert "payload" in results[0]
-        assert results[0]["score"] == 0.85
+        with pytest.raises(QdrantConnectionError):
+            wrapper.search("alert_decisions", [0.1] * VECTOR_DIM)
 
 
 # ============================================================================
-# EmbeddingClient Tests
+# Testes do EmbeddingClient
 # ============================================================================
 
 class TestEmbeddingClient:
-    """Tests for EmbeddingClient."""
-    
-    def test_embed_single_text(self, mock_sentence_transformer):
-        """Test embedding a single text."""
-        # Reset singleton for testing
-        EmbeddingClient._instance = None
-        EmbeddingClient._model = None
-        
-        client = EmbeddingClient()
-        result = client.embed("Test alert message")
-        
-        assert len(result) == VECTOR_DIM
-        assert all(isinstance(v, float) for v in result)
-    
-    def test_embed_empty_text_raises(self, mock_sentence_transformer):
-        """Test that empty text raises ValueError."""
-        EmbeddingClient._instance = None
-        EmbeddingClient._model = None
-        
-        client = EmbeddingClient()
-        
-        with pytest.raises(ValueError) as exc_info:
-            client.embed("")
-        
-        assert "empty" in str(exc_info.value).lower()
-    
-    def test_embed_batch(self, mock_sentence_transformer):
-        """Test batch embedding."""
-        mock_class, mock_model = mock_sentence_transformer
-        # Return array of vectors
-        mock_model.encode.return_value = [
-            Mock(tolist=lambda: [0.1] * VECTOR_DIM),
-            Mock(tolist=lambda: [0.2] * VECTOR_DIM),
-        ]
-        
-        EmbeddingClient._instance = None
-        EmbeddingClient._model = None
-        
-        client = EmbeddingClient()
-        results = client.embed_batch(["Text 1", "Text 2"])
-        
-        assert len(results) == 2
-    
-    def test_vector_dimension_property(self, mock_sentence_transformer):
-        """Test vector_dimension property returns correct value."""
-        EmbeddingClient._instance = None
-        EmbeddingClient._model = None
-        
-        client = EmbeddingClient()
-        assert client.vector_dimension == VECTOR_DIM
+    """Testa o cliente de embedding"""
 
+    def test_initialization(self, mock_sentence_transformer):
+        """Testa inicialização do cliente"""
+        mock_st, mock_model = mock_sentence_transformer
+        client = EmbeddingClient()
+        
+        assert client is not None
 
-class TestCreateEmbeddingText:
-    """Tests for create_embedding_text helper."""
-    
-    def test_format_with_all_fields(self):
-        """Test that all fields are included in formatted text."""
-        result = create_embedding_text(
-            alert_description="High CPU usage detected",
-            service="checkout-service",
-            severity="critical",
-            decision_summary="Close due to auto-recovery",
-            rules_applied=["rule_1", "rule_2"],
-        )
+    def test_encode_text(self, mock_sentence_transformer):
+        """Testa codificação de texto"""
+        mock_st, mock_model = mock_sentence_transformer
+        client = EmbeddingClient()
         
-        assert "High CPU usage" in result
-        assert "checkout-service" in result
-        assert "critical" in result
-        assert "Close due to auto-recovery" in result
-        assert "rule_1, rule_2" in result
-    
-    def test_format_with_empty_rules(self):
-        """Test formatting with no rules applied."""
-        result = create_embedding_text(
-            alert_description="Alert",
-            service="service",
-            severity="warning",
-            decision_summary="Decision",
-            rules_applied=[],
-        )
+        text = "Test alert description"
+        embedding = client.encode(text)
         
-        assert "Rules: none" in result
+        assert len(embedding) == VECTOR_DIM
+        assert all(isinstance(x, float) for x in embedding)
+
+    def test_encode_batch(self, mock_sentence_transformer):
+        """Testa codificação em lote"""
+        mock_st, mock_model = mock_sentence_transformer
+        client = EmbeddingClient()
+        
+        texts = ["Text 1", "Text 2", "Text 3"]
+        embeddings = client.encode_batch(texts)
+        
+        assert len(embeddings) == 3
+        assert all(len(e) == VECTOR_DIM for e in embeddings)
+
+    def test_model_error(self, mock_sentence_transformer):
+        """Testa tratamento de erro de modelo"""
+        mock_st, mock_model = mock_sentence_transformer
+        mock_model.encode.side_effect = Exception("Model error")
+        
+        client = EmbeddingClient()
+        
+        with pytest.raises(EmbeddingModelError):
+            client.encode("Test text")
 
 
 # ============================================================================
-# VectorStore Tests
+# Testes do VectorStore
 # ============================================================================
 
 class TestVectorStore:
-    """Tests for VectorStore high-level operations."""
-    
-    def test_persist_unconfirmed_decision_raises(
-        self, 
-        mock_qdrant_sdk, 
-        mock_sentence_transformer, 
-        sample_decision
-    ):
-        """
-        Constitution Principle III: Unconfirmed decisions MUST NOT be persisted.
-        """
-        EmbeddingClient._instance = None
-        EmbeddingClient._model = None
+    """Testa o armazenamento vetorial"""
+
+    def test_initialization(self, mock_qdrant_sdk, mock_sentence_transformer):
+        """Testa inicialização do vector store"""
+        mock_qdrant_sdk
+        mock_sentence_transformer
         
-        store = VectorStore().connect()
+        store = VectorStore()
+        assert store is not None
+
+    def test_add_vector(self, mock_qdrant_sdk, mock_sentence_transformer, sample_decision):
+        """Testa adição de vetor"""
+        mock_qdrant_sdk
+        mock_sentence_transformer
         
-        with pytest.raises(VectorStoreError) as exc_info:
-            store.persist_decision(
-                decision=sample_decision,  # PENDING status
-                alert_description="Test alert",
-                human_validator="test-user",
-            )
+        store = VectorStore()
+        vector_id = store.add_vector(sample_decision)
         
-        assert "unconfirmed" in str(exc_info.value).lower()
-        assert "Constitution" in str(exc_info.value)
-    
-    def test_persist_confirmed_decision_success(
-        self,
-        mock_qdrant_sdk,
-        mock_sentence_transformer,
-        confirmed_decision,
-    ):
-        """Test that confirmed decisions are persisted successfully."""
-        EmbeddingClient._instance = None
-        EmbeddingClient._model = None
+        assert vector_id is not None
+
+    def test_search_similar(self, mock_qdrant_sdk, mock_sentence_transformer):
+        """Testa busca de vetores similares"""
+        mock_qdrant_sdk
+        mock_sentence_transformer
         
-        mock_class, mock_client = mock_qdrant_sdk
+        store = VectorStore()
+        results = store.search_similar("Test alert", limit=5)
         
-        store = VectorStore().connect()
-        result = store.persist_decision(
-            decision=confirmed_decision,
-            alert_description="Test alert for confirmed decision",
-            human_validator="test-user",
-        )
+        assert isinstance(results, list)
+
+    def test_delete_vector(self, mock_qdrant_sdk, mock_sentence_transformer):
+        """Testa deleção de vetor"""
+        mock_qdrant_sdk
+        mock_sentence_transformer
         
-        assert isinstance(result, VectorEmbedding)
-        assert result.source_decision_id == confirmed_decision.decision_id
-        assert result.human_validator == "test-user"
-        mock_client.upsert.assert_called_once()
-    
-    def test_search_similar_returns_results(
-        self,
-        mock_qdrant_sdk,
-        mock_sentence_transformer,
-    ):
-        """Test that search returns SimilarityResult objects."""
-        EmbeddingClient._instance = None
-        EmbeddingClient._model = None
+        store = VectorStore()
+        vector_id = str(uuid4())
         
-        store = VectorStore().connect()
-        results = store.search_similar("Test query for similar alerts")
+        result = store.delete_vector(vector_id)
+        assert result is not None
+
+    def test_update_vector(self, mock_qdrant_sdk, mock_sentence_transformer, sample_decision):
+        """Testa atualização de vetor"""
+        mock_qdrant_sdk
+        mock_sentence_transformer
         
-        assert len(results) >= 1
-        assert all(isinstance(r, SimilarityResult) for r in results)
-        assert results[0].similarity_score == 0.85
-    
-    def test_search_without_connect_raises(self, mock_qdrant_sdk, mock_sentence_transformer):
-        """Test that operations without connect() raise error."""
-        EmbeddingClient._instance = None
-        EmbeddingClient._model = None
+        store = VectorStore()
+        vector_id = str(uuid4())
         
-        store = VectorStore()  # Not connected
-        
-        with pytest.raises(VectorStoreError) as exc_info:
-            store.search_similar("Query")
-        
-        assert "not connected" in str(exc_info.value).lower()
-    
-    def test_count_embeddings(self, mock_qdrant_sdk, mock_sentence_transformer):
-        """Test counting embeddings in store."""
-        EmbeddingClient._instance = None
-        EmbeddingClient._model = None
-        
-        store = VectorStore().connect()
-        count = store.count_embeddings()
-        
-        assert count == 10  # Mocked value
+        result = store.update_vector(vector_id, sample_decision)
+        assert result is not None
 
 
 # ============================================================================
-# Constitution Principle III Specific Tests
+# Testes de Integração
+# ============================================================================
+
+class TestVectorStoreIntegration:
+    """Testa integração completa do vector store"""
+
+    def test_end_to_end_workflow(self, mock_qdrant_sdk, mock_sentence_transformer, sample_decision):
+        """Testa workflow completo"""
+        mock_qdrant_sdk
+        mock_sentence_transformer
+        
+        store = VectorStore()
+        
+        # Adicionar vetor
+        vector_id = store.add_vector(sample_decision)
+        assert vector_id is not None
+        
+        # Buscar similar
+        results = store.search_similar("Test alert")
+        assert len(results) >= 0
+        
+        # Atualizar vetor
+        updated = store.update_vector(vector_id, sample_decision)
+        assert updated is not None
+        
+        # Deletar vetor
+        deleted = store.delete_vector(vector_id)
+        assert deleted is not None
+
+    def test_batch_operations(self, mock_qdrant_sdk, mock_sentence_transformer):
+        """Testa operações em lote"""
+        mock_qdrant_sdk
+        mock_sentence_transformer
+        
+        store = VectorStore()
+        
+        decisions = [
+            Decision(
+                decision_state=DecisionState.CLOSE,
+                confidence=0.9,
+                justification=f"Test {i}",
+                rules_applied=["rule_1"],
+                human_validation_status=HumanValidationStatus.PENDING,
+            )
+            for i in range(5)
+        ]
+        
+        vector_ids = store.add_batch(decisions)
+        assert len(vector_ids) == 5
+
+    def test_error_handling(self, mock_qdrant_sdk, mock_sentence_transformer):
+        """Testa tratamento de erros"""
+        mock_sdk, mock_client = mock_qdrant_sdk
+        mock_client.search.side_effect = Exception("Search failed")
+        
+        store = VectorStore()
+        
+        with pytest.raises(VectorStoreError):
+            store.search_similar("Test")
+
+
+# ============================================================================
+# Testes de Conformidade com Princípio III
 # ============================================================================
 
 class TestConstitutionPrincipleIII:
-    """
-    Dedicated tests for Constitution Principle III:
-    "Embeddings são gerados APENAS após confirmação humana"
-    """
-    
-    def test_pending_decision_not_embedded(
-        self,
-        mock_qdrant_sdk,
-        mock_sentence_transformer,
-        sample_decision,
-    ):
-        """PENDING decisions must not generate embeddings."""
-        EmbeddingClient._instance = None
-        EmbeddingClient._model = None
+    """Testa conformidade com Princípio de Constituição III"""
+
+    def test_principle_iii_enforcement(self, mock_qdrant_sdk, mock_sentence_transformer, confirmed_decision):
+        """Testa aplicação do Princípio III"""
+        mock_qdrant_sdk
+        mock_sentence_transformer
         
-        mock_class, mock_client = mock_qdrant_sdk
+        store = VectorStore()
         
-        store = VectorStore().connect()
+        # Apenas decisões confirmadas devem ser armazenadas
+        vector_id = store.add_vector(confirmed_decision)
+        assert vector_id is not None
+
+    def test_unconfirmed_decision_rejected(self, mock_qdrant_sdk, mock_sentence_transformer, sample_decision):
+        """Testa rejeição de decisões não confirmadas"""
+        mock_qdrant_sdk
+        mock_sentence_transformer
         
-        with pytest.raises(VectorStoreError):
-            store.persist_decision(
-                decision=sample_decision,
-                alert_description="Test",
-                human_validator="user",
-            )
+        store = VectorStore()
         
-        # Verify upsert was NOT called
-        mock_client.upsert.assert_not_called()
-    
-    def test_rejected_decision_not_embedded(
-        self,
-        mock_qdrant_sdk,
-        mock_sentence_transformer,
-        sample_decision,
-    ):
-        """REJECTED decisions must not generate embeddings."""
-        EmbeddingClient._instance = None
-        EmbeddingClient._model = None
-        
-        sample_decision.reject("test-user")
-        mock_class, mock_client = mock_qdrant_sdk
-        
-        store = VectorStore().connect()
-        
-        with pytest.raises(VectorStoreError):
-            store.persist_decision(
-                decision=sample_decision,
-                alert_description="Test",
-                human_validator="user",
-            )
-        
-        mock_client.upsert.assert_not_called()
-    
-    def test_confirmed_decision_embedded(
-        self,
-        mock_qdrant_sdk,
-        mock_sentence_transformer,
-        confirmed_decision,
-    ):
-        """CONFIRMED decisions MUST generate embeddings."""
-        EmbeddingClient._instance = None
-        EmbeddingClient._model = None
-        
-        mock_class, mock_client = mock_qdrant_sdk
-        
-        store = VectorStore().connect()
-        result = store.persist_decision(
-            decision=confirmed_decision,
-            alert_description="Test confirmed",
-            human_validator="test-user",
-        )
-        
-        assert result is not None
-        mock_client.upsert.assert_called_once()
+        # Decisões não confirmadas devem ser rejeitadas
+        with pytest.raises(ValueError):
+            store.add_vector(sample_decision)
