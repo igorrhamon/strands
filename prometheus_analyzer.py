@@ -181,14 +181,15 @@ class PrometheusAnalyzer:
             url = f"{self.ollama_url}/api/generate"
 
             # Models: primary plus optional fallbacks (comma-separated env var)
-            primary_model = os.getenv("OLLAMA_MODEL", "mistral-3:3b")
+            primary_model = os.getenv("OLLAMA_MODEL", "ministral-3:3b")
             fallback_env = os.getenv("OLLAMA_FALLBACK_MODELS", "mistral-nano,mistral-small")
             fallback_models = [m.strip() for m in fallback_env.split(",") if m.strip()]
             models_to_try = [primary_model] + [m for m in fallback_models if m != primary_model]
 
             # Configuráveis via ambiente
-            retries = int(os.getenv("OLLAMA_RETRIES", "2"))
-            timeout_sec = int(os.getenv("OLLAMA_TIMEOUT", "30"))
+            # Increase defaults: more retries and longer timeout to accommodate slow model responses
+            retries = int(os.getenv("OLLAMA_RETRIES", "4"))
+            timeout_sec = int(os.getenv("OLLAMA_TIMEOUT", "300"))
 
             if aiohttp_mod is None:
                 raise RuntimeError(AIOHTTP_MISSING)
@@ -196,10 +197,11 @@ class PrometheusAnalyzer:
             overall_last_error = None
 
             for model_name in models_to_try:
+                # Enable streaming to receive partial results and avoid client-side timeouts
                 payload = {
                     "model": model_name,
                     "prompt": prompt,
-                    "stream": False,
+                    "stream": True,
                     "temperature": 0.7,
                 }
 
@@ -209,26 +211,58 @@ class PrometheusAnalyzer:
                 for attempt in range(1, retries + 1):
                     try:
                         async with session.post(url, json=payload, timeout=aiohttp_mod.ClientTimeout(total=timeout_sec)) as resp:
+                            if resp.status != 200:
+                                # Try to capture body for diagnostics
+                                try:
+                                    body_text = await resp.text()
+                                except Exception:
+                                    body_text = None
+                                last_error = f"http_{resp.status}"
+                                logger.error("LLM request failed", extra={"status": resp.status, "body": body_text, "attempt": attempt, "model": model_name})
+                                break  # don't retry on HTTP error
+
+                            # If streaming, consume chunks as they arrive
+                            if payload.get("stream"):
+                                accumulated = ""
+                                try:
+                                    async for chunk in resp.content.iter_chunked(1024):
+                                        try:
+                                            text = chunk.decode(errors="ignore")
+                                        except Exception:
+                                            text = str(chunk)
+                                        accumulated += text
+                                        # optional: could yield partial results or log progress here
+                                except asyncio.CancelledError:
+                                    raise
+                                except Exception as e:
+                                    logger.warning("Error while streaming LLM response", extra={"error": str(e), "model": model_name})
+
+                                # Try to parse accumulated JSON if possible, otherwise return raw text
+                                try:
+                                    parsed = json.loads(accumulated)
+                                    raw = parsed
+                                    analysis_text = (
+                                        parsed.get("response")
+                                        or parsed.get("text")
+                                        or parsed.get("output")
+                                        or ("\n".join(c.get("text", "") for c in parsed.get("choices", [])) if parsed.get("choices") else None)
+                                    ) or ""
+                                    return {"status": "success", "analysis": analysis_text, "timestamp": datetime.now().isoformat(), "raw": raw, "model": model_name}
+                                except Exception:
+                                    return {"status": "success", "analysis": accumulated, "timestamp": datetime.now().isoformat(), "model": model_name}
+
+                            # Non-streaming fallback (should be rare with stream enabled)
                             body_text = None
                             try:
                                 body_text = await resp.text()
                             except Exception:
                                 body_text = None
-
-                            if resp.status != 200:
-                                last_error = f"http_{resp.status}"
-                                logger.error("LLM request failed", extra={"status": resp.status, "body": body_text, "attempt": attempt, "model": model_name})
-                                break  # don't retry on HTTP error
-
-                            # Try to parse JSON, but be resilient to different shapes
                             try:
-                                result = await resp.json()
+                                result = json.loads(body_text) if body_text else {}
                             except Exception:
-                                # Fall back to text body
                                 logger.warning("LLM returned non-JSON response", extra={"body": body_text, "attempt": attempt, "model": model_name})
                                 return {"status": "success", "analysis": body_text or "", "timestamp": datetime.now().isoformat(), "model": model_name}
 
-                            # Extract likely textual output from common keys
                             analysis_text = ""
                             if isinstance(result, dict):
                                 analysis_text = (
