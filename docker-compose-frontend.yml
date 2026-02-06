@@ -154,6 +154,10 @@ services:
     environment:
       - PROMETHEUS_URL=http://prometheus:9090
       - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=mistral-3:3b
+      - OLLAMA_FALLBACK_MODELS=mistral-nano,mistral-small
+      - OLLAMA_TIMEOUT=60
+      - OLLAMA_RETRIES=3
       - LOG_LEVEL=INFO
     networks:
       - strads_network
