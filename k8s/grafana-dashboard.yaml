@@ -13,64 +13,37 @@ data:
             "title": "Agent Execution Duration (p95)",
             "targets": [
               {
-                "expr": "histogram_quantile(0.95, sum(rate(strands_agent_execution_seconds_bucket[5m])) by (le, agent_name))",
-                "legendFormat": "{{agent_name}}"
+                "expr": "histogram_quantile(0.95, agent_execution_duration_seconds)"
               }
             ],
-            "type": "graph",
-            "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
+            "type": "graph"
           },
           {
-            "title": "Agent Success Rate",
+            "title": "Agent Error Rate",
             "targets": [
               {
-                "expr": "sum(rate(strands_agent_executions_total{status='success'}[5m])) by (agent_name) / sum(rate(strands_agent_executions_total[5m])) by (agent_name)",
-                "legendFormat": "{{agent_name}}"
+                "expr": "rate(agent_errors_total[5m])"
               }
             ],
-            "type": "graph",
-            "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 }
+            "type": "graph"
           },
           {
-            "title": "Orchestrator Queue Depth",
+            "title": "Orchestrator Pending Tasks",
             "targets": [
               {
-                "expr": "strands_orchestrator_queue_depth"
+                "expr": "orchestrator_pending_tasks"
               }
             ],
-            "type": "stat",
-            "gridPos": { "h": 4, "w": 6, "x": 0, "y": 8 }
+            "type": "stat"
           },
           {
-            "title": "Active Tasks",
+            "title": "Decision Confidence Score",
             "targets": [
               {
-                "expr": "strands_orchestrator_active_tasks"
+                "expr": "decision_confidence_score"
               }
             ],
-            "type": "stat",
-            "gridPos": { "h": 4, "w": 6, "x": 6, "y": 8 }
-          },
-          {
-            "title": "Decision Confidence Distribution",
-            "targets": [
-              {
-                "expr": "histogram_quantile(0.95, sum(rate(strands_decision_confidence_bucket[5m])) by (le))"
-              }
-            ],
-            "type": "heatmap",
-            "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 }
-          },
-          {
-            "title": "DB Connection Pool Size",
-            "targets": [
-              {
-                "expr": "strands_db_pool_size",
-                "legendFormat": "{{database}}"
-              }
-            ],
-            "type": "graph",
-            "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 }
+            "type": "gauge"
           },
           {
             "title": "API Request Rate",
@@ -79,10 +52,35 @@ data:
                 "expr": "rate(http_requests_total[5m])"
               }
             ],
-            "type": "graph",
-            "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 }
+            "type": "graph"
+          },
+          {
+            "title": "API Error Rate",
+            "targets": [
+              {
+                "expr": "rate(http_requests_total{status=~\"5..\"}[5m])"
+              }
+            ],
+            "type": "graph"
+          },
+          {
+            "title": "Pod Memory Usage",
+            "targets": [
+              {
+                "expr": "container_memory_usage_bytes{pod=~\"strands-api-.*\"}"
+              }
+            ],
+            "type": "graph"
+          },
+          {
+            "title": "Pod CPU Usage",
+            "targets": [
+              {
+                "expr": "rate(container_cpu_usage_seconds_total{pod=~\"strands-api-.*\"}[5m])"
+              }
+            ],
+            "type": "graph"
           }
-        ],
-        "refresh": "5s"
+        ]
       }
     }
