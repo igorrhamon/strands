@@ -44,6 +44,9 @@ class ReviewRequest(BaseModel):
     feedback: Optional[str] = None
     validated_by: str
 
+class GenerateRequest(BaseModel):
+    prompt: str
+
 @app.on_event("startup")
 async def startup_event():
     try:
@@ -61,6 +64,11 @@ async def shutdown_event():
 @app.get("/metrics")
 async def metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+@app.post("/generate")
+async def generate(request: GenerateRequest):
+    """A simple endpoint used by agent_http.py for demo purposes."""
+    return {"text": f"Echo: {request.prompt}"}
 
 @app.post("/simulate/alert")
 async def simulate_alert(request: Request, active: bool = True):
@@ -158,7 +166,7 @@ async def submit_review(decision_id: str, review: ReviewRequest):
             validated_at=datetime.now(timezone.utc)
         )
 
-        await human_review.process_review(stub_candidate, validation)
+        human_review.process_review(stub_candidate, validation)
         
         return {"status": "success", "decision_id": decision_id, "action": "approved" if review.is_approved else "rejected"}
 
