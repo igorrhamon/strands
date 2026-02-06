@@ -37,6 +37,10 @@ COPY --from=builder /root/.local /home/strands/.local
 # Copy application code
 COPY --chown=strands:strands strands/ ./strands/
 COPY --chown=strands:strands scripts/ ./scripts/
+COPY --chown=strands:strands templates/ ./templates/
+COPY --chown=strands:strands static/ ./static/
+COPY --chown=strands:strands server_fastapi.py .
+COPY --chown=strands:strands main.py .
 
 # Set environment variables
 ENV PATH=/home/strands/.local/bin:$PATH \
@@ -55,7 +59,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 EXPOSE 8000 8001
 
 # Run the application
-CMD ["python", "-m", "uvicorn", "strands.main:app", \
+CMD ["python", "-m", "uvicorn", "server_fastapi:app", \
      "--host", "0.0.0.0", \
      "--port", "8000", \
      "--workers", "4"]
