@@ -45,13 +45,14 @@ class Neo4jAdapter:
         # need more robust reconstruction of complex objects like policies.
         query = """
         MATCH (run:SwarmRun {id: $run_id})<-[:TRIGGERED]-(alert:Alert)
+        MATCH (run)-[:BELONGS_TO]->(domain:Domain)
         MATCH (run)-[:EXECUTED_STEP]->(step)-[:HAD_EXECUTION]->(exec:AgentExecution)-[:EXECUTED_BY]->(agent:Agent)
         OPTIONAL MATCH (exec)-[:PRODUCED]->(ev:Evidence)
-        WITH run, alert, step, agent, exec, collect(ev) as evidences
-        WITH run, alert, step, agent, collect({execution: exec, evidences: evidences}) as executions_data
-        WITH run, alert, collect({step: step, agent: agent, executions: executions_data}) as step_data
+        WITH run, domain, alert, step, agent, exec, collect(ev) as evidences
+        WITH run, domain, alert, step, agent, collect({execution: exec, evidences: evidences}) as executions_data
+        WITH run, domain, alert, collect({step: step, agent: agent, executions: executions_data}) as step_data
         OPTIONAL MATCH (decision:Decision)<-[:INFLUENCED]-(:Evidence)<-[:PRODUCED]-(:AgentExecution)<-[:HAD_EXECUTION]-(:SwarmStep)<-[:EXECUTED_STEP]-(run)
-        RETURN run, alert, step_data, decision LIMIT 1
+        RETURN run, domain, alert, step_data, decision LIMIT 1
         """
         data = self.run_read_transaction(query, {"run_id": run_id})
         if not data: return {}
@@ -82,8 +83,17 @@ class Neo4jAdapter:
             steps=reconstructed_steps
         )
 
+        domain_node = raw_run['domain']
+        reconstructed_domain = Domain(
+            id=domain_node['id'],
+            name=domain_node['name'],
+            description=domain_node['description'],
+            risk_level=RiskLevel(domain_node['risk_level'])
+        )
+
         return {
             "plan": reconstructed_plan,
+            "domain": reconstructed_domain,
             "alert": Alert(alert_id=raw_run['alert']['id'], data=json.loads(raw_run['alert']['data'])),
             "results": reconstructed_results,
             "decision": raw_run['decision'],
