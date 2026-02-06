@@ -28,13 +28,15 @@ class ReplayEngine:
             raise ValueError(f"No data found for run_id: {run_id}")
 
         plan_to_replay = new_plan if new_plan else original_run_context['plan']
+        domain_to_replay = original_run_context['domain']
 
         coordinator.set_replay_mode(original_run_context['results'])
 
         alert = original_run_context['alert']
         original_seed = original_run_context['master_seed']
 
-        replayed_decision, _, _, _ = await coordinator.aexecute_plan(plan_to_replay, alert, run_id, master_seed=original_seed)
+        replayed_run, _ = await coordinator.aexecute_plan(domain_to_replay, plan_to_replay, alert, run_id, master_seed=original_seed)
+        replayed_decision = replayed_run.final_decision
 
         coordinator.disable_replay_mode()
 

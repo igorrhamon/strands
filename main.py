@@ -7,8 +7,10 @@ from typing import Dict, Any
 
 from swarm_intelligence.core.models import (
     Evidence, EvidenceType, Alert, SwarmPlan, SwarmStep,
-    Decision, HumanAction, HumanDecision, OperationalOutcome, RetryAttempt, AgentExecution
+    Decision, HumanAction, HumanDecision, OperationalOutcome, RetryAttempt, AgentExecution,
+    Domain
 )
+from swarm_intelligence.core.enums import RiskLevel
 from swarm_intelligence.core.swarm import Agent, SwarmOrchestrator
 from swarm_intelligence.coordinators.swarm_run_coordinator import SwarmRunCoordinator
 from swarm_intelligence.controllers.swarm_execution_controller import SwarmExecutionController
@@ -109,6 +111,13 @@ async def main():
         )
         coordinator.register_human_hooks(expert_human_review)
 
+        default_domain = Domain(
+            id="infra-01",
+            name="Infrastructure",
+            description="Core infrastructure operations",
+            risk_level=RiskLevel.MEDIUM
+        )
+
         retry_policy = ExponentialBackoffPolicy(max_attempts=2, base_delay=0.1)
         plan = SwarmPlan(objective="Neutralize threat on host web-prod-03.",
                          steps=[SwarmStep(agent_id="log_analysis", mandatory=True),
@@ -116,10 +125,11 @@ async def main():
         alert = Alert(alert_id="sec-alert-101", data={"hostname": "web-prod-03"})
         run_id = f"run-{alert.alert_id}"
 
-        decision, executions, retries, master_seed = await coordinator.aexecute_plan(plan, alert, run_id)
+        swarm_run, all_retry_attempts, all_retry_decisions = await coordinator.aexecute_plan(default_domain, plan, alert, run_id)
 
-        neo4j.save_swarm_run(plan, alert, executions, decision, retries, master_seed)
+        neo4j.save_swarm_run(swarm_run, alert, all_retry_attempts, all_retry_decisions)
 
+        decision = swarm_run.final_decision
         if decision.human_decision:
             outcome = OperationalOutcome(status="success")
             neo4j.save_human_override(decision, decision.human_decision, outcome)

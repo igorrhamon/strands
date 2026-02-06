@@ -10,6 +10,8 @@ from swarm_intelligence.core.models import (
     RetryDecision,
     HumanDecision,
     SwarmStep,
+    Domain,
+    SwarmRun
 )
 from swarm_intelligence.controllers.swarm_execution_controller import (
     SwarmExecutionController,
@@ -42,22 +44,27 @@ class SwarmRunCoordinator:
         self.confidence_service = confidence_service
         self.llm_agent_id = llm_agent_id
 
-    async def run(
+    async def aexecute_plan(
         self,
+        domain: Domain,
         plan: SwarmPlan,
         alert: Alert,
         run_id: str,
-        confidence_policy: ConfidencePolicy,
-        human_hook: Optional[Callable[[Decision], HumanDecision]],
+        confidence_policy: ConfidencePolicy = None,
+        human_hook: Optional[Callable[[Decision], HumanDecision]] = None,
         replay_mode: bool = False,
         replay_results: Optional[Dict[str, AgentExecution]] = None,
         master_seed: Optional[int] = None,
-    ) -> (Decision, List[AgentExecution], List[RetryAttempt], List[RetryDecision], int):
+    ) -> (SwarmRun, List[RetryAttempt], List[RetryDecision]):
         master_seed = (
             master_seed
             if master_seed is not None
             else random.randint(0, 1_000_000)
         )
+
+        all_retry_attempts = []
+        all_retry_decisions = []
+
         sequence_id = 0
 
         all_executions: List[AgentExecution] = []
@@ -110,16 +117,13 @@ class SwarmRunCoordinator:
             final_successful_executions,
             alert,
             self.confidence_service,
-            confidence_policy,
+            confidence_policy or DefaultConfidencePolicy(),
             human_hook,
             run_id,
             master_seed,
         )
 
-        return (
-            decision,
-            all_executions,
-            all_retry_attempts,
-            all_retry_decisions,
-            master_seed,
-        )
+        swarm_run.executions = all_executions
+        swarm_run.final_decision = decision
+
+        return swarm_run, all_retry_attempts, all_retry_decisions

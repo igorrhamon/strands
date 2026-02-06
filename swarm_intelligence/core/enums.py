@@ -1,5 +1,12 @@
 from enum import Enum
 
+class RiskLevel(Enum):
+    """Enumeration for risk levels."""
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
 class EvidenceType(Enum):
     """Enumeration for the types of evidence that can be produced."""
     RAW_DATA = "raw_data"

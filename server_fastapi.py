@@ -51,17 +51,8 @@ class ReviewRequest(BaseModel):
     feedback: Optional[str] = None
     validated_by: str
 
-
 class GenerateRequest(BaseModel):
     prompt: str
-
-
-@app.post("/generate")
-async def generate(req: GenerateRequest):
-    """A simple endpoint to simulate a model generating a response."""
-    time.sleep(2)  # Simulate a delay
-    return {"text": f"This is a dummy response to: {req.prompt}"}
-
 
 @app.on_event("startup")
 async def startup_event():
@@ -82,24 +73,17 @@ async def metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 @app.post("/generate")
-async def generate(request: Request):
-    """Echo the prompt for agent_http.py demo."""
-    body = await request.json()
-    return {"text": f"Echo: {body.get('prompt', '')}"}
+async def generate(request: GenerateRequest):
+    """A simple endpoint used by agent_http.py for demo purposes."""
+    return {"text": f"Echo: {request.prompt}"}
 
 @app.post("/simulate/alert")
 async def simulate_alert(request: Request, active: bool = True):
-    """Simulate an alert by setting metrics on the Prometheus registry.
-    When `active` is True the CPU gauge will be set high; otherwise low.
-    If `force_ambiguous` is True, metrics will oscillate to create ambiguous trends
-    that cause the deterministic rule engine to return a low confidence decision.
-    """
+    """Simulate an alert by setting metrics on the Prometheus registry."""
     params = dict(request.query_params)
     force_ambiguous = params.get("force_ambiguous", "false").lower() in ("1", "true", "yes")
 
     if force_ambiguous:
-        # produce an oscillating series by choosing a value near the decision boundary
-        # alternate between medium and slightly high values so metrics look noisy
         cpu_value = random.choice([48.0, 52.0, 45.0, 55.0])
         memory_value = random.choice([40.0, 60.0, 47.0, 53.0])
         req_rate = random.choice([40.0, 60.0, 50.0, 52.0])
@@ -119,7 +103,6 @@ async def simulate_alert(request: Request, active: bool = True):
         PAYMENT_SERVICE_MEMORY.set(memory_value)
         PAYMENT_SERVICE_REQUEST_RATE.set(req_rate)
     except NameError:
-        # older versions may not have these gauges registered
         pass
 
     status = "ambiguous" if force_ambiguous else ("alert_active" if active else "alert_cleared")
@@ -144,49 +127,15 @@ async def get_pending_decisions():
     """API to get raw JSON list of pending decisions."""
     return repo.get_pending_decisions()
 
-@app.post("/decisions/{decision_id}/review")
-async def submit_review(decision_id: str, review: ReviewRequest):
-    """Submit a human approval or rejection."""
-    try:
-        if str(decision_id) != str(review.decision_id):
-            raise HTTPException(status_code=400, detail="ID mismatch")
-        
-        # 1. Construct Validation Object
-        # Note: In a real app we would fetch the candidate first to check existence
-        # But HumanReviewAgent mainly needs the ID to update the graph.
-        # However, .process_review expects a DecisionCandidate object.
-        # We need a lightweight way to re-hydrate/mock it or change process_review signature.
-        
-        # For this demo, we will create a 'stub' candidate just enough to pass validation
-        # or we fetch it from DB (but we didn't implement get_by_id yet).
-        # Let's modify the process_review call slightly or stub the candidate.
-        
-        # Actually, let's create a stub since `process_review` mostly reads ID and updates status.
-        from src.models.decision import DecisionCandidate, DecisionStatus, AutomationLevel
-        
-        stub_candidate = DecisionCandidate(
-            decision_id=UUID(decision_id),
-            alert_reference="unknown", # Not needed for update
-            summary="stub",
-            status=DecisionStatus.PROPOSED,
-            primary_hypothesis="stub",
-            risk_assessment="stub",
-            automation_level=AutomationLevel.MANUAL
-        )
-
-        validation = DecisionValidation(
-            validation_id=f"val-{datetime.now().timestamp()}",
-            decision_id=UUID(decision_id),
-            validated_by=review.validated_by,
-            is_approved=review.is_approved,
-            feedback=review.feedback,
-            validated_at=datetime.now(timezone.utc)
-        )
-
-        human_review.process_review(stub_candidate, validation)
-        
-        return {"status": "success", "decision_id": decision_id, "action": "approved" if review.is_approved else "rejected"}
-
-    except Exception as e:
-        logger.error(f"Error processing review: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+@app.post("/api/decisions/review")
+async def review_decision(review: ReviewRequest):
+    """API to submit a human review for a decision."""
+    success = human_review.review_decision(
+        review.decision_id,
+        review.is_approved,
+        review.validated_by,
+        review.feedback
+    )
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to process review")
+    return {"status": "success"}
