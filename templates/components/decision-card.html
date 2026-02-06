@@ -1,0 +1,38 @@
+<section class="decision-card bg-white p-6 rounded-2xl shadow-sm border border-slate-200 hover:border-blue-300 transition-all duration-300">
+    <div class="flex justify-between items-start gap-4 mb-4">
+        <div class="flex-1">
+            <span class="service-badge {% if d.severity == 'critical' %}critical{% else %}warning{% endif %}">
+                {{ d.service or 'Global' }}
+            </span>
+            <h2 class="text-xl font-bold mt-2 text-slate-800">
+                {{ d.summary }}
+            </h2>
+        </div>
+        <time class="text-xs font-medium text-slate-400 whitespace-nowrap bg-slate-50 px-2 py-1 rounded">
+            {{ d.created_at[:16] }}
+        </time>
+    </div>
+
+    <div class="hypothesis bg-slate-50 p-4 rounded-xl mb-6 border-l-4 border-blue-500">
+        <p class="text-slate-700 leading-relaxed font-medium">
+            {{ d.primary_hypothesis }}
+        </p>
+    </div>
+
+    <div class="actions flex flex-col sm:flex-row gap-4">
+        <button 
+            onclick="UI.handleReview('{{ d.decision_id }}', true, this)"
+            class="action-button approve flex-1 bg-emerald-600 text-white font-bold py-3 rounded-xl hover:bg-emerald-700 transition focus-ring disabled:opacity-50"
+            aria-label="Approve decision"
+        >
+            Approve
+        </button>
+        <button 
+            onclick="UI.handleReview('{{ d.decision_id }}', false, this)"
+            class="action-button reject flex-1 bg-rose-600 text-white font-bold py-3 rounded-xl hover:bg-rose-700 transition focus-ring disabled:opacity-50"
+            aria-label="Reject decision"
+        >
+            Reject
+        </button>
+    </div>
+</section>
