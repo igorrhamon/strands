@@ -63,6 +63,7 @@ services:
       - '--storage.tsdb.path=/prometheus'
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -96,6 +97,19 @@ services:
       - strads_network
     depends_on:
       - grafana
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+    networks:
+      - strads_network
     restart: unless-stopped
 
   strands-dashboard:
@@ -141,6 +155,34 @@ services:
       "--reload"
     ]
 
+  prometheus-analyzer:
+    build:
+      context: .
+      dockerfile: Dockerfile.analyzer
+    container_name: prometheus-analyzer-strads
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./prometheus_analyzer.py:/app/prometheus_analyzer.py
+    environment:
+      - PROMETHEUS_URL=http://prometheus-strads:9090
+      - OLLAMA_URL=http://ollama:11434
+      - LOG_LEVEL=INFO
+    networks:
+      - strads_network
+    depends_on:
+      prometheus:
+        condition: service_started
+      ollama:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
 volumes:
   qdrant_storage:
     driver: local
@@ -155,6 +197,8 @@ volumes:
   prometheus_data:
     driver: local
   grafana_data:
+    driver: local
+  ollama_data:
     driver: local
   strands_app:
     driver: local

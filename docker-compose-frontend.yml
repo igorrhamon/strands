@@ -141,6 +141,35 @@ services:
       - strads_network
     restart: unless-stopped
 
+  # Prometheus Analyzer (LLM-powered analysis)
+  prometheus-analyzer:
+    build:
+      context: .
+      dockerfile: Dockerfile.analyzer
+    container_name: prometheus-analyzer-dev
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./prometheus_analyzer.py:/app/prometheus_analyzer.py
+    environment:
+      - PROMETHEUS_URL=http://prometheus:9090
+      - OLLAMA_URL=http://ollama:11434
+      - LOG_LEVEL=INFO
+    networks:
+      - strads_network
+    depends_on:
+      prometheus:
+        condition: service_started
+      ollama:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
 volumes:
   neo4j_data:
     driver: local
@@ -153,6 +182,8 @@ volumes:
   grafana_data:
     driver: local
   ollama_data:
+    driver: local
+  analyzer_data:
     driver: local
 
 networks:
