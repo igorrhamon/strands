@@ -220,7 +220,7 @@ class LogInspectorAgent:
         for error_info in all_errors:
             evidence.append({
                 "pod_name": error_info['pod'],
-                "errors": error_info['errors']
+                "log_snippets": error_info['errors']
             })
 
         suggested_action = (

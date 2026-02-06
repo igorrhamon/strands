@@ -6,6 +6,7 @@ import asyncio
 import random
 import logging
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import Response
 from prometheus_client import Counter, Histogram, Gauge, generate_latest
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
@@ -178,7 +179,7 @@ async def get_errors():
 @app.get("/metrics")
 async def metrics():
     """Prometheus metrics endpoint."""
-    return generate_latest()
+    return Response(content=generate_latest(), media_type="text/plain; version=0.0.4")
 
 if __name__ == "__main__":
     import uvicorn
