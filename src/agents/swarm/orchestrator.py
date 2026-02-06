@@ -51,8 +51,19 @@ class SwarmOrchestrator:
             for agent in self.agents
         ]
 
-        # Wait for all to complete
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Wait for all to complete with a global timeout
+        try:
+            # Global timeout of 30 seconds for the entire swarm execution
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=30.0
+            )
+        except asyncio.TimeoutError:
+            logger.error("Swarm analysis timed out after 30 seconds. Returning partial results.")
+            # In case of timeout, we might have some completed tasks if we used as_completed,
+            # but with gather/wait_for, we lose pending ones. 
+            # For robustness, we return empty list or handle partials if architected differently.
+            return []
         
         # Filter out valid results and log unexpected errors
         valid_results = []

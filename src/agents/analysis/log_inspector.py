@@ -5,10 +5,14 @@ Interacts with Kubernetes to fetch and analyze logs from pods.
 """
 
 import logging
+from datetime import datetime, timezone
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 from typing import List, Dict, Any
 from tenacity import retry, stop_after_attempt, wait_fixed
+
+from src.models.alert import NormalizedAlert
+from src.models.swarm import SwarmResult, EvidenceItem, EvidenceType
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +23,7 @@ class LogInspectorAgent:
     """
 
     AGENT_NAME = "LogInspectorAgent"
+    agent_id = "log_inspector"
 
     def __init__(self):
         """
@@ -106,37 +111,98 @@ class LogInspectorAgent:
 
     def _parse_logs(self, logs: str) -> List[str]:
         """
-        Parse logs for keywords and stack traces.
+        Parse logs for keywords and multi-line stack traces.
 
         Args:
             logs: The logs to parse.
 
         Returns:
-            A list of strings, where each string is an error or a stack trace.
+            A list of strings, where each string is an error block or a stack trace.
         """
-        keywords = ["ERROR", "CRITICAL", "Exception", "Panic"]
+        keywords = ["ERROR", "CRITICAL", "Exception", "Panic", "Traceback"]
         lines = logs.split('\n')
         errors = []
-        for i, line in enumerate(lines):
-            for keyword in keywords:
-                if keyword in line:
-                    # Capture the line and the next few lines as context
-                    context = "\n".join(lines[i:i+5])
-                    errors.append(context)
-                    break  # Move to the next line once a keyword is found
+        
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            # Check if line contains a keyword AND is not part of an existing stack trace context
+            # (Simple heuristic: usually keywords start the line or follow a timestamp)
+            if any(keyword in line for keyword in keywords):
+                # Found an error start. Capture it.
+                error_block = [line]
+                i += 1
+                
+                # Capture subsequent lines until we hit a new log entry
+                while i < len(lines):
+                    next_line = lines[i]
+                    stripped = next_line.strip()
+                    
+                    # Heuristic: A new log entry usually starts with a timestamp (202X-...) or a log level (INFO, DEBUG, WARN, ERROR)
+                    # If it doesn't start with these, assume it's part of the previous error (stack trace, multi-line message)
+                    is_new_log_entry = (
+                        stripped.startswith(("202", "INFO", "DEBUG", "WARN", "WARNING")) or
+                        (stripped.startswith("ERROR") and "at " not in stripped) or # ERROR could be start of new error, unless it's inside a stack trace (rare)
+                        stripped.startswith("CRITICAL")
+                    )
+                    
+                    # Special case: If the line is indented, it's definitely a continuation (stack trace)
+                    is_indented = next_line.startswith((' ', '\t'))
+                    
+                    if is_indented or not is_new_log_entry:
+                        error_block.append(next_line)
+                        i += 1
+                    else:
+                        break
+                
+                errors.append("\n".join(error_block))
+                # Continue the outer loop from the current i, skipping the increment below
+                continue
+
+            i += 1
+                
         return errors
+
+    async def analyze(self, alert: NormalizedAlert) -> SwarmResult:
+        """
+        Analyze logs for the service mentioned in the alert.
+        
+        Args:
+            alert: The normalized alert object.
+            
+        Returns:
+            SwarmResult containing the analysis.
+        """
+        logger.info(f"[{self.agent_id}] Analyzing logs for {alert.service}...")
+        
+        # Call the synchronous method (or refactor to async if k8s client supports it)
+        # For now, we wrap the result in SwarmResult
+        analysis = self.get_pod_logs(alert.service)
+        
+        # Convert dictionary evidence to EvidenceItem objects
+        evidence_items = []
+        for ev in analysis.get("evidence", []):
+            # Create a description from the log snippets
+            snippets = "\n".join(ev.get("log_snippets", []))
+            evidence_items.append(EvidenceItem(
+                type=EvidenceType.LOG,
+                description=f"Logs from pod {ev.get('pod_name')}:\n{snippets[:500]}...", # Truncate for brevity
+                source_url=f"kubectl logs {ev.get('pod_name')}",
+                timestamp=datetime.now(timezone.utc),
+                metadata={"pod": ev.get("pod_name"), "full_logs": snippets}
+            ))
+            
+        return SwarmResult(
+            agent_id=self.agent_id,
+            hypothesis=analysis.get("hypothesis", "No analysis performed."),
+            confidence=0.9 if analysis.get("evidence") else 0.5, # High confidence if we found errors
+            evidence=evidence_items,
+            suggested_actions=[analysis.get("suggested_action", "Check logs manually.")]
+        )
 
     def _format_analysis(self, service_name: str, all_errors: List[Dict[str, Any]], total_pods: int) -> Dict[str, Any]:
         """
-        Formats the analysis into the expected SwarmResult structure.
-
-        Args:
-            service_name: The name of the service.
-            all_errors: A list of errors found in the logs.
-            total_pods: The total number of pods for the service.
-
-        Returns:
-            A dictionary with the structured analysis.
+        Formats the analysis into a dictionary (internal helper).
         """
         if not all_errors:
             return {
@@ -154,7 +220,7 @@ class LogInspectorAgent:
         for error_info in all_errors:
             evidence.append({
                 "pod_name": error_info['pod'],
-                "log_snippets": error_info['errors']
+                "errors": error_info['errors']
             })
 
         suggested_action = (
