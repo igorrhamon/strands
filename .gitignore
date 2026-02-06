@@ -1,16 +1,3 @@
-.venv/
-examples/__pycache__/
-specs/
-scripts/
-**/__pycache__/
-.venv/
-*.md
-.specify/
-.github/
-__pycache__/http_provider.cpython-312.pyc
-__pycache__/http_provider.cpython-312.pyc
-.venv/
-# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
 *$py.class
@@ -231,3 +218,6 @@ __pycache__/my_http_model.cpython-312.pyc
 __pycache__/server_fastapi.cpython-312.pyc
 uvicorn.out
 *.pyc
+*.pyc
+uvicorn.out
+.venv/
