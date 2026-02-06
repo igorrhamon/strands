@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class OllamaClient:
     """Client for interacting with Ollama LLM."""
     
-    def __init__(self, base_url: str = "http://localhost:11434", model: str = "mistral-nemo"):
+    def __init__(self, base_url: str = "http://localhost:11434", model: str = "mistral"):
         self.base_url = base_url
         self.model = model
         self.client = httpx.AsyncClient(timeout=300.0)

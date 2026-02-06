@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   # Prometheus - Time-series database for metrics
   prometheus:
@@ -14,14 +16,10 @@ services:
       - '--storage.tsdb.path=/prometheus'
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
-      - '--web.enable-lifecycle'
     networks:
       - strands-net
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    depends_on:
+      - error-simulator
 
   # Grafana - Visualization and dashboarding
   grafana:
@@ -40,13 +38,7 @@ services:
     networks:
       - strands-net
     depends_on:
-      prometheus:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - prometheus
 
   # Jaeger - Distributed tracing
   jaeger:
@@ -62,18 +54,13 @@ services:
       - "9411:9411"
     networks:
       - strands-net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:16686/api/services"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   # Ollama - Local LLM
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
     ports:
-      - "11435:11434"
+      - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     networks:
@@ -97,16 +84,8 @@ services:
     networks:
       - strands-net
     depends_on:
-      prometheus:
-        condition: service_healthy
-      jaeger:
-        condition: service_started
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+      - prometheus
+      - jaeger
 
   # Neo4j - Graph database
   neo4j:
@@ -120,9 +99,6 @@ services:
       NEO4J_PLUGINS: '["apoc"]'
     volumes:
       - neo4j_data:/data
-      - strands_neo4j_plugins:/var/lib/neo4j/labs
-      - strands_neo4j_plugins:/var/lib/neo4j/plugins
-      - strands_neo4j_logs:/var/lib/neo4j/logs
     networks:
       - strands-net
 
@@ -146,7 +122,5 @@ volumes:
   prometheus_data:
   grafana_data:
   neo4j_data:
-  strands_neo4j_plugins:
-  strands_neo4j_logs:
   qdrant_data:
   ollama_data:

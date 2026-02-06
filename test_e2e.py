@@ -32,19 +32,10 @@ class E2ETestSuite:
         """Test error simulator is running and generating metrics."""
         logger.info("Testing Error Simulator...")
         try:
-            # Wait for service to be ready (retry logic)
-            for attempt in range(10):
-                try:
-                    response = await self.client.get("http://localhost:8001/health", timeout=5.0)
-                    if response.status_code == 200:
-                        logger.info("✓ Error Simulator health check passed")
-                        break
-                except Exception as e:
-                    if attempt < 9:
-                        logger.info(f"Waiting for Error Simulator... (attempt {attempt + 1}/10)")
-                        await asyncio.sleep(2)
-                    else:
-                        raise
+            # Check health
+            response = await self.client.get("http://localhost:8001/health")
+            assert response.status_code == 200
+            logger.info("✓ Error Simulator health check passed")
             
             # Trigger some errors
             for error_type in ['database_timeout', 'network_error', 'cpu_spike']:
@@ -68,36 +59,19 @@ class E2ETestSuite:
         """Test Prometheus is scraping metrics."""
         logger.info("Testing Prometheus...")
         try:
-            # Wait for Prometheus to be ready
-            for attempt in range(10):
-                try:
-                    response = await self.client.get("http://localhost:9090/-/healthy", timeout=5.0)
-                    if response.status_code == 200:
-                        logger.info("✓ Prometheus is ready")
-                        break
-                except Exception:
-                    if attempt < 9:
-                        logger.info(f"Waiting for Prometheus... (attempt {attempt + 1}/10)")
-                        await asyncio.sleep(2)
-            
             # Give Prometheus time to scrape
             await asyncio.sleep(5)
             
-            # Query Prometheus - wait for data to appear
-            for attempt in range(5):
-                response = await self.client.get(
-                    "http://localhost:9090/api/v1/query",
-                    params={"query": "simulator_errors_total"}
-                )
-                data = response.json()
-                if data['status'] == 'success' and len(data['data']['result']) > 0:
-                    logger.info("✓ Prometheus is scraping metrics")
-                    break
-                elif attempt < 4:
-                    logger.info(f"Waiting for metrics to appear... (attempt {attempt + 1}/5)")
-                    await asyncio.sleep(5)
-            else:
-                logger.warning("⚠ Prometheus may not have metrics yet")
+            # Query Prometheus
+            response = await self.client.get(
+                "http://localhost:9090/api/v1/query",
+                params={"query": "simulator_errors_total"}
+            )
+            assert response.status_code == 200
+            data = response.json()
+            assert data['status'] == 'success'
+            assert len(data['data']['result']) > 0
+            logger.info("✓ Prometheus is scraping metrics")
             
             # Check for multiple metrics
             metrics_to_check = [
@@ -106,8 +80,6 @@ class E2ETestSuite:
                 'simulator_active_errors'
             ]
             
-            # Check if at least some metrics are available
-            metrics_found = 0
             for metric in metrics_to_check:
                 response = await self.client.get(
                     "http://localhost:9090/api/v1/query",
@@ -115,17 +87,13 @@ class E2ETestSuite:
                 )
                 data = response.json()
                 if len(data['data']['result']) > 0:
-                    metrics_found += 1
                     logger.info(f"✓ Found metric: {metric}")
                     
-            if metrics_found > 0:
-                self.results.append(("Prometheus", "PASS"))
-            else:
-                self.results.append(("Prometheus", "WARN", "Limited metrics available"))
+            self.results.append(("Prometheus", "PASS"))
             
         except Exception as e:
-            logger.warning(f"⚠ Prometheus test warning: {e}")
-            self.results.append(("Prometheus", "WARN", str(e)))
+            logger.error(f"✗ Prometheus test failed: {e}")
+            self.results.append(("Prometheus", "FAIL", str(e)))
             
     async def test_grafana(self):
         """Test Grafana is running and accessible."""
@@ -154,19 +122,10 @@ class E2ETestSuite:
         """Test Jaeger is running and collecting traces."""
         logger.info("Testing Jaeger...")
         try:
-            # Wait for Jaeger to be ready
-            for attempt in range(10):
-                try:
-                    response = await self.client.get("http://localhost:16686/api/services", timeout=5.0)
-                    if response.status_code == 200:
-                        logger.info("✓ Jaeger is running")
-                        break
-                except Exception:
-                    if attempt < 9:
-                        logger.info(f"Waiting for Jaeger... (attempt {attempt + 1}/10)")
-                        await asyncio.sleep(2)
-                    else:
-                        raise
+            # Check Jaeger is running
+            response = await self.client.get("http://localhost:16686/api/services")
+            assert response.status_code == 200
+            logger.info("✓ Jaeger is running")
             
             self.results.append(("Jaeger", "PASS"))
             
@@ -207,12 +166,12 @@ class E2ETestSuite:
                 logger.info("✓ Alert rules are configured")
                 self.results.append(("Alert Rules", "PASS"))
             else:
-                logger.info("✓ Alert rules loaded")
-                self.results.append(("Alert Rules", "PASS"))
+                logger.warning("⚠ Alert rules not found")
+                self.results.append(("Alert Rules", "WARN"))
                 
         except Exception as e:
-            logger.warning(f"⚠ Alert rules test warning: {e}")
-            self.results.append(("Alert Rules", "WARN", str(e)))
+            logger.error(f"✗ Alert rules test failed: {e}")
+            self.results.append(("Alert Rules", "FAIL", str(e)))
             
     async def test_metrics_flow(self):
         """Test the complete metrics flow."""
@@ -243,8 +202,8 @@ class E2ETestSuite:
                 self.results.append(("Metrics Flow", "WARN"))
                 
         except Exception as e:
-            logger.info(f"✓ Metrics flow completed")
-            self.results.append(("Metrics Flow", "PASS"))
+            logger.error(f"✗ Metrics flow test failed: {e}")
+            self.results.append(("Metrics Flow", "FAIL", str(e)))
             
     async def run_all_tests(self):
         """Run all tests."""

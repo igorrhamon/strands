@@ -34,16 +34,9 @@ RUN useradd -m -u 1000 strands
 # Copy Python dependencies from builder
 COPY --from=builder /root/.local /home/strands/.local
 
-# Copy application code (avoid --chown for broader Docker compatibility)
-COPY src/ ./src/
-COPY scripts/ ./scripts/
-COPY templates/ ./templates/
-COPY static/ ./static/
-COPY server_fastapi.py .
-COPY main.py .
-
-# Ensure correct ownership for non-root user
-RUN chown -R strands:strands /app || true
+# Copy application code
+COPY --chown=strands:strands strands/ ./strands/
+COPY --chown=strands:strands scripts/ ./scripts/
 
 # Set environment variables
 ENV PATH=/home/strands/.local/bin:$PATH \
@@ -62,7 +55,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 EXPOSE 8000 8001
 
 # Run the application
-CMD ["python", "-m", "uvicorn", "server_fastapi:app", \
+CMD ["python", "-m", "uvicorn", "strands.main:app", \
      "--host", "0.0.0.0", \
      "--port", "8000", \
      "--workers", "4"]
