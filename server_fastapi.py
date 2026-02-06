@@ -10,6 +10,7 @@ import random
 import time
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+import time
 from pydantic import BaseModel
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Gauge
 
@@ -43,6 +44,18 @@ class ReviewRequest(BaseModel):
     is_approved: bool
     feedback: Optional[str] = None
     validated_by: str
+
+
+class GenerateRequest(BaseModel):
+    prompt: str
+
+
+@app.post("/generate")
+async def generate(req: GenerateRequest):
+    """A simple endpoint to simulate a model generating a response."""
+    time.sleep(2)  # Simulate a delay
+    return {"text": f"This is a dummy response to: {req.prompt}"}
+
 
 @app.on_event("startup")
 async def startup_event():
