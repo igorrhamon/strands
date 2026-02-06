@@ -42,10 +42,9 @@ def swarm_results():
         )
     ]
 
-@pytest.mark.asyncio
-async def test_consolidate_agreement(mock_alert, swarm_results):
+def test_consolidate_agreement(mock_alert, swarm_results):
     engine = DecisionEngine()
-    candidate = await engine.consolidate(mock_alert, swarm_results)
+    candidate = engine.consolidate(mock_alert, swarm_results)
     
     assert candidate.alert_reference == mock_alert.fingerprint
     assert candidate.primary_hypothesis == "CPU saturation"
@@ -53,8 +52,7 @@ async def test_consolidate_agreement(mock_alert, swarm_results):
     assert "CPU usage > 90%" in candidate.supporting_evidence[0]
     assert not candidate.conflicting_hypotheses
 
-@pytest.mark.asyncio
-async def test_consolidate_conflict(mock_alert):
+def test_consolidate_conflict(mock_alert):
     results = [
         SwarmResult(
             agent_id="metrics",
@@ -71,7 +69,7 @@ async def test_consolidate_conflict(mock_alert):
     ]
     
     engine = DecisionEngine()
-    candidate = await engine.consolidate(mock_alert, results)
+    candidate = engine.consolidate(mock_alert, results)
     
     assert candidate.primary_hypothesis == "CPU saturation" # Winner because 0.85 > 0.82
     assert candidate.conflicting_hypotheses
@@ -79,10 +77,9 @@ async def test_consolidate_conflict(mock_alert):
     assert any("Database lock" in c for c in candidate.conflicting_hypotheses)
     assert candidate.automation_level == AutomationLevel.MANUAL
 
-@pytest.mark.asyncio
-async def test_empty_results(mock_alert):
+def test_empty_results(mock_alert):
     engine = DecisionEngine()
-    candidate = await engine.consolidate(mock_alert, [])
+    candidate = engine.consolidate(mock_alert, [])
     
     assert candidate.status == DecisionStatus.PROPOSED
     assert "No analysis results" in candidate.summary

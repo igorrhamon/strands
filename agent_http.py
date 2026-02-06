@@ -24,8 +24,7 @@ class Spinner:
 
     def spin(self):
         while self.busy:
-            # Cyand color for the spinner char (from PR #18)
-            sys.stdout.write(f"\r\033[36m{next(self.spinner)}\033[0m {self.message}")
+            sys.stdout.write(f"\r{self.message} {next(self.spinner)}")
             sys.stdout.flush()
             self.spinner_visible = True
             time.sleep(self.delay)
@@ -43,33 +42,20 @@ class Spinner:
         if self.spinner_visible:
             # Clear the entire line
             sys.stdout.write('\r' + ' ' * (len(self.message) + 4) + '\r')
-            sys.stdout.flush()
 
-
-def main():
-    """Instantiates an agent and runs a prompt with a loading spinner and colors."""
-    try:
-        http_model = HTTPModel(endpoint_url=MODEL_ENDPOINT)
-        agent = Agent(model=http_model)
-
-        # Delightful colors (from PR #18)
-        BLUE = "\033[94m"
-        BOLD = "\033[1m"
-        END = "\033[0m"
-
-        print(f"{BLUE}🎨 Sending prompt to agent...{END}")
-        with Spinner("Agent thinking..."):
-            resp = agent("Explique como funciona o loop de agentes em Strands.")
-
-        # AgentResult implements __str__ to return the last textual message
-        print(f"\n{BLUE}{BOLD}✅ Agent response:{END}")
-        print(str(resp))
-
-    except httpx.ConnectError:
-        print("\n❌ Could not connect to the model endpoint.")
-        print(f"   Please ensure the demo server is running on {MODEL_ENDPOINT}")
-        print("   You can start it with: uvicorn server_fastapi:app --reload --port 8000")
-
+def call_http_agent(prompt: str):
+    print(f"\nPrompt: {prompt}")
+    with Spinner("Agent is thinking..."):
+        model = HTTPModel(MODEL_ENDPOINT)
+        agent = Agent("http-demo-agent", model)
+        response = agent.think(prompt)
+    
+    print(f"Agent Response: {response}")
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1:
+        user_prompt = " ".join(sys.argv[1:])
+    else:
+        user_prompt = "What is the capital of France?"
+    
+    call_http_agent(user_prompt)

@@ -24,8 +24,7 @@ def mock_repo():
     repo.record_decision_outcome = Mock()
     return repo
 
-@pytest.mark.asyncio
-async def test_review_approval(mock_candidate, mock_repo):
+def test_review_approval(mock_candidate, mock_repo):
     agent = HumanReviewAgent(mock_repo)
     
     validation = DecisionValidation(
@@ -36,13 +35,12 @@ async def test_review_approval(mock_candidate, mock_repo):
         feedback="Looks good"
     )
     
-    result = await agent.process_review(mock_candidate, validation)
+    result = agent.process_review(mock_candidate, validation)
     
     assert result.status == DecisionStatus.APPROVED
     mock_repo.record_decision_outcome.assert_called_once_with(validation)
 
-@pytest.mark.asyncio
-async def test_review_rejection(mock_candidate, mock_repo):
+def test_review_rejection(mock_candidate, mock_repo):
     agent = HumanReviewAgent(mock_repo)
     
     validation = DecisionValidation(
@@ -53,13 +51,12 @@ async def test_review_rejection(mock_candidate, mock_repo):
         feedback="Wrong hypothesis"
     )
     
-    result = await agent.process_review(mock_candidate, validation)
+    result = agent.process_review(mock_candidate, validation)
     
     assert result.status == DecisionStatus.REJECTED
     mock_repo.record_decision_outcome.assert_called_once_with(validation)
 
-@pytest.mark.asyncio
-async def test_id_mismatch(mock_candidate, mock_repo):
+def test_id_mismatch(mock_candidate, mock_repo):
     agent = HumanReviewAgent(mock_repo)
     
     validation = DecisionValidation(
@@ -70,4 +67,4 @@ async def test_id_mismatch(mock_candidate, mock_repo):
     )
     
     with pytest.raises(ValueError, match="Validation ID mismatch"):
-        await agent.process_review(mock_candidate, validation)
+        agent.process_review(mock_candidate, validation)

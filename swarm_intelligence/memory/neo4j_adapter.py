@@ -7,8 +7,9 @@ from typing import Dict, Any, List
 from swarm_intelligence.core.models import (
     Alert, SwarmPlan, SwarmStep, AgentExecution, Evidence, Decision,
     HumanDecision, OperationalOutcome, EvidenceType, RetryAttempt, ReplayReport,
-    Domain, SwarmRun
+    Domain, SwarmRun, RetryDecision
 )
+from swarm_intelligence.core.enums import RiskLevel
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -41,8 +42,6 @@ class Neo4jAdapter:
 
     def fetch_full_run_context(self, run_id: str) -> Dict[str, Any]:
         """Fetches and reconstructs a complete SwarmRun context for deterministic replay."""
-        # This implementation is simplified for clarity. A production version would
-        # need more robust reconstruction of complex objects like policies.
         query = """
         MATCH (run:SwarmRun {id: $run_id})<-[:TRIGGERED]-(alert:Alert)
         MATCH (run)-[:BELONGS_TO]->(domain:Domain)
@@ -113,6 +112,8 @@ class Neo4jAdapter:
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:HumanDecision) REQUIRE n.id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:OperationalOutcome) REQUIRE n.id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:RetryAttempt) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:RetryDecision) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:RetryPolicy) REQUIRE n.logic_hash IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:ReplayReport) REQUIRE n.id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:ConfidenceSnapshot) REQUIRE n.id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:Domain) REQUIRE n.id IS UNIQUE",
@@ -121,7 +122,7 @@ class Neo4jAdapter:
             self.run_transaction(query)
         logging.info("Neo4j schema constraints ensured.")
 
-    def save_swarm_run(self, swarm_run: SwarmRun, alert: Alert, retry_attempts: List[RetryAttempt]):
+    def save_swarm_run(self, swarm_run: SwarmRun, alert: Alert, retry_attempts: List[RetryAttempt], retry_decisions: List[RetryDecision]):
         # This complex query performs the entire save in one atomic transaction.
         query = """
         MERGE (alert:Alert {id: $alert_id}) ON CREATE SET alert.data = $alert_data
@@ -137,7 +138,7 @@ class Neo4jAdapter:
         WITH run, dec
         UNWIND $steps as step_param
         MERGE (step:SwarmStep {id: step_param.step_id})
-        ON CREATE SET step.parameters = step_param.params, step.retry_policy = step_param.policy
+        ON CREATE SET step.parameters = step_param.params
         MERGE (run)-[:EXECUTED_STEP]->(step)
 
         MERGE (agent:Agent {id: step_param.agent_id})
@@ -169,8 +170,9 @@ class Neo4jAdapter:
         MATCH (evidence:Evidence {id: ev_id})
         MERGE (evidence)-[:INFLUENCED {weight: 1.0}]->(dec)
 
-        WITH dec
+        WITH run
         UNWIND $retries as retry_param
+        MATCH (step:SwarmStep {id: retry_param.step_id})
         MATCH (failed_exec:AgentExecution {id: retry_param.failed_execution_id})
         CREATE (ra:RetryAttempt {
             id: retry_param.attempt_id,
@@ -179,14 +181,28 @@ class Neo4jAdapter:
             reason: retry_param.reason,
             timestamp: datetime()
         })
-        CREATE (failed_exec)-[:RETRIED_WITH]->(ra)
+        CREATE (step)-[:RETRIED_WITH]->(ra)
+        CREATE (ra)-[:FAILED_EXECUTION]->(failed_exec)
+
+        WITH run
+        UNWIND $retry_decisions as rd_param
+        MATCH (attempt:RetryAttempt {id: rd_param.attempt_id})
+        MATCH (failed_exec:AgentExecution {id: attempt.failed_execution_id})
+        MATCH (step:SwarmStep {id: rd_param.step_id})
+        CREATE (rd:RetryDecision {
+            id: rd_param.decision_id,
+            reason: rd_param.reason,
+            timestamp: datetime()
+        })
+        CREATE (failed_exec)-[:TRIGGERED]->(rd)
+        CREATE (rd)-[:RESULTED_IN]->(attempt)
+        CREATE (attempt)-[:REEXECUTED]->(step)
         """
 
         steps_params = [{
             "step_id": s.step_id,
             "agent_id": s.agent_id,
             "params": json.dumps(s.parameters),
-            "policy": json.dumps(s.retry_policy.to_dict() if s.retry_policy else {}),
             "executions": [{
                 "execution_id": ex.execution_id,
                 "agent_version": ex.agent_version,
@@ -205,7 +221,8 @@ class Neo4jAdapter:
             "action_proposed": swarm_run.final_decision.action_proposed, "confidence": swarm_run.final_decision.confidence,
             "steps": steps_params,
             "influencing_evidence": [ev.evidence_id for ev in swarm_run.final_decision.supporting_evidence],
-            "retries": [r.__dict__ for r in retry_attempts]
+            "retries": [r.__dict__ for r in retry_attempts],
+            "retry_decisions": [rd.__dict__ for rd in retry_decisions]
         }
         self.run_transaction(query, params)
 
@@ -290,7 +307,6 @@ class Neo4jAdapter:
 
     def link_policy_to_domain(self, policy_name: str, domain_id: str):
         """Creates a VALID_IN relationship from a policy to a domain."""
-        # Note: This assumes policies are identified by name.
         query = """
         MERGE (p:RetryPolicy {name: $policy_name})
         MATCH (d:Domain {id: $domain_id})
@@ -300,7 +316,6 @@ class Neo4jAdapter:
 
     def link_metric_to_domain(self, metric_name: str, domain_id: str):
         """Creates a RELEVANT_FOR relationship from a metric to a domain."""
-         # Note: This assumes metrics are identified by name.
         query = """
         MERGE (m:Metric {name: $metric_name})
         MATCH (d:Domain {id: $domain_id})

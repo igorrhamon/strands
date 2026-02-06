@@ -12,16 +12,7 @@ class ConfidenceSnapshot: pass
 class RetryAttempt: pass
 class AgentExecution: pass
 class Evidence: pass
-@dataclass
-class RetryDecision:
-    """Represents a decision made by the RetryController about a failed execution."""
-    step_id: str
-    reason: str
-    policy_name: str
-    policy_version: str
-    policy_logic_hash: str
-    attempt_id: str
-    decision_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+class RetryDecision: pass
 
 @dataclass
 class Evidence:
@@ -148,24 +139,4 @@ class RetryEvaluationResult:
     """A structured result from the SwarmRetryController."""
     steps_to_retry: List[SwarmStep] = field(default_factory=list)
     retry_attempts: List[RetryAttempt] = field(default_factory=list)
-    retry_decisions: List[RetryDecision] = field(default_factory=list)
     max_delay_seconds: float = 0.0
-
-@dataclass(frozen=True)
-class Domain:
-    """Represents a cognitive domain of operation."""
-    id: str
-    name: str
-    description: str
-    risk_level: RiskLevel
-
-@dataclass
-class SwarmRun:
-    """Represents a single, complete execution of a swarm against a plan."""
-    run_id: str
-    domain: Domain
-    plan: SwarmPlan
-    master_seed: int
-    executions: List[AgentExecution] = field(default_factory=list)
-    final_decision: Optional[Decision] = None
-    timestamp: datetime = field(default_factory=datetime.utcnow)

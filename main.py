@@ -12,7 +12,10 @@ from swarm_intelligence.core.models import (
 )
 from swarm_intelligence.core.enums import RiskLevel
 from swarm_intelligence.core.swarm import Agent, SwarmOrchestrator
-from swarm_intelligence.controller import SwarmController
+from swarm_intelligence.coordinators.swarm_run_coordinator import SwarmRunCoordinator
+from swarm_intelligence.controllers.swarm_execution_controller import SwarmExecutionController
+from swarm_intelligence.controllers.swarm_retry_controller import SwarmRetryController
+from swarm_intelligence.controllers.swarm_decision_controller import SwarmDecisionController
 from swarm_intelligence.memory.neo4j_adapter import Neo4jAdapter
 from swarm_intelligence.policy.retry_policy import ExponentialBackoffPolicy
 from swarm_intelligence.policy.confidence_policy import DefaultConfidencePolicy
@@ -93,8 +96,20 @@ async def main():
         confidence_service = ConfidenceService(neo4j)
         agents = [ThreatIntelAgent("threat_intel"), LogAnalysisAgent("log_analysis")]
         orchestrator = SwarmOrchestrator(agents)
-        controller = SwarmController(orchestrator, confidence_service, neo4j, confidence_policy=DefaultConfidencePolicy())
-        controller.register_human_hooks(expert_human_review)
+
+        # Initialize controllers
+        execution_controller = SwarmExecutionController(orchestrator)
+        retry_controller = SwarmRetryController()
+        decision_controller = SwarmDecisionController(orchestrator, confidence_service, confidence_policy=DefaultConfidencePolicy())
+
+        # Initialize the main coordinator
+        coordinator = SwarmRunCoordinator(
+            execution_controller,
+            retry_controller,
+            decision_controller,
+            confidence_service
+        )
+        coordinator.register_human_hooks(expert_human_review)
 
         default_domain = Domain(
             id="infra-01",
@@ -110,9 +125,9 @@ async def main():
         alert = Alert(alert_id="sec-alert-101", data={"hostname": "web-prod-03"})
         run_id = f"run-{alert.alert_id}"
 
-        swarm_run, all_retry_attempts = await controller.aexecute_plan(default_domain, plan, alert, run_id)
+        swarm_run, all_retry_attempts, all_retry_decisions = await coordinator.aexecute_plan(default_domain, plan, alert, run_id)
 
-        neo4j.save_swarm_run(swarm_run, alert, all_retry_attempts)
+        neo4j.save_swarm_run(swarm_run, alert, all_retry_attempts, all_retry_decisions)
 
         decision = swarm_run.final_decision
         if decision.human_decision:
@@ -122,7 +137,7 @@ async def main():
 
         logging.info("\n--- Initiating Deterministic Replay ---")
         replay_engine = ReplayEngine(neo4j)
-        report = await replay_engine.replay_decision(run_id, controller)
+        report = await replay_engine.replay_decision(run_id, coordinator)
         logging.info(f"Replay Report ({report.report_id}) generated and saved.")
 
     except Exception as e:
