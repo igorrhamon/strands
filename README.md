@@ -1,112 +1,243 @@
-# Strands Agents — HTTP custom model provider example
+# Strands — Distributed Diagnostic Swarm Intelligence
 
-This example shows how to create a custom `Model` provider for Strands Agents
-that forwards prompts to an HTTP endpoint (for example an open-source model
-you hosted yourself). It also includes a minimal FastAPI demo server.
+**Strands** is a production-ready framework for orchestrating autonomous agents to diagnose and resolve infrastructure incidents in Kubernetes environments. It combines multi-agent collaboration, semantic memory, causal reasoning, and human-in-the-loop governance to deliver intelligent, auditable incident response.
 
-## Features
+## Overview
 
-- **Custom HTTP Model Provider**: HTTPModel implementation for Strands Agents SDK
-- **GitHub Models Provider**: Integration with Microsoft Foundry Inference SDK (see [specs/001-github-model-provider](specs/001-github-model-provider/))
-- **Ollama Provider**: Local LLM integration via Ollama API (see [src/providers/ollama_models.py](src/providers/ollama_models.py))
-- **MetricsAnalysisAgent**: Enhanced agent with p95 filtering, exponential backoff, and multi-metric fusion (see [specs/008-metrics-analysis-agent/quickstart.md](specs/008-metrics-analysis-agent/quickstart.md))
-- **Multi-Agent Pipeline**: Complete SRE workflow with 12-step orchestration (see [examples/PIPELINE_OLLAMA_README.md](examples/PIPELINE_OLLAMA_README.md))
-- **FastAPI Demo Server**: Minimal server for testing HTTP model integration
+Strands implements a **Swarm Intelligence** architecture where specialized agents work in parallel to analyze alerts, collect evidence, and recommend actions. The system prioritizes transparency and auditability through causal graphs, evidence scoring, and deterministic replay capabilities.
 
-Setup
------
+### Key Capabilities
 
-1. Create and activate a virtual environment
+**Multi-Agent Orchestration**: Five specialist agents (Metrics Analyst, Log Inspector, Embedding Agent, Graph Context, Correlator) execute in parallel, each contributing unique insights to incident analysis.
+
+**Evidence-Based Decision Making**: All agent outputs are scored for confidence and traced through a causal graph, enabling post-incident audits and continuous learning.
+
+**Kubernetes-Native Diagnostics**: Direct integration with `kubectl` for real-time log collection, pod inspection, and deployment context retrieval.
+
+**Semantic Memory**: Vector embeddings of incidents and resolutions enable similarity-based recommendations for recurring problems.
+
+**Governance & Control**: Automated decisions can be downgraded to manual review based on risk assessment, with full audit trails for compliance.
+
+## Architecture
+
+```mermaid
+graph TB
+    Alert["🚨 Alert Ingestion"] --> Normalizer["📋 Alert Normalizer"]
+    
+    Normalizer --> Orchestrator["⚙️ Swarm Orchestrator<br/>(Global Timeout: 30s)"]
+    
+    Orchestrator --> |Parallel Dispatch| MetricsAgent["📊 Metrics Analyst<br/>Prometheus Queries"]
+    Orchestrator --> |Parallel Dispatch| LogAgent["🔍 Log Inspector<br/>kubectl logs"]
+    Orchestrator --> |Parallel Dispatch| EmbeddingAgent["🧠 Embedding Agent<br/>Semantic Search"]
+    Orchestrator --> |Parallel Dispatch| GraphAgent["📈 Graph Context<br/>Neo4j Relations"]
+    Orchestrator --> |Parallel Dispatch| CorrelatorAgent["🔗 Correlator<br/>Pattern Matching"]
+    
+    MetricsAgent --> |SwarmResult| Consolidator["🎯 Decision Engine<br/>Hypothesis Synthesis"]
+    LogAgent --> |SwarmResult| Consolidator
+    EmbeddingAgent --> |SwarmResult| Consolidator
+    GraphAgent --> |SwarmResult| Consolidator
+    CorrelatorAgent --> |SwarmResult| Consolidator
+    
+    Consolidator --> |DecisionCandidate| Recommender["💡 Recommender Agent<br/>Action Suggestion"]
+    
+    Recommender --> RiskAssess["⚠️ Risk Assessment"]
+    RiskAssess --> |High Risk| HumanReview["👤 Human Review"]
+    RiskAssess --> |Low Risk| AutoExec["✅ Automated Execution"]
+    
+    HumanReview --> Outcome["📝 Incident Resolution"]
+    AutoExec --> Outcome
+    
+    Outcome --> Memory["💾 Memory & Learning<br/>Vector DB + Neo4j"]
+    
+    style Alert fill:#ff6b6b
+    style Orchestrator fill:#4ecdc4
+    style Consolidator fill:#45b7d1
+    style Memory fill:#96ceb4
+    style HumanReview fill:#ffeaa7
+```
+
+## Agent Specifications
+
+| Agent | Role | Status | Key Features |
+|-------|------|--------|--------------|
+| **Metrics Analyst** | Specialist | ✅ Implemented | Dynamic Prometheus queries, anomaly detection (latency > 2s, error rate > 5%), exponential backoff retry logic |
+| **Log Inspector** | Specialist | ✅ Implemented | Kubernetes pod log streaming via `kubectl`, multi-line stack trace parsing (Java/Python), error categorization |
+| **Embedding Agent** | Knowledge | ✅ Implemented | FastEmbed vector generation, Qdrant similarity search, incident history retrieval |
+| **Graph Context** | Specialist | ✅ Implemented | Neo4j causal relationship queries, dependency mapping, blast radius analysis |
+| **Correlator** | Specialist | ✅ Implemented | Pattern matching across agent outputs, conflict detection, hypothesis refinement |
+| **Recommender** | Governance | ✅ Implemented | Heuristic-based action suggestions, risk-aware automation downgrade, historical pattern matching |
+| **Decision Engine** | Orchestration | ✅ Implemented | Hypothesis synthesis, confidence scoring, conflict resolution |
+| **Human Review** | Governance | ✅ Implemented | Manual approval workflow, decision audit trail, feedback loop |
+
+## Installation
+
+### Prerequisites
+
+- Python 3.10+
+- Kubernetes cluster with `kubectl` configured
+- Prometheus (for metrics collection)
+- Neo4j (for causal graph storage)
+- Qdrant (for vector similarity search)
+
+### Setup
 
 ```bash
+# Clone repository
+git clone https://github.com/igorrhamon/strands.git
+cd strands
+
+# Create virtual environment
 python3 -m venv .venv
-. .venv/bin/activate
+source .venv/bin/activate
+
+# Install dependencies
 pip install --upgrade pip setuptools wheel
 pip install -r requirements.txt
 ```
 
-2. Run the demo server (FastAPI)
+### Configuration
+
+Set environment variables for your infrastructure:
 
 ```bash
-uvicorn server_fastapi:app --reload --port 8000
+export PROMETHEUS_URL="http://prometheus:9090"
+export KUBERNETES_CONTEXT="production"
+export NEO4J_URI="bolt://localhost:7687"
+export QDRANT_URL="http://localhost:6333"
+export OLLAMA_HOST="http://localhost:11434"  # Optional: for local LLM
 ```
 
-3. In another terminal (with `.venv` activated) run the agent example
+## Quick Start
+
+### Run the Demo Pipeline
 
 ```bash
-python agent_http.py
+# Test connectivity and basic orchestration
+python examples/pipeline_ollama_test.py
+
+# Run full SRE workflow with simulated alert
+python examples/pipeline_ollama.py
 ```
 
-Files
------
-- `my_http_model.py`: Custom `HTTPModel` provider that posts prompts to an endpoint.
-- `agent_http.py`: Example that creates an `Agent` using the custom provider.
-- `server_fastapi.py`: Small FastAPI demo server that returns an echoed response.
-- `requirements.txt`: Packages used in the example.
+### Run Unit Tests
 
-Multi-Agent Pipeline Examples
-------------------------------
-Complete SRE workflows demonstrating agent orchestration:
-
-### Ollama Pipeline (Local LLM)
-Full 12-step pipeline with Ollama provider:
-- **Quick Start**: `python examples/pipeline_ollama_test.py` (connectivity test)
-- **Full Pipeline**: `python examples/pipeline_ollama.py` (complete workflow)
-- **Documentation**: [examples/PIPELINE_OLLAMA_README.md](examples/PIPELINE_OLLAMA_README.md)
-- **Summary**: [examples/PIPELINE_IMPLEMENTATION_SUMMARY.md](examples/PIPELINE_IMPLEMENTATION_SUMMARY.md)
-
-Pipeline Flow:
-```
-AlertCollector → AlertNormalizer → AlertCorrelation → MetricsAnalysis
-→ RepositoryContext ⟷ GraphKnowledge (feedback loop)
-→ DecisionEngine → HumanReview → OutcomeSupervisor
-→ MemoryValidation → GraphKnowledge → AuditReport
-```
-
-Prerequisites:
 ```bash
-# Install and start Ollama
-curl -fsSL https://ollama.com/install.sh | sh
-ollama serve
+# Test individual agents
+pytest tests/unit/test_log_inspector.py
+pytest tests/unit/test_new_agents.py
 
-# Pull a model
-ollama pull llama3.1
+# Test orchestration timeout
+pytest tests/unit/test_orchestrator_timeout.py
 
-# Set environment
-export OLLAMA_HOST="http://localhost:11434"
-export OLLAMA_MODEL="llama3.1"
+# Run end-to-end simulation
+pytest tests/e2e/test_e2e_simulation.py
 ```
 
-Notes
------
-- Production servers should implement streaming, authentication, retries,
-  timeout control and proper error handling. The demo server only echoes the
-  prompt for simplicity.
-- If you have a model from GitHub Models, first serve it with a model server
-  (Ollama, Llama-API, custom FastAPI wrapping a transformers pipeline, etc.)
-  and then point `HTTPModel.endpoint_url` to that server.
+## Confidence Scoring
 
-Distributed Diagnostic Swarm (Feature 009)
-------------------------------------------
-**Status: Implemented & Verified**
+The system calculates evidence confidence using a **weighted formula**:
 
-A parallel multi-agent analysis architecture that ingests alerts, spawns specialized agents to investigate in parallel, and consolidates findings into a single decision candidate.
-
-- **Architecture**: Swarm of 5 specialist agents (Metrics, Code, Graph, Vector, Correlator)
-- **Orchestration**: `SwarmOrchestrator` uses `asyncio` for parallel, independent execution.
-- **Data Model**: `DecisionCandidate` captures the primary hypothesis, risks, and conflicts.
-- **Governance**: Human-in-the-Loop review process via `HumanReviewAgent`.
-- **Learning**: Post-mortem generation and Graph/Vector lineage recording.
-
-**Quick Demo:**
-```bash
-# Uses mocked repository and agents for demonstration
-python examples/demo_graph_swarm.py
+```
+Confidence Score = (Base × 0.4) + (Quality × 0.3) + (History × 0.3) - Penalty
 ```
 
-**Key Components:**
-- `src/agents/swarm/orchestrator.py`: Parallel dispatch logic.
-- `src/agents/governance/decision_engine.py`: Conflict resolution and hypothesis synthesis.
-- `src/graph/neo4j_repo.py`: Graph persistence (Neo4j).
-- `specs/009-diagnostic-swarm-graph/spec.md`: Full specification.
+Where:
+- **Base** (0-1): Raw agent confidence in its analysis
+- **Quality** (0-1): Data quality score (completeness, recency)
+- **History** (0-1): Historical accuracy of similar analyses
+- **Penalty** (0-0.5): Deduction for conflicting evidence or missing context
 
+Example: An agent with base confidence 0.9, quality 0.85, and perfect history (1.0) scores `(0.9 × 0.4) + (0.85 × 0.3) + (1.0 × 0.3) = 0.895`.
+
+## Production Readiness
+
+### Recent Improvements (PR #20)
+
+1. **Global Timeout**: SwarmOrchestrator enforces 30-second timeout to prevent indefinite waits
+2. **Robust Log Parsing**: Multi-line stack trace support for Java/Python exceptions
+3. **Dynamic Queries**: Metrics Agent constructs Prometheus queries based on alert service name
+4. **Embedding Integration**: Real FastEmbed + Qdrant for semantic incident search
+5. **Enhanced Recommendations**: Risk-aware automation downgrade for high-severity scenarios
+
+### Known Limitations
+
+- Hypothesis comparison uses string equality (not semantic similarity) — planned for LLM-based comparison
+- Recommender uses rule-based heuristics (not ML-trained) — candidate for future ML model
+- No built-in alerting for agent failures — requires external monitoring
+
+## File Structure
+
+```
+strands/
+├── src/
+│   ├── agents/
+│   │   ├── analysis/          # Specialist agents (metrics, logs, embeddings)
+│   │   ├── swarm/             # Orchestration logic
+│   │   ├── governance/        # Decision engine, recommender, human review
+│   │   └── grafana_alert_analysis/
+│   ├── models/                # Pydantic data models
+│   ├── graph/                 # Neo4j repository and causal graph logic
+│   └── providers/             # LLM providers (HTTP, Ollama, GitHub Models)
+├── examples/
+│   ├── pipeline_ollama.py     # Full SRE workflow
+│   ├── demo_graph_swarm.py    # Swarm orchestration demo
+│   └── PIPELINE_OLLAMA_README.md
+├── tests/
+│   ├── unit/                  # Agent and orchestrator tests
+│   └── e2e/                   # End-to-end simulation
+├── specs/                     # Architecture specifications
+├── requirements.txt           # Python dependencies
+├── environment.yml            # Conda environment definition
+└── README.md                  # This file
+```
+
+## Contributing
+
+Contributions are welcome! Please follow these guidelines:
+
+1. **Branch Naming**: Use `feat/` for features, `fix/` for bug fixes, `docs/` for documentation
+2. **Testing**: All new agents must include unit tests and pass `pytest`
+3. **Documentation**: Update specs/ and README.md for architectural changes
+4. **Code Style**: Follow PEP 8; use type hints for all functions
+
+## Roadmap
+
+| Phase | Focus | Timeline |
+|-------|-------|----------|
+| **Phase 1** | Production Hardening | Q1 2026 |
+| | - LLM-based hypothesis comparison | |
+| | - Agent failure alerting | |
+| | - Performance optimization | |
+| **Phase 2** | Advanced Intelligence | Q2 2026 |
+| | - ML-trained recommender | |
+| | - Predictive incident detection | |
+| | - Cross-cluster correlation | |
+| **Phase 3** | Enterprise Features | Q3 2026 |
+| | - Multi-tenant isolation | |
+| | - Custom agent framework | |
+| | - Compliance reporting | |
+
+## References
+
+- **Swarm Intelligence**: Orchestrator design inspired by multi-agent systems research
+- **Evidence Scoring**: Bayesian confidence model with weighted components
+- **Kubernetes Integration**: Uses official Python client library for pod/log access
+- **Vector Search**: FastEmbed + Qdrant for semantic similarity
+- **Causal Graphs**: Neo4j for relationship persistence and audit trails
+
+## License
+
+MIT License — See LICENSE file for details
+
+## Support
+
+For issues, feature requests, or questions:
+- **GitHub Issues**: [igorrhamon/strands/issues](https://github.com/igorrhamon/strands/issues)
+- **Documentation**: [specs/](specs/) directory contains detailed specifications
+- **Examples**: [examples/](examples/) directory contains runnable demos
+
+---
+
+**Last Updated**: February 2026  
+**Maintainer**: Igor Hamon (@igorrhamon)  
+**Contributors**: Manus AI, Google Labs Jules Bot
