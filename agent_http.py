@@ -1,3 +1,4 @@
+import httpx
 import itertools
 import sys
 import time
@@ -45,15 +46,21 @@ class Spinner:
 
 def main():
     """Instantiates an agent and runs a prompt with a loading spinner."""
-    http_model = HTTPModel(endpoint_url=MODEL_ENDPOINT)
-    agent = Agent(model=http_model)
+    try:
+        http_model = HTTPModel(endpoint_url=MODEL_ENDPOINT)
+        agent = Agent(model=http_model)
 
-    print("Sending prompt to agent...")
-    with Spinner("Agent thinking..."):
-        resp = agent("Explique como funciona o loop de agentes em Strands.")
+        print("🎨 Sending prompt to agent...")
+        with Spinner("Agent thinking..."):
+            resp = agent("Explique como funciona o loop de agentes em Strands.")
 
-    # AgentResult implements __str__ to return the last textual message
-    print('Agent response:\n', str(resp))
+        # AgentResult implements __str__ to return the last textual message
+        print('\n✅ Agent response:\n', str(resp))
+
+    except httpx.ConnectError:
+        print("\n❌ Could not connect to the model endpoint.")
+        print(f"   Please ensure the demo server is running on {MODEL_ENDPOINT}")
+        print("   You can start it with: uvicorn server_fastapi:app --reload --port 8000")
 
 
 if __name__ == "__main__":
