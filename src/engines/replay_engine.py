@@ -568,3 +568,99 @@ class ReplayEngine:
             Lista de sessões
         """
         return list(self._sessions.values())
+    
+    def time_travel_to_event(self, event_id: str) -> Optional[ReplayEvent]:
+        """Navega até um evento específico (time-travel).
+        
+        Args:
+            event_id: ID do evento
+        
+        Returns:
+            ReplayEvent ou None
+        """
+        for event in self._event_store:
+            if event.event_id == event_id:
+                self.logger.info(f"Time-travel to event: {event_id}")
+                return event
+        
+        return None
+    
+    def get_event_context(self, event_id: str, context_size: int = 5) -> Dict:
+        """Obtém contexto ao redor de um evento.
+        
+        Args:
+            event_id: ID do evento
+            context_size: Número de eventos antes/depois
+        
+        Returns:
+            Dicionário com contexto
+        """
+        # Encontrar índice do evento
+        event_index = None
+        for i, event in enumerate(self._event_store):
+            if event.event_id == event_id:
+                event_index = i
+                break
+        
+        if event_index is None:
+            return {}
+        
+        # Extrair contexto
+        start = max(0, event_index - context_size)
+        end = min(len(self._event_store), event_index + context_size + 1)
+        
+        context_events = self._event_store[start:end]
+        
+        return {
+            "target_event": self._event_store[event_index].to_dict(),
+            "before": [e.to_dict() for e in context_events[:context_size]],
+            "after": [e.to_dict() for e in context_events[context_size+1:]],
+        }
+    
+    def compare_sessions(self, session_id_1: str, session_id_2: str) -> Dict:
+        """Compara duas sessões de replay.
+        
+        Args:
+            session_id_1: ID da primeira sessão
+            session_id_2: ID da segunda sessão
+        
+        Returns:
+            Dicionário com comparação
+        """
+        session_1 = self.get_session(session_id_1)
+        session_2 = self.get_session(session_id_2)
+        
+        if not session_1 or not session_2:
+            return {}
+        
+        return {
+            "session_1": session_1.to_dict(),
+            "session_2": session_2.to_dict(),
+            "events_1": len(session_1.events),
+            "events_2": len(session_2.events),
+            "results_match": session_1.results == session_2.results,
+        }
+    
+    def cancel_session(self, session_id: str) -> bool:
+        """Cancela uma sessão de replay.
+        
+        Args:
+            session_id: ID da sessão
+        
+        Returns:
+            True se cancelada com sucesso
+        """
+        if session_id not in self._sessions:
+            return False
+        
+        session = self._sessions[session_id]
+        
+        if session.status in [ReplayStatus.COMPLETED, ReplayStatus.FAILED]:
+            return False
+        
+        session.status = ReplayStatus.CANCELLED
+        session.end_time = datetime.utcnow()
+        
+        self.logger.info(f"Replay session cancelled: {session_id}")
+        
+        return True
