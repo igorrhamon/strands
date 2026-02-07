@@ -449,3 +449,225 @@ class Neo4jCheckpointSaver:
         except Exception as e:
             self.logger.error(f"Erro ao limpar checkpoints antigos: {e}")
             raise
+
+
+    @retry_with_backoff(max_retries=3, initial_delay=1.0, backoff_factor=2.0)
+    def persist_execution_step(self, thread_id: str, step_index: int, 
+                               agent_data: Dict[str, Any]) -> str:
+        """Persiste um passo de execução com dados de agentes.
+        
+        Cria estrutura:
+            (:ExecutionThread)-[:HAS_STEP]->(:ExecutionStep)
+        
+        Args:
+            thread_id: ID da thread
+            step_index: Índice do passo
+            agent_data: Dados dos agentes (JSON serializado)
+        
+        Returns:
+            ID do passo persistido
+        
+        Raises:
+            Exception: Se falha ao persistir após retries
+        """
+        if not self._driver:
+            self.connect()
+        
+        step_id = f"step_{thread_id}_{step_index}"
+        
+        query = """
+        MERGE (thread:ExecutionThread {thread_id: $thread_id})
+        CREATE (step:ExecutionStep {
+            step_id: $step_id,
+            step_index: $step_index,
+            agent_data: $agent_data,
+            created_at: $created_at
+        })
+        CREATE (thread)-[:HAS_STEP {order: $step_index}]->(step)
+        RETURN step.step_id as step_id
+        """
+        
+        params = {
+            "thread_id": thread_id,
+            "step_id": step_id,
+            "step_index": step_index,
+            "agent_data": agent_data,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        
+        try:
+            with self._driver.session() as session:
+                result = session.run(query, params)
+                record = result.single()
+                
+                if record:
+                    persisted_step_id = record["step_id"]
+                    self.logger.info(
+                        f"Passo de execução persistido: {persisted_step_id} "
+                        f"(thread: {thread_id}, step: {step_index})"
+                    )
+                    return persisted_step_id
+                else:
+                    raise RuntimeError("Falha ao persistir passo de execução")
+        
+        except Exception as e:
+            self.logger.error(f"Erro ao persistir passo de execução: {e}")
+            raise
+    
+    @retry_with_backoff(max_retries=3, initial_delay=1.0, backoff_factor=2.0)
+    def load_execution_step(self, thread_id: str, step_index: int) -> Optional[Dict]:
+        """Carrega um passo de execução.
+        
+        Args:
+            thread_id: ID da thread
+            step_index: Índice do passo
+        
+        Returns:
+            Dicionário com dados do passo ou None
+        """
+        if not self._driver:
+            self.connect()
+        
+        query = """
+        MATCH (thread:ExecutionThread {thread_id: $thread_id})
+        MATCH (thread)-[:HAS_STEP {order: $step_index}]->(step:ExecutionStep)
+        RETURN step
+        """
+        
+        params = {
+            "thread_id": thread_id,
+            "step_index": step_index,
+        }
+        
+        try:
+            with self._driver.session() as session:
+                result = session.run(query, params)
+                record = result.single()
+                
+                if not record:
+                    self.logger.warning(
+                        f"Passo não encontrado: thread={thread_id}, step={step_index}"
+                    )
+                    return None
+                
+                step_node = record["step"]
+                
+                step_data = {
+                    "step_id": step_node["step_id"],
+                    "step_index": step_node["step_index"],
+                    "agent_data": step_node["agent_data"],
+                    "created_at": step_node["created_at"],
+                }
+                
+                self.logger.info(
+                    f"Passo carregado: {step_data['step_id']} "
+                    f"(thread: {thread_id}, step: {step_index})"
+                )
+                
+                return step_data
+        
+        except Exception as e:
+            self.logger.error(f"Erro ao carregar passo de execução: {e}")
+            raise
+    
+    @retry_with_backoff(max_retries=3, initial_delay=1.0, backoff_factor=2.0)
+    def list_execution_steps(self, thread_id: str) -> List[Dict]:
+        """Lista todos os passos de uma thread.
+        
+        Args:
+            thread_id: ID da thread
+        
+        Returns:
+            Lista de passos ordenados por step_index
+        """
+        if not self._driver:
+            self.connect()
+        
+        query = """
+        MATCH (thread:ExecutionThread {thread_id: $thread_id})
+        MATCH (thread)-[:HAS_STEP]->(step:ExecutionStep)
+        RETURN step
+        ORDER BY step.step_index ASC
+        """
+        
+        params = {"thread_id": thread_id}
+        
+        try:
+            with self._driver.session() as session:
+                result = session.run(query, params)
+                
+                steps = []
+                for record in result:
+                    step_node = record["step"]
+                    step_data = {
+                        "step_id": step_node["step_id"],
+                        "step_index": step_node["step_index"],
+                        "agent_data": step_node["agent_data"],
+                        "created_at": step_node["created_at"],
+                    }
+                    steps.append(step_data)
+                
+                self.logger.info(f"Listados {len(steps)} passo(s) da thread {thread_id}")
+                
+                return steps
+        
+        except Exception as e:
+            self.logger.error(f"Erro ao listar passos de execução: {e}")
+            raise
+    
+    @retry_with_backoff(max_retries=3, initial_delay=1.0, backoff_factor=2.0)
+    def save_agent_memory(self, thread_id: str, step_index: int, 
+                         agent_memories: Dict[str, Dict]) -> bool:
+        """Salva memória de agentes para um passo.
+        
+        Args:
+            thread_id: ID da thread
+            step_index: Índice do passo
+            agent_memories: Dicionário com memória por agente
+        
+        Returns:
+            True se salvo com sucesso
+        """
+        if not self._driver:
+            self.connect()
+        
+        query = """
+        MATCH (thread:ExecutionThread {thread_id: $thread_id})
+        MATCH (thread)-[:HAS_STEP {order: $step_index}]->(step:ExecutionStep)
+        UNWIND $agent_memories as agent_mem
+        CREATE (memory:AgentMemory {
+            agent_id: agent_mem.agent_id,
+            memory_data: agent_mem.memory_data,
+            timestamp: $timestamp
+        })
+        CREATE (step)-[:HAS_AGENT_MEMORY]->(memory)
+        """
+        
+        agent_memories_list = [
+            {
+                "agent_id": agent_id,
+                "memory_data": memory_data,
+            }
+            for agent_id, memory_data in agent_memories.items()
+        ]
+        
+        params = {
+            "thread_id": thread_id,
+            "step_index": step_index,
+            "agent_memories": agent_memories_list,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        
+        try:
+            with self._driver.session() as session:
+                session.run(query, params)
+                self.logger.info(
+                    f"Memória de {len(agent_memories)} agente(s) salva "
+                    f"(thread: {thread_id}, step: {step_index})"
+                )
+                return True
+        
+        except Exception as e:
+            self.logger.warning(f"Falha ao salvar memória de agentes: {e}")
+            # Não falhar completamente, apenas log
+            return False
