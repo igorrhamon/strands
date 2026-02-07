@@ -3,7 +3,7 @@ import logging
 from uuid import uuid4
 from datetime import datetime, timezone
 
-from src.models.alert import NormalizedAlert, AlertSource, ValidationStatus
+from src.models.alert import NormalizedAlert, ValidationStatus
 from src.agents.swarm.orchestrator import SwarmOrchestrator
 from src.agents.analysis.metrics_analysis import MetricsAnalysisAgent
 from src.agents.analysis.repository_context import RepositoryContextAgent
@@ -60,7 +60,6 @@ async def main():
         service="checkout-service",
         description="High latency in checkout service (99th percentile > 2s)",
         severity="critical",
-        source=AlertSource.GRAFANA,
         timestamp=datetime.now(timezone.utc),
         validation_status=ValidationStatus.VALID
     )
@@ -74,12 +73,12 @@ async def main():
         logger.info(f" - [{r.agent_id}] {r.hypothesis} ({r.confidence})")
 
     # 4. Decision Consolidation
-    candidate = await decision_engine.consolidate(alert, results)
+    candidate = decision_engine.consolidate(alert, results)
     logger.info(f"Decision Candidate Proposed: {candidate.primary_hypothesis}")
     logger.info(f"Risk: {candidate.risk_assessment}, Automation: {candidate.automation_level}")
 
     # 5. Recommendation
-    candidate = await recommender.refine_recommendation(candidate)
+    candidate = recommender.refine_recommendation(candidate)
     logger.info(f"Refined Recommendation: {candidate.summary}")
 
     # 6. Human Review
@@ -94,7 +93,7 @@ async def main():
         validated_at=datetime.now(timezone.utc)
     )
     
-    final_decision = await human_review.process_review(candidate, validation)
+    final_decision = human_review.process_review(candidate, validation)
     logger.info(f"Final Status: {final_decision.status}")
 
 if __name__ == "__main__":
