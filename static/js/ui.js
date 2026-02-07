@@ -14,17 +14,18 @@ class UI {
     /**
      * Simulate alert button click
      */
-    static async simulateAlert() {
-        const btn = document.getElementById('simulate-alert-btn');
-        if (!btn) return;
+    static async simulateAlert(btn) {
+        // Use provided button or fall back to the header one
+        const targetBtn = (btn instanceof HTMLElement) ? btn : document.getElementById('simulate-alert-btn');
+        if (!targetBtn) return;
 
-        const originalText = btn.innerText;
-        btn.disabled = true;
-        btn.innerText = '⏳ Generating...';
+        const originalContent = targetBtn.innerHTML;
+        targetBtn.disabled = true;
+        targetBtn.innerHTML = '⏳ Generating...';
 
         try {
             await StrandsAPI.simulateAlert();
-            btn.innerText = '✓ Alert Sent';
+            targetBtn.innerHTML = '✓ Alert Sent';
             
             // Reload page after 1 second
             setTimeout(() => {
@@ -32,13 +33,12 @@ class UI {
             }, 1000);
         } catch (error) {
             console.error('Error simulating alert:', error);
-            btn.innerText = '✗ Failed';
-            btn.disabled = false;
+            targetBtn.innerHTML = '✗ Failed';
             
             // Reset button after 3 seconds
             setTimeout(() => {
-                btn.innerText = originalText;
-                btn.disabled = false;
+                targetBtn.innerHTML = originalContent;
+                targetBtn.disabled = false;
             }, 3000);
         }
     }
@@ -141,8 +141,8 @@ class UI {
 
         // Add keyboard shortcuts
         document.addEventListener('keydown', (e) => {
-            // Alt+S to simulate alert
-            if (e.altKey && e.key === 's') {
+            // Alt+S to simulate alert (handles both 's' and 'S')
+            if (e.altKey && (e.key === 's' || e.key === 'S')) {
                 e.preventDefault();
                 this.simulateAlert();
             }

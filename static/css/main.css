@@ -235,6 +235,40 @@ footer a:hover {
     animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
+/* Notifications */
+.notification {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    padding: 1rem 1.5rem;
+    border-radius: 1rem;
+    background-color: #1f2937;
+    color: white;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    z-index: 100;
+    transform: translateY(100%);
+    opacity: 0;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    font-weight: 500;
+}
+
+.notification.show {
+    transform: translateY(0);
+    opacity: 1;
+}
+
+.notification-error {
+    background-color: var(--color-danger);
+}
+
+.notification-success {
+    background-color: var(--color-success);
+}
+
+.notification-info {
+    background-color: var(--color-primary);
+}
+
 /* Print styles */
 @media print {
     header,
