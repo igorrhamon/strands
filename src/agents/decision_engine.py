@@ -18,6 +18,7 @@ from src.models.metric_trend import MetricTrend
 from src.models.decision import Decision, DecisionState, HumanValidationStatus, SemanticEvidence
 from src.rules.decision_rules import RuleEngine, RuleResult
 from src.providers.github_models import GitHubModels, MissingTokenError
+from src.services.semantic_recovery_service import SemanticRecoveryService
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,7 @@ class DecisionEngine:
         )
         self._llm_threshold = llm_fallback_threshold
         self._llm_enabled = llm_enabled
+        self._semantic_recovery = SemanticRecoveryService(threshold=llm_fallback_threshold)
     
     async def decide(
         self,
@@ -102,26 +104,36 @@ class DecisionEngine:
         llm_reason = None
         
         if (
-            self._llm_enabled
-            and rule_result.confidence < self._llm_threshold
+            rule_result.confidence < self._llm_threshold
             and rule_result.decision_state != DecisionState.MANUAL_REVIEW
         ):
-            logger.info(
-                f"[{self.AGENT_NAME}] Confidence {rule_result.confidence:.2f} < "
-                f"{self._llm_threshold}, invoking LLM fallback"
-            )
+            # Try Semantic Recovery first
+            semantic_result = await self._semantic_recovery.recover(cluster, rule_result.confidence)
 
-            llm_result = await self._invoke_llm_fallback(
-                cluster=cluster,
-                trends=trends,
-                semantic_evidence=semantic_evidence,
-                rule_result=rule_result,
-            )
+            if semantic_result:
+                logger.info(
+                    f"[{self.AGENT_NAME}] [RECOVERY_TYPE:SEMANTIC] "
+                    f"Successful recovery (confidence: {semantic_result.confidence:.2f})"
+                )
+                rule_result = semantic_result
+                llm_contribution = False # It was semantic, not raw LLM
+            elif self._llm_enabled:
+                logger.info(
+                    f"[{self.AGENT_NAME}] [RECOVERY_TYPE:LLM_FALLBACK] "
+                    f"Confidence {rule_result.confidence:.2f} < {self._llm_threshold}, invoking LLM"
+                )
 
-            if llm_result:
-                rule_result = llm_result
-                llm_contribution = True
-                llm_reason = "Rule confidence below threshold"
+                llm_result = await self._invoke_llm_fallback(
+                    cluster=cluster,
+                    trends=trends,
+                    semantic_evidence=semantic_evidence,
+                    rule_result=rule_result,
+                )
+
+                if llm_result:
+                    rule_result = llm_result
+                    llm_contribution = True
+                    llm_reason = "Rule confidence below threshold"
         
         # Step 3: Create Decision object
         decision = Decision(

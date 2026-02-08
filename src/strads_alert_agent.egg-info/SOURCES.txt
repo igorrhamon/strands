@@ -46,6 +46,8 @@ src/agents/multi_agent/__init__.py
 src/agents/multi_agent/supervisor.py
 src/agents/multi_agent/tools.py
 src/agents/swarm/orchestrator.py
+src/api/async_orchestration.py
+src/api/health_checks.py
 src/config/__init__.py
 src/config/settings.py
 src/controllers/decision_controller.py
@@ -66,6 +68,7 @@ src/models/metrics.py
 src/models/swarm.py
 src/persistence/checkpoint_engine.py
 src/persistence/neo4j_adapter.py
+src/persistence/neo4j_indexing.py
 src/pipeline/refrag_pipeline.py
 src/policies/confidence_policy.py
 src/providers/agentes_pipeline.py
@@ -99,4 +102,5 @@ src/utils/__init__.py
 src/utils/alert_normalizer.py
 src/utils/audit_logger.py
 src/utils/error_handling.py
+src/utils/logging_context.py
 src/utils/statistics.py

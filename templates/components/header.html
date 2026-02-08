@@ -13,12 +13,12 @@
             </a>
             <button 
                 id="simulate-alert-btn"
-                onclick="UI.simulateAlert(this)"
-                class="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition focus-ring"
+                class="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition focus-ring flex items-center gap-2"
                 aria-label="Simulate new alert (Alt+S)"
-                title="Simulate new alert (Alt+S)"
+                title="Shortcut: Alt+S"
             >
-                Simulate Alert
+                <span>Simulate Alert</span>
+                <kbd class="hidden md:inline-block bg-blue-700 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold border border-blue-500/30">Alt+S</kbd>
             </button>
         </nav>
     </div>

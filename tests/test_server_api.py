@@ -1,7 +1,14 @@
 import pytest
+import sys
+from unittest.mock import MagicMock, patch
+
+# Mock semantica before any imports that might use it
+sys.modules["semantica"] = MagicMock()
+sys.modules["semantica.semantic_extract"] = MagicMock()
+sys.modules["semantica.kg"] = MagicMock()
+
 from fastapi.testclient import TestClient
 from server_fastapi import app
-from unittest.mock import MagicMock, patch
 
 client = TestClient(app)
 

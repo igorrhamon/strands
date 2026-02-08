@@ -35,8 +35,17 @@ RUN useradd -m -u 1000 strands
 COPY --from=builder /root/.local /home/strands/.local
 
 # Copy application code
-COPY --chown=strands:strands strands/ ./strands/
+# The repository uses a `src/` layout — copy that into the image and
+# add it to PYTHONPATH so imports work without an in-repo `strands/` folder.
+COPY --chown=strands:strands src/ ./src/
 COPY --chown=strands:strands scripts/ ./scripts/
+
+# Copy top-level entrypoints expected by docker-compose runtime
+# e.g. `server_fastapi.py` (the compose command runs `uvicorn server_fastapi:app`).
+COPY --chown=strands:strands server_fastapi.py ./server_fastapi.py
+
+# Ensure Python can import modules from /app/src
+ENV PYTHONPATH=/app/src:$PYTHONPATH
 
 # Set environment variables
 ENV PATH=/home/strands/.local/bin:$PATH \
@@ -49,13 +58,13 @@ USER strands
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:8000/ || exit 1
 
 # Expose ports
 EXPOSE 8000 8001
 
 # Run the application
-CMD ["python", "-m", "uvicorn", "strands.main:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8000", \
-     "--workers", "4"]
+CMD ["python", "-m", "uvicorn", "server_fastapi:app", \
+    "--host", "0.0.0.0", \
+    "--port", "8000", \
+    "--workers", "4"]
