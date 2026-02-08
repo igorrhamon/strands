@@ -25,11 +25,12 @@ class UI {
         try {
             await StrandsAPI.simulateAlert();
             btn.innerText = '✓ Alert Sent';
+            UI.showNotification('Alert simulated successfully! The swarm is processing...', 'success');
             
-            // Reload page after 1 second
+            // Reload page after 1.5 seconds
             setTimeout(() => {
                 location.reload();
-            }, 1000);
+            }, 1500);
         } catch (error) {
             console.error('Error simulating alert:', error);
             btn.innerText = '✗ Failed';
@@ -94,13 +95,17 @@ class UI {
      * Show notification toast
      */
     static showNotification(message, type = 'info') {
+        const container = document.getElementById('notification-container');
+        if (!container) return;
+
         // Create notification element
         const notification = document.createElement('div');
         notification.className = `notification notification-${type}`;
+        notification.role = 'alert';
         notification.textContent = message;
 
         // Add to DOM
-        document.body.appendChild(notification);
+        container.appendChild(notification);
 
         // Animate in
         setTimeout(() => {
@@ -136,15 +141,15 @@ class UI {
         // Add event listeners
         const simulateBtn = document.getElementById('simulate-alert-btn');
         if (simulateBtn) {
-            simulateBtn.addEventListener('click', () => this.simulateAlert());
+            simulateBtn.addEventListener('click', () => UI.simulateAlert());
         }
 
         // Add keyboard shortcuts
         document.addEventListener('keydown', (e) => {
-            // Alt+S to simulate alert
-            if (e.altKey && e.key === 's') {
+            // Alt+S to simulate alert (case-insensitive)
+            if (e.altKey && e.key.toLowerCase() === 's') {
                 e.preventDefault();
-                this.simulateAlert();
+                UI.simulateAlert();
             }
         });
 

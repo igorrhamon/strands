@@ -235,6 +235,28 @@ footer a:hover {
     animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
+/* Notification styles */
+.notification {
+    padding: 1rem 1.5rem;
+    border-radius: 0.75rem;
+    background: white;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    border-left: 4px solid #cbd5e1;
+    color: #1e293b;
+    font-weight: 500;
+    transform: translateX(120%);
+    transition: transform 0.3s ease-out;
+    max-width: 24rem;
+}
+
+.notification.show {
+    transform: translateX(0);
+}
+
+.notification-info { border-left-color: #3b82f6; }
+.notification-success { border-left-color: #10b981; }
+.notification-error { border-left-color: #ef4444; }
+
 /* Print styles */
 @media print {
     header,
