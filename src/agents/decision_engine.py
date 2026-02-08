@@ -111,13 +111,16 @@ class DecisionEngine:
             semantic_result = await self._semantic_recovery.recover(cluster, rule_result.confidence)
             
             if semantic_result:
-                logger.info(f"[{self.AGENT_NAME}] Semantic recovery successful (confidence: {semantic_result.confidence:.2f})")
+                logger.info(
+                    f"[{self.AGENT_NAME}] [RECOVERY_TYPE:SEMANTIC] "
+                    f"Successful recovery (confidence: {semantic_result.confidence:.2f})"
+                )
                 rule_result = semantic_result
                 llm_contribution = False # It was semantic, not raw LLM
             elif self._llm_enabled:
                 logger.info(
-                    f"[{self.AGENT_NAME}] Confidence {rule_result.confidence:.2f} < "
-                    f"{self._llm_threshold}, invoking LLM fallback"
+                    f"[{self.AGENT_NAME}] [RECOVERY_TYPE:LLM_FALLBACK] "
+                    f"Confidence {rule_result.confidence:.2f} < {self._llm_threshold}, invoking LLM"
                 )
 
                 llm_result = await self._invoke_llm_fallback(
