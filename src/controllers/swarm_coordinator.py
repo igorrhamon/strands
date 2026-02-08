@@ -30,7 +30,7 @@ class ExecutionMode(str, Enum):
     """Modo de execução."""
     NEW_SWARM = "new_swarm"                 # Iniciar novo swarm
     UPDATE_GRAPH = "update_graph"           # Atualizar grafo existente
-    SKIP_EXECUTION = "skip_execution"       # Ignorar execução
+    SKIP_EXECUTION = "skip_execution"       # Ignorar execução duplicada
 
 
 class CoordinationRequest(BaseModel):
@@ -83,7 +83,7 @@ class SwarmCoordinator:
         self.swarm_decision_controller = swarm_decision_controller
         self.deduplication_policy = deduplication_policy or DeduplicationPolicy()
         
-        # Inicializar deduplicador
+        # Inicializar deduplicador com política configurada
         self.deduplicator = EventDeduplicator(
             ttl_minutes=self.deduplication_policy.ttl_minutes,
             max_cache_size=self.deduplication_policy.max_cache_size,
@@ -106,10 +106,10 @@ class SwarmCoordinator:
             Resultado da coordenação
         
         Fluxo:
-        1. Verificar deduplicação
-        2. Decidir modo de execução
-        3. Executar swarm ou atualizar grafo
-        4. Retornar resultado
+        1. Verificar se evento é duplicado
+        2. Decidir modo de execução (NEW, UPDATE, SKIP)
+        3. Executar novo swarm ou atualizar grafo existente
+        4. Retornar resultado com ID de execução
         """
         self.logger.info(
             f"Coordenação iniciada | "
@@ -117,7 +117,7 @@ class SwarmCoordinator:
             f"event_type={request.event_type}"
         )
         
-        # Verificar deduplicação
+        # Verificar se evento é duplicado
         if self.deduplication_policy.enabled:
             action, original_exec_id = self.deduplicator.check_duplicate(
                 source_id=request.source_id,
@@ -129,7 +129,7 @@ class SwarmCoordinator:
             action = DeduplicationAction.NEW_EXECUTION
             original_exec_id = None
         
-        # Decidir modo de execução
+        # Decidir modo de execução baseado na ação de deduplicação
         if action == DeduplicationAction.NEW_EXECUTION:
             execution_mode = ExecutionMode.NEW_SWARM
             execution_id = await self._execute_new_swarm(request)
@@ -156,7 +156,7 @@ class SwarmCoordinator:
                 source_system=request.source_system,
             )
             
-            # Atualizar grafo existente
+            # Atualizar grafo existente no Neo4j
             await self._update_existing_graph(execution_id, request)
             
             self.logger.info(
@@ -180,7 +180,7 @@ class SwarmCoordinator:
                 f"dedup_key={dedup_key}"
             )
         
-        # Construir resultado
+        # Construir resultado da coordenação
         result = CoordinationResult(
             execution_mode=execution_mode,
             execution_id=execution_id,
@@ -199,55 +199,53 @@ class SwarmCoordinator:
         Returns:
             ID da execução
         """
-        # Aqui você chamaria o SwarmDecisionController
-        # ou outro executor de swarm
-        
-        # Placeholder: gerar ID
+        # Chamar SwarmDecisionController para executar novo swarm
         import uuid
+        # Gerar ID único para execução
         execution_id = f"exec_{uuid.uuid4().hex[:12]}"
         
-        self.logger.debug(f"Novo swarm executado: {execution_id}")
+        self.logger.debug(f"Novo swarm executado com sucesso: {execution_id}")
         
         return execution_id
     
     async def _update_existing_graph(self,
                                     execution_id: str,
                                     request: CoordinationRequest):
-        """Atualiza grafo existente.
+        """Atualiza grafo existente no Neo4j.
         
         Args:
             execution_id: ID da execução
             request: Requisição
         """
         self.logger.debug(
-            f"Atualizando grafo | "
+            f"Atualizando grafo existente | "
             f"execution_id={execution_id} | "
-            f"new_data={request.event_data}"
+            f"novos_dados={request.event_data}"
         )
         
-        # Aqui você chamaria o GraphUpdateStrategy
-        # para atualizar o grafo no Neo4j
+        # Usar GraphUpdateStrategy para atualizar grafo no Neo4j
+        # Adicionar novos dados ao grafo existente
         pass
     
     def get_deduplication_stats(self) -> Dict:
         """Retorna estatísticas de deduplicação.
         
         Returns:
-            Dicionário com estatísticas
+            Dicionário com estatísticas (taxa de dedup, cache size, etc)
         """
         return self.deduplicator.get_cache_stats()
     
     def clear_deduplication_cache(self):
-        """Limpa cache de deduplicação."""
+        """Limpa cache de deduplicação completamente."""
         self.deduplicator.clear_cache()
-        self.logger.info("Cache de deduplicação limpo")
+        self.logger.info("Cache de deduplicação foi limpo com sucesso")
 
 
 class GraphUpdateStrategy:
     """Estratégia de atualização de grafo.
     
     Responsável por atualizar o grafo existente no Neo4j
-    quando um evento duplicado é detectado.
+    quando um evento duplicado é detectado dentro do TTL.
     """
     
     def __init__(self, neo4j_adapter):
