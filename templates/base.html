@@ -15,6 +15,9 @@
     {% block extra_head %}{% endblock %}
 </head>
 <body class="bg-slate-50 text-slate-900 font-sans min-h-screen flex flex-col">
+    <!-- Notification Container for accessibility -->
+    <div id="notification-container" class="fixed bottom-4 right-4 z-[100] flex flex-col gap-2" aria-live="polite"></div>
+
     {% include "components/header.html" %}
     
     <main class="flex-1">
