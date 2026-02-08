@@ -107,9 +107,10 @@ class OpenAIProvider(BaseLLMProvider):
         try:
             import openai
             self.openai = openai
+            # Inicializar cliente assíncrono do OpenAI
             self.client = openai.AsyncOpenAI(api_key=config.api_key)
         except ImportError:
-            raise ImportError("openai package não instalado. Execute: pip install openai")
+            raise ImportError("Pacote openai não instalado. Execute: pip install openai")
         
         self.logger.info(f"OpenAI Provider inicializado | model={config.model}")
     
@@ -185,9 +186,10 @@ class AnthropicProvider(BaseLLMProvider):
         try:
             import anthropic
             self.anthropic = anthropic
+            # Inicializar cliente assíncrono do Anthropic
             self.client = anthropic.AsyncAnthropic(api_key=config.api_key)
         except ImportError:
-            raise ImportError("anthropic package não instalado. Execute: pip install anthropic")
+            raise ImportError("Pacote anthropic não instalado. Execute: pip install anthropic")
         
         self.logger.info(f"Anthropic Provider inicializado | model={config.model}")
     
@@ -241,7 +243,7 @@ class AnthropicProvider(BaseLLMProvider):
             True se saudável
         """
         try:
-            # Fazer uma chamada mínima para verificar
+            # Fazer chamada mínima para verificar conectividade
             await self.client.messages.create(
                 model=self.config.model,
                 max_tokens=10,
@@ -269,7 +271,7 @@ class OllamaProvider(BaseLLMProvider):
             import ollama
             self.ollama = ollama
         except ImportError:
-            raise ImportError("ollama package não instalado. Execute: pip install ollama")
+            raise ImportError("Pacote ollama não instalado. Execute: pip install ollama")
         
         self.base_url = config.base_url or "http://localhost:11434"
         self.logger.info(f"Ollama Provider inicializado | model={config.model} | url={self.base_url}")
