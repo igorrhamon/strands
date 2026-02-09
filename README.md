@@ -1,112 +1,107 @@
-# Strands Agents — HTTP custom model provider example
+# Strands: Autonomous SRE Orchestration Framework
 
-This example shows how to create a custom `Model` provider for Strands Agents
-that forwards prompts to an HTTP endpoint (for example an open-source model
-you hosted yourself). It also includes a minimal FastAPI demo server.
+**Strands** is a high-performance, multi-agent framework designed for autonomous incident response and SRE (Site Reliability Engineering) automation. It leverages a **GraphRAG (Graph Retrieval-Augmented Generation)** architecture to move beyond simple vector similarity, providing deep semantic and structural context for incident resolution.
 
-## Features
+---
 
-- **Custom HTTP Model Provider**: HTTPModel implementation for Strands Agents SDK
-- **GitHub Models Provider**: Integration with Microsoft Foundry Inference SDK (see [specs/001-github-model-provider](specs/001-github-model-provider/))
-- **Ollama Provider**: Local LLM integration via Ollama API (see [src/providers/ollama_models.py](src/providers/ollama_models.py))
-- **MetricsAnalysisAgent**: Enhanced agent with p95 filtering, exponential backoff, and multi-metric fusion (see [specs/008-metrics-analysis-agent/quickstart.md](specs/008-metrics-analysis-agent/quickstart.md))
-- **Multi-Agent Pipeline**: Complete SRE workflow with 12-step orchestration (see [examples/PIPELINE_OLLAMA_README.md](examples/PIPELINE_OLLAMA_README.md))
-- **FastAPI Demo Server**: Minimal server for testing HTTP model integration
+## 🏗️ Architecture & Design Principles
 
-Setup
------
+Strands is built on four core "Constitution Principles" that ensure reliability and traceability in production environments:
 
-1. Create and activate a virtual environment
+1.  **Human-in-the-Loop (HITL)**: Autonomous decisions are treated as candidates until confirmed by a human operator.
+2.  **Determinism over Stochasticity**: Rule-based logic and Knowledge Graphs are prioritized over raw LLM calls to ensure consistent outcomes.
+3.  **Controlled Learning**: Semantic memory (Knowledge Graph) is only updated after human validation, preventing "hallucination loops."
+4.  **Full Traceability**: Every decision, evidence, and tool execution is recorded in a structured Audit Log.
+
+### The Semantic Recovery Pipeline
+
+The core of Strands is its **Semantic Recovery Service**, which integrates the [Semantica](https://github.com/Hawksight-AI/semantica) framework:
+
+```mermaid
+graph TD
+    A[Alert Cluster] --> B{Confidence Check}
+    B -- High --> C[Standard Recovery]
+    B -- Low --> D[SemanticRecoveryService]
+    D --> E[Entity Extraction - NER]
+    E --> F[GitHub Metadata Enrichment]
+    F --> G[GraphRAG Search]
+    G --> H[Validated Decision Candidate]
+    H --> I[Human Review]
+```
+
+---
+
+## 🚀 Key Features
+
+-   **GraphRAG Integration**: Uses Semantica to navigate Knowledge Graphs, identifying relationships between services, events, and historical runbooks.
+-   **Multi-Agent Swarm**: Parallel investigation specialists (Metrics, Code, Graph, Correlator) that consolidate findings into a single hypothesis.
+-   **GitHub Models & MCP**: Native integration with GitHub Models and Model Context Protocol (MCP) for repository metadata and tool execution.
+-   **LRU Semantic Cache**: High-performance caching of semantic results to minimize latency and LLM costs.
+-   **Pydantic Validation**: Strict schema enforcement for all agent outputs and graph returns.
+
+---
+
+## 🛠️ Getting Started
+
+### Prerequisites
+
+-   Python 3.11+
+-   `GITHUB_TOKEN` (with required scopes for Models and Repository access)
+
+### Installation
 
 ```bash
+# Clone and setup environment
+git clone https://github.com/igorrhamon/strands
+cd strands
 python3 -m venv .venv
-. .venv/bin/activate
-pip install --upgrade pip setuptools wheel
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-2. Run the demo server (FastAPI)
+### Configuration
+
+Set your environment variables:
+```bash
+export GITHUB_TOKEN="your_token_here"
+export SEMANTICA_MODEL="en_core_web_sm"
+```
+
+---
+
+## 📂 Project Structure
+
+-   `src/agents/`: Core agent implementations (Orchestrator, DecisionEngine, MetricsAnalysis).
+-   `src/services/`: Business logic services, including the `SemanticRecoveryService`.
+-   `src/models/`: Pydantic data contracts for alerts, clusters, and decisions.
+-   `src/rules/`: Deterministic rule sets for incident classification.
+-   `src/providers/`: LLM and Model provider integrations (GitHub, Ollama, HTTP).
+
+---
+
+## 🧪 Testing & Quality Assurance
+
+Strands follows a strict TDD approach. The suite includes unit tests for individual agents and integration tests for the full pipeline.
 
 ```bash
-uvicorn server_fastapi:app --reload --port 8000
+# Run all unit tests
+pytest tests/unit
+
+# Run semantic recovery specific tests
+pytest tests/unit/test_semantic_recovery_service.py
 ```
 
-3. In another terminal (with `.venv` activated) run the agent example
+---
 
-```bash
-python agent_http.py
-```
+## 🤝 Contributing
 
-Files
------
-- `my_http_model.py`: Custom `HTTPModel` provider that posts prompts to an endpoint.
-- `agent_http.py`: Example that creates an `Agent` using the custom provider.
-- `server_fastapi.py`: Small FastAPI demo server that returns an echoed response.
-- `requirements.txt`: Packages used in the example.
+We follow a senior engineering workflow:
+1.  **Specs First**: All major features must have a specification in `specs/`.
+2.  **Type Safety**: Use Pydantic models for all data exchange.
+3.  **Observability**: Include structured logs for all recovery attempts.
 
-Multi-Agent Pipeline Examples
-------------------------------
-Complete SRE workflows demonstrating agent orchestration:
+---
 
-### Ollama Pipeline (Local LLM)
-Full 12-step pipeline with Ollama provider:
-- **Quick Start**: `python examples/pipeline_ollama_test.py` (connectivity test)
-- **Full Pipeline**: `python examples/pipeline_ollama.py` (complete workflow)
-- **Documentation**: [examples/PIPELINE_OLLAMA_README.md](examples/PIPELINE_OLLAMA_README.md)
-- **Summary**: [examples/PIPELINE_IMPLEMENTATION_SUMMARY.md](examples/PIPELINE_IMPLEMENTATION_SUMMARY.md)
+## 📄 License
 
-Pipeline Flow:
-```
-AlertCollector → AlertNormalizer → AlertCorrelation → MetricsAnalysis
-→ RepositoryContext ⟷ GraphKnowledge (feedback loop)
-→ DecisionEngine → HumanReview → OutcomeSupervisor
-→ MemoryValidation → GraphKnowledge → AuditReport
-```
-
-Prerequisites:
-```bash
-# Install and start Ollama
-curl -fsSL https://ollama.com/install.sh | sh
-ollama serve
-
-# Pull a model
-ollama pull llama3.1
-
-# Set environment
-export OLLAMA_HOST="http://localhost:11434"
-export OLLAMA_MODEL="llama3.1"
-```
-
-Notes
------
-- Production servers should implement streaming, authentication, retries,
-  timeout control and proper error handling. The demo server only echoes the
-  prompt for simplicity.
-- If you have a model from GitHub Models, first serve it with a model server
-  (Ollama, Llama-API, custom FastAPI wrapping a transformers pipeline, etc.)
-  and then point `HTTPModel.endpoint_url` to that server.
-
-Distributed Diagnostic Swarm (Feature 009)
-------------------------------------------
-**Status: Implemented & Verified**
-
-A parallel multi-agent analysis architecture that ingests alerts, spawns specialized agents to investigate in parallel, and consolidates findings into a single decision candidate.
-
-- **Architecture**: Swarm of 5 specialist agents (Metrics, Code, Graph, Vector, Correlator)
-- **Orchestration**: `SwarmOrchestrator` uses `asyncio` for parallel, independent execution.
-- **Data Model**: `DecisionCandidate` captures the primary hypothesis, risks, and conflicts.
-- **Governance**: Human-in-the-Loop review process via `HumanReviewAgent`.
-- **Learning**: Post-mortem generation and Graph/Vector lineage recording.
-
-**Quick Demo:**
-```bash
-# Uses mocked repository and agents for demonstration
-python examples/demo_graph_swarm.py
-```
-
-**Key Components:**
-- `src/agents/swarm/orchestrator.py`: Parallel dispatch logic.
-- `src/agents/governance/decision_engine.py`: Conflict resolution and hypothesis synthesis.
-- `src/graph/neo4j_repo.py`: Graph persistence (Neo4j).
-- `specs/009-diagnostic-swarm-graph/spec.md`: Full specification.
-
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
