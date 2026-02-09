@@ -6,8 +6,16 @@
             No pending decisions. The swarm is observing.
         </p>
         <p class="text-slate-400 text-sm mt-2">
-            Click "Simulate Alert" to generate a test decision.
+            Generate a test decision to see the swarm in action.
         </p>
+        <button
+            onclick="UI.simulateAlert()"
+            class="mt-6 bg-slate-900 text-white px-6 py-2.5 rounded-xl font-bold hover:bg-slate-800 transition focus-ring inline-flex items-center gap-2"
+            aria-label="Simulate Alert"
+        >
+            <span>Simulate Alert</span>
+            <span class="text-lg">🚀</span>
+        </button>
     </div>
     {% else %}
     <div class="decisions-container space-y-6">
