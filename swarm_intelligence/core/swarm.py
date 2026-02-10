@@ -22,8 +22,11 @@ class SwarmOrchestrator:
     The pure execution engine for the swarm. It executes a list of agents
     for given steps and returns the resulting AgentExecution events.
     """
-    def __init__(self, agents: Sequence[Agent]):
+    def __init__(self, agents: Sequence[Agent], max_concurrency: int = 10, step_timeout: float = 60.0):
         self._agents = {agent.agent_id: agent for agent in agents}
+        self.max_concurrency = max_concurrency
+        self.step_timeout = step_timeout
+        self._semaphore = asyncio.Semaphore(max_concurrency)
 
     async def _execute_agent(self, step: SwarmStep) -> AgentExecution:
         """A wrapper to execute a single agent and handle exceptions."""
@@ -35,7 +38,17 @@ class SwarmOrchestrator:
                 error=Exception(f"Agent '{step.agent_id}' not found.")
             )
         try:
-            return await agent.execute(step.parameters, step.step_id)
+            async with self._semaphore:
+                return await asyncio.wait_for(
+                    agent.execute(step.parameters, step.step_id),
+                    timeout=self.step_timeout
+                )
+        except asyncio.TimeoutError:
+            return AgentExecution(
+                agent_id=agent.agent_id, agent_version=agent.version, logic_hash=agent.logic_hash,
+                step_id=step.step_id, input_parameters=step.parameters,
+                error=Exception(f"Step timed out after {self.step_timeout}s")
+            )
         except Exception as e:
             return AgentExecution(
                 agent_id=agent.agent_id, agent_version=agent.version, logic_hash=agent.logic_hash,
