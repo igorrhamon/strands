@@ -1,23 +1,25 @@
 """
-Correlator Agent - Análise de Correlação entre Domínios
+Correlator Agent - Análise de Correlação entre Domínios (Produção)
 
 Correlaciona sinais de diferentes domínios (logs vs métricas, traces vs eventos)
-para identificar causas raiz de incidentes.
+para identificar causas raiz de incidentes usando fontes de dados reais.
 
-Padrões de Correlação Suportados:
-1. Logs + Métricas: Picos de erro em logs correlacionam com métricas de latência
-2. Traces + Eventos: Falhas em traces correlacionam com eventos de deployment
-3. Métricas + Métricas: Correlação entre CPU e memória, requisições e erros
-4. Eventos + Eventos: Sequência de eventos que levam a incidente
+Integrações:
+- Prometheus: Métricas de infraestrutura e aplicação
+- Kubernetes API: Logs de pods e eventos de cluster
+- Jaeger (Futuro): Traces distribuídos
 """
 
 import logging
+import numpy as np
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum
 
 from src.models.alert import NormalizedAlert
 from src.models.swarm import SwarmResult, EvidenceItem, EvidenceType
+from src.tools.prometheus_client import PrometheusClient
+from src.tools.kubectl_client import KubectlMCPClient
 
 logger = logging.getLogger(__name__)
 
@@ -77,41 +79,36 @@ class CorrelationPattern:
 
 class CorrelatorAgent:
     """
-    Agente responsável por correlacionar sinais de diferentes domínios.
-    
-    Detecta padrões de correlação que indicam causas raiz de incidentes,
-    como:
-    - Picos de erro em logs que coincidem com latência alta em métricas
-    - Falhas em traces distribuídos que coincidem com eventos de deployment
-    - Correlação temporal entre múltiplos eventos
+    Agente responsável por correlacionar sinais de diferentes domínios usando dados reais.
     """
     
     agent_id = "correlator"
     
     def __init__(self):
-        """Inicializa o agente correlator."""
+        """Inicializa o agente correlator com clientes reais."""
         self.detected_patterns: List[CorrelationPattern] = []
+        # Clientes serão inicializados sob demanda ou injetados
+        self.prometheus_client = PrometheusClient()
+        self.kubectl_client = KubectlMCPClient()
     
     def analyze(self, alert: NormalizedAlert) -> SwarmResult:
         """
         Analisa correlações de sinais para um alerta normalizado.
-        
-        Args:
-            alert: Alerta normalizado para análise
-            
-        Returns:
-            SwarmResult com hipótese, evidência e confiança
         """
         logger.info(f"[{self.agent_id}] Correlacionando sinais para {alert.fingerprint}...")
         
         # Limpar padrões detectados anteriormente
         self.detected_patterns = []
         
-        # Executar análises de correlação
-        self._analyze_log_metric_correlation(alert)
-        self._analyze_trace_event_correlation(alert)
-        self._analyze_metric_metric_correlation(alert)
-        self._analyze_temporal_correlation(alert)
+        try:
+            # Executar análises de correlação com dados reais
+            self._analyze_log_metric_correlation(alert)
+            self._analyze_metric_metric_correlation(alert)
+            self._analyze_temporal_correlation(alert)
+            # Trace correlation requer Jaeger client (futuro)
+            
+        except Exception as e:
+            logger.error(f"Erro durante análise de correlação: {e}", exc_info=True)
         
         # Consolidar resultados
         hypothesis, confidence, evidence, suggested_actions = self._consolidate_results(alert)
@@ -126,33 +123,64 @@ class CorrelatorAgent:
     
     def _analyze_log_metric_correlation(self, alert: NormalizedAlert) -> None:
         """
-        Analisa correlação entre picos de erro em logs e anomalias em métricas.
-        
-        Padrão: Quando há picos de erro em logs, geralmente há também:
-        - Aumento de latência (P95, P99)
-        - Aumento de taxa de erro HTTP
-        - Aumento de CPU/Memória
+        Analisa correlação entre erros em logs (Kubernetes) e métricas (Prometheus).
         """
         logger.debug(f"Analisando correlação LOG-METRIC para {alert.service}...")
         
-        # Simulação: Detectar correlação entre logs e métricas
-        # Em produção, isso consultaria Elasticsearch/Loki para logs e Prometheus para métricas
+        # 1. Buscar logs recentes do pod
+        namespace = alert.labels.get("namespace", "default")
+        pod_name = alert.labels.get("pod")
         
-        if alert.severity in ["critical", "warning"]:
-            # Hipótese: Picos de erro em logs correlacionam com latência alta
-            correlation_strength = 0.95
+        if not pod_name:
+            # Tentar encontrar pod pelo serviço
+            pods = self.kubectl_client.get_pods(namespace=namespace, label_selector=f"app={alert.service}")
+            if pods:
+                pod_name = pods[0].get("metadata", {}).get("name")
+        
+        if not pod_name:
+            logger.warning(f"Pod não encontrado para serviço {alert.service}")
+            return
+
+        logs = self.kubectl_client.get_logs(pod_name=pod_name, namespace=namespace, tail_lines=200)
+        
+        # Contar erros nos logs
+        error_count = logs.lower().count("error") + logs.lower().count("exception")
+        
+        if error_count == 0:
+            return
+
+        # 2. Buscar métricas de latência/erro no Prometheus
+        end_time = datetime.now(timezone.utc)
+        start_time = end_time - timedelta(minutes=15)
+        
+        # Query para taxa de erro HTTP
+        error_rate_query = f'rate(http_requests_total{{app="{alert.service}", status=~"5.."}}[5m])'
+        metrics_result = self.prometheus_client.query_range(error_rate_query, start_time, end_time)
+        
+        has_metric_spike = False
+        if metrics_result.get("result"):
+            values = metrics_result["result"][0].get("values", [])
+            # Verificar se houve aumento recente
+            if values:
+                recent_values = [float(v[1]) for v in values[-3:]] # Últimos 3 pontos
+                if recent_values and max(recent_values) > 0.01: # Threshold arbitrário para exemplo
+                    has_metric_spike = True
+        
+        # 3. Correlacionar
+        if has_metric_spike:
+            correlation_strength = 0.95 # Alta confiança pois ambos indicam erro
             
             evidence = [
                 EvidenceItem(
                     type=EvidenceType.LOG,
-                    description="Picos de erro detectados nos logs: 'Connection timeout', 'Database unavailable'",
-                    source_url="http://loki:3100/explore?query=error",
+                    description=f"Detectados {error_count} erros nos logs do pod {pod_name}",
+                    source_url=f"kubectl logs {pod_name}",
                     timestamp=datetime.now(timezone.utc)
                 ),
                 EvidenceItem(
                     type=EvidenceType.METRIC,
-                    description="Latência P95 aumentou de 200ms para 2500ms no mesmo período",
-                    source_url="http://prometheus:9090/graph?g0.expr=histogram_quantile(0.95,rate(http_request_duration_seconds_bucket[5m]))",
+                    description="Pico na taxa de erros HTTP (5xx) detectado no Prometheus",
+                    source_url=f"{self.prometheus_client.base_url}/graph?g0.expr={error_rate_query}",
                     timestamp=datetime.now(timezone.utc)
                 )
             ]
@@ -162,174 +190,152 @@ class CorrelatorAgent:
                 source_domain_1="LOGS",
                 source_domain_2="METRICS",
                 correlation_strength=correlation_strength,
-                description=f"Picos de erro em logs correlacionam exatamente com aumento de latência em métricas para {alert.service}",
+                description=f"Erros nos logs coincidem com aumento na taxa de erros HTTP para {alert.service}",
                 evidence_items=evidence,
-                suggested_action="Investigar causa raiz de aumento de latência (possível gargalo em DB ou serviço downstream)"
+                suggested_action="Investigar stack traces nos logs e verificar dependências do serviço"
             )
             
             self.detected_patterns.append(pattern)
-    
-    def _analyze_trace_event_correlation(self, alert: NormalizedAlert) -> None:
-        """
-        Analisa correlação entre falhas em traces distribuídos e eventos de infraestrutura.
-        
-        Padrão: Quando há falhas em traces, geralmente há também:
-        - Eventos de deployment
-        - Mudanças em configuração
-        - Eventos de escala (scale up/down)
-        """
-        logger.debug(f"Analisando correlação TRACE-EVENT para {alert.service}...")
-        
-        # Simulação: Detectar correlação entre traces e eventos
-        # Em produção, isso consultaria Jaeger para traces e Kubernetes API para eventos
-        
-        if "restart" in alert.description.lower() or "pod" in alert.description.lower():
-            # Hipótese: Falhas em traces correlacionam com restart de pod
-            correlation_strength = 0.88
-            
-            evidence = [
-                EvidenceItem(
-                    type=EvidenceType.TRACE,
-                    description="Trace #xyz falhou no passo de conexão com banco de dados",
-                    source_url="http://jaeger:16686/trace/xyz",
-                    timestamp=datetime.now(timezone.utc)
-                ),
-                EvidenceItem(
-                    type=EvidenceType.DOCUMENT,
-                    description="Pod foi reiniciado 15 vezes nos últimos 10 minutos (evento Kubernetes)",
-                    source_url="kubectl describe pod worker-service-pod-2 -n production",
-                    timestamp=datetime.now(timezone.utc)
-                )
-            ]
-            
-            pattern = CorrelationPattern(
-                correlation_type=CorrelationType.TRACE_EVENT_CORRELATION,
-                source_domain_1="TRACES",
-                source_domain_2="EVENTS",
-                correlation_strength=correlation_strength,
-                description=f"Falhas em traces distribuídos correlacionam com restart contínuo do pod {alert.service}",
-                evidence_items=evidence,
-                suggested_action="Verificar logs do pod para identificar causa raiz do restart (possível memory leak ou crash)"
-            )
-            
-            self.detected_patterns.append(pattern)
-    
+
     def _analyze_metric_metric_correlation(self, alert: NormalizedAlert) -> None:
         """
-        Analisa correlação entre múltiplas métricas.
-        
-        Padrão: Correlações comuns:
-        - CPU alto + Memória alta = Possível memory leak
-        - Taxa de erro alta + Latência alta = Possível gargalo em serviço downstream
-        - Requisições altas + CPU alto = Possível falta de recursos
+        Analisa correlação entre CPU e Memória usando dados reais do Prometheus.
         """
         logger.debug(f"Analisando correlação METRIC-METRIC para {alert.service}...")
         
-        # Simulação: Detectar correlação entre métricas
-        # Em produção, isso calcularia correlação de Pearson entre séries temporais
+        end_time = datetime.now(timezone.utc)
+        start_time = end_time - timedelta(minutes=30)
         
-        if "cpu" in alert.description.lower() or "memory" in alert.description.lower():
-            # Hipótese: CPU alto correlaciona com Memória alta
-            correlation_strength = 0.92
+        # Queries
+        cpu_query = f'rate(container_cpu_usage_seconds_total{{pod=~"{alert.service}.*"}}[5m])'
+        mem_query = f'container_memory_working_set_bytes{{pod=~"{alert.service}.*"}}'
+        
+        cpu_data = self.prometheus_client.query_range(cpu_query, start_time, end_time)
+        mem_data = self.prometheus_client.query_range(mem_query, start_time, end_time)
+        
+        if not cpu_data.get("result") or not mem_data.get("result"):
+            return
             
+        # Extrair séries temporais (simplificado: pega a primeira série retornada)
+        cpu_values = [float(v[1]) for v in cpu_data["result"][0]["values"]]
+        mem_values = [float(v[1]) for v in mem_data["result"][0]["values"]]
+        
+        # Normalizar tamanhos para correlação (truncar para o menor tamanho)
+        min_len = min(len(cpu_values), len(mem_values))
+        if min_len < 5: # Precisa de dados suficientes
+            return
+            
+        cpu_series = np.array(cpu_values[:min_len])
+        mem_series = np.array(mem_values[:min_len])
+        
+        # Calcular correlação de Pearson
+        correlation_matrix = np.corrcoef(cpu_series, mem_series)
+        correlation = correlation_matrix[0, 1]
+        
+        if correlation > 0.7: # Forte correlação positiva
             evidence = [
                 EvidenceItem(
                     type=EvidenceType.METRIC,
-                    description="CPU aumentou de 30% para 95% em 2 minutos",
-                    source_url="http://prometheus:9090/graph?g0.expr=rate(process_cpu_seconds_total[5m])",
-                    timestamp=datetime.now(timezone.utc)
-                ),
-                EvidenceItem(
-                    type=EvidenceType.METRIC,
-                    description="Memória aumentou de 500MB para 1.8GB no mesmo período",
-                    source_url="http://prometheus:9090/graph?g0.expr=process_resident_memory_bytes",
+                    description=f"Correlação de Pearson detectada: {correlation:.2f} entre CPU e Memória",
+                    source_url=f"{self.prometheus_client.base_url}/graph?g0.expr={cpu_query}&g1.expr={mem_query}",
                     timestamp=datetime.now(timezone.utc)
                 )
             ]
             
             pattern = CorrelationPattern(
                 correlation_type=CorrelationType.METRIC_METRIC_CORRELATION,
-                source_domain_1="CPU_METRIC",
-                source_domain_2="MEMORY_METRIC",
-                correlation_strength=correlation_strength,
-                description=f"Aumento de CPU correlaciona fortemente com aumento de memória em {alert.service}",
+                source_domain_1="CPU",
+                source_domain_2="MEMORY",
+                correlation_strength=float(correlation),
+                description=f"Uso de CPU e Memória fortemente correlacionados ({correlation:.2f}) para {alert.service}",
                 evidence_items=evidence,
-                suggested_action="Investigar possível memory leak ou processamento de dados em larga escala"
+                suggested_action="Investigar operações intensivas de processamento de dados ou memory leaks"
             )
             
             self.detected_patterns.append(pattern)
-    
+
     def _analyze_temporal_correlation(self, alert: NormalizedAlert) -> None:
         """
-        Analisa correlação temporal entre múltiplos eventos.
-        
-        Padrão: Sequência de eventos que levam a incidente:
-        1. Deployment de nova versão
-        2. Aumento de requisições
-        3. Aumento de CPU/Memória
-        4. Timeout de conexão
-        5. Alerta crítico
+        Analisa correlação temporal com eventos do Kubernetes (ex: Deployments).
         """
-        logger.debug(f"Analisando correlação TEMPORAL para {alert.service}...")
+        # Simplificação: Verificar se houve restart recente do pod
+        namespace = alert.labels.get("namespace", "default")
+        pod_name = alert.labels.get("pod")
         
-        # Simulação: Detectar sequência temporal de eventos
-        # Em produção, isso analisaria timeline de eventos de múltiplas fontes
+        if not pod_name:
+             # Tentar encontrar pod pelo serviço
+            pods = self.kubectl_client.get_pods(namespace=namespace, label_selector=f"app={alert.service}")
+            if pods:
+                pod_name = pods[0].get("metadata", {}).get("name")
         
-        # Hipótese: Sequência de eventos que levou ao alerta
-        correlation_strength = 0.85
+        if not pod_name:
+            return
+
+        # Verificar restarts
+        # Assumindo que get_pods retorna json completo
+        pods = self.kubectl_client.get_pods(namespace=namespace, label_selector=f"metadata.name={pod_name}")
         
-        evidence = [
-            EvidenceItem(
-                type=EvidenceType.DOCUMENT,
-                description="Deployment de versão 2.5.0 iniciado às 22:15 UTC",
-                source_url="http://github.com/igorrhamon/strands/releases/tag/v2.5.0",
-                timestamp=datetime.now(timezone.utc) - timedelta(minutes=5)
-            ),
-            EvidenceItem(
-                type=EvidenceType.METRIC,
-                description="Taxa de requisições aumentou 300% às 22:16 UTC",
-                source_url="http://prometheus:9090/graph?g0.expr=rate(http_requests_total[5m])",
-                timestamp=datetime.now(timezone.utc) - timedelta(minutes=4)
-            ),
-            EvidenceItem(
-                type=EvidenceType.METRIC,
-                description="CPU aumentou para 95% às 22:17 UTC",
-                source_url="http://prometheus:9090/graph?g0.expr=rate(process_cpu_seconds_total[5m])",
-                timestamp=datetime.now(timezone.utc) - timedelta(minutes=3)
-            ),
-            EvidenceItem(
-                type=EvidenceType.LOG,
-                description="Timeout de conexão detectado em logs às 22:18 UTC",
-                source_url="http://loki:3100/explore?query=timeout",
-                timestamp=datetime.now(timezone.utc) - timedelta(minutes=2)
-            )
-        ]
+        if not pods:
+            # Tentar buscar todos os pods e filtrar (caso label selector não funcione como esperado no mock)
+            pods = self.kubectl_client.get_pods(namespace=namespace)
+            pods = [p for p in pods if p.get("metadata", {}).get("name") == pod_name]
+            
+        if not pods:
+            return
+            
+        pod = pods[0]
+        container_statuses = pod.get("status", {}).get("containerStatuses", [])
         
-        pattern = CorrelationPattern(
-            correlation_type=CorrelationType.TEMPORAL_CORRELATION,
-            source_domain_1="EVENTS",
-            source_domain_2="TIMELINE",
-            correlation_strength=correlation_strength,
-            description=f"Sequência temporal: Deployment → Aumento de requisições → CPU alto → Timeout de conexão",
-            evidence_items=evidence,
-            suggested_action="Considerar rollback de deployment ou aumentar recursos alocados"
-        )
+        restart_count = 0
+        last_restart_time = None
         
-        self.detected_patterns.append(pattern)
-    
+        for status in container_statuses:
+            restart_count += status.get("restartCount", 0)
+            state = status.get("lastState", {})
+            if "terminated" in state:
+                finished_at = state["terminated"].get("finishedAt")
+                if finished_at:
+                    # Parse timestamp (ex: 2023-10-27T10:00:00Z)
+                    try:
+                        dt = datetime.strptime(finished_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+                        last_restart_time = dt
+                    except ValueError:
+                        pass
+
+        if restart_count > 0 and last_restart_time:
+            # Verificar se restart foi recente (últimos 30 min)
+            if (datetime.now(timezone.utc) - last_restart_time) < timedelta(minutes=30):
+                evidence = [
+                    EvidenceItem(
+                        type=EvidenceType.DOCUMENT,
+                        description=f"Pod reiniciado {restart_count} vezes. Último restart: {last_restart_time}",
+                        source_url=f"kubectl describe pod {pod_name}",
+                        timestamp=last_restart_time
+                    )
+                ]
+                
+                pattern = CorrelationPattern(
+                    correlation_type=CorrelationType.TEMPORAL_CORRELATION,
+                    source_domain_1="POD_LIFECYCLE",
+                    source_domain_2="ALERT_TIMING",
+                    correlation_strength=0.85,
+                    description=f"Alerta coincide com restart recente do pod {pod_name}",
+                    evidence_items=evidence,
+                    suggested_action="Verificar logs anteriores ao crash (kubectl logs --previous)"
+                )
+                
+                self.detected_patterns.append(pattern)
+
     def _consolidate_results(self, alert: NormalizedAlert) -> Tuple[str, float, List[EvidenceItem], List[str]]:
         """
         Consolida resultados de todas as análises de correlação.
-        
-        Returns:
-            Tupla com (hypothesis, confidence, evidence, suggested_actions)
         """
         if not self.detected_patterns:
             return (
-                f"Nenhuma correlação significativa detectada para {alert.service}.",
-                0.5,
+                f"Nenhuma correlação significativa detectada para {alert.service} nos dados analisados.",
+                0.0,
                 [],
-                ["Continuar monitorando o serviço"]
+                ["Continuar monitorando", "Verificar integridade dos coletores de métricas"]
             )
         
         # Ordenar padrões por força de correlação
@@ -339,31 +345,23 @@ class CorrelatorAgent:
             reverse=True
         )
         
-        # Usar padrão mais forte como principal
         strongest_pattern = sorted_patterns[0]
         
-        # Consolidar hipótese
         hypothesis_parts = [
-            f"Correlação detectada entre {strongest_pattern.source_domain_1} e {strongest_pattern.source_domain_2}: ",
+            f"Correlação detectada ({strongest_pattern.correlation_type.value}): ",
             strongest_pattern.description
         ]
         
         if len(sorted_patterns) > 1:
-            hypothesis_parts.append(f"\nAdicionalmente, {len(sorted_patterns) - 1} correlação(ões) secundária(s) detectada(s).")
+            hypothesis_parts.append(f"\nOutras {len(sorted_patterns) - 1} correlações detectadas.")
         
         hypothesis = "".join(hypothesis_parts)
-        
-        # Calcular confiança média
         avg_confidence = sum(p.correlation_strength for p in sorted_patterns) / len(sorted_patterns)
         
-        # Consolidar evidência
         all_evidence = []
         for pattern in sorted_patterns:
             all_evidence.extend(pattern.evidence_items)
         
-        # Consolidar ações sugeridas
-        suggested_actions = [p.suggested_action for p in sorted_patterns]
-        
-        logger.info(f"[{self.agent_id}] Correlação consolidada: {strongest_pattern.correlation_type.value} com confiança {avg_confidence:.2f}")
+        suggested_actions = list(set([p.suggested_action for p in sorted_patterns])) # Dedup
         
         return hypothesis, avg_confidence, all_evidence, suggested_actions

@@ -1,5 +1,5 @@
 """
-Recommender Agent - Análise Avançada de Recomendações
+Recommender Agent - Análise Avançada de Recomendações (Produção)
 
 Analisa candidatos de decisão para propor ações técnicas específicas,
 refinar avaliações de risco e validar níveis de automação.
@@ -65,13 +65,6 @@ class RemediationPlaybook:
 class RecommenderAgent:
     """
     Agente responsável por analisar candidatos de decisão e propor ações técnicas específicas.
-    
-    Funcionalidades:
-    - Refinar recomendações com planos de ação detalhados
-    - Avaliar risco com base em padrões conhecidos
-    - Validar níveis de automação baseado em risco
-    - Incorporar insights de incidentes similares
-    - Gerar playbooks de remediação
     """
     
     agent_id = "recommender"
@@ -166,12 +159,6 @@ class RecommenderAgent:
     def refine_recommendation(self, candidate: DecisionCandidate) -> DecisionCandidate:
         """
         Refina o candidato de decisão com planos de ação específicos.
-        
-        Args:
-            candidate: Candidato de decisão a refinar
-            
-        Returns:
-            Candidato de decisão refinado com ações específicas
         """
         logger.info(f"[{self.agent_id}] Refinando recomendação para {candidate.decision_id}")
         
@@ -200,9 +187,6 @@ class RecommenderAgent:
     def _analyze_hypothesis_and_generate_actions(self, candidate: DecisionCandidate) -> None:
         """
         Analisa a hipótese principal e gera ações técnicas específicas.
-        
-        Args:
-            candidate: Candidato de decisão
         """
         hypothesis_lower = candidate.primary_hypothesis.lower()
         
@@ -286,12 +270,6 @@ class RecommenderAgent:
     def _assess_risk(self, candidate: DecisionCandidate) -> RiskLevel:
         """
         Avalia o nível de risco da decisão.
-        
-        Args:
-            candidate: Candidato de decisão
-            
-        Returns:
-            Nível de risco detectado
         """
         risk_keywords = {
             RiskLevel.CRITICAL: ["critical", "oommemory", "data loss", "security"],
@@ -312,10 +290,6 @@ class RecommenderAgent:
     def _validate_automation_level(self, candidate: DecisionCandidate, risk_level: RiskLevel) -> None:
         """
         Valida e ajusta nível de automação baseado em risco.
-        
-        Args:
-            candidate: Candidato de decisão
-            risk_level: Nível de risco detectado
         """
         # Forçar MANUAL para risco CRITICAL ou HIGH
         if risk_level in [RiskLevel.CRITICAL, RiskLevel.HIGH]:
@@ -339,9 +313,6 @@ class RecommenderAgent:
     def _incorporate_similar_incidents(self, candidate: DecisionCandidate) -> None:
         """
         Incorpora insights de incidentes similares.
-        
-        Args:
-            candidate: Candidato de decisão
         """
         if "similar incident" in candidate.summary.lower():
             candidate.risk_assessment += " Recurrent issue pattern detected - consider permanent fix."
@@ -350,9 +321,6 @@ class RecommenderAgent:
     def _generate_consolidated_playbook(self, candidate: DecisionCandidate) -> None:
         """
         Gera playbook consolidado baseado em padrões detectados.
-        
-        Args:
-            candidate: Candidato de decisão
         """
         if not self.detected_playbooks:
             return
@@ -377,12 +345,6 @@ class RecommenderAgent:
     def get_playbook_for_hypothesis(self, hypothesis: str) -> Optional[RemediationPlaybook]:
         """
         Retorna playbook apropriado para uma hipótese.
-        
-        Args:
-            hypothesis: Hipótese a analisar
-            
-        Returns:
-            Playbook apropriado ou None
         """
         hypothesis_lower = hypothesis.lower()
         
@@ -395,9 +357,6 @@ class RecommenderAgent:
     def get_all_playbooks(self) -> Dict[str, Dict]:
         """
         Retorna todos os playbooks disponíveis.
-        
-        Returns:
-            Dicionário com todos os playbooks
         """
         return {
             pattern: playbook.to_dict()
