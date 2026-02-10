@@ -170,3 +170,4 @@ class SwarmRun:
     executions: List[AgentExecution] = field(default_factory=list)
     final_decision: Optional[Decision] = None
     timestamp: datetime = field(default_factory=datetime.utcnow)
+    metadata: Dict[str, Any] = field(default_factory=dict)
