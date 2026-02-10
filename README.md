@@ -70,6 +70,7 @@ export SEMANTICA_MODEL="en_core_web_sm"
 ---
 
 ## 📂 Project Structure
+- [**Agents Documentation**](docs/AGENTS.md): Detailed technical overview of all agents and their roles.
 
 -   `src/agents/`: Core agent implementations (Orchestrator, DecisionEngine, MetricsAnalysis).
 -   `src/services/`: Business logic services, including the `SemanticRecoveryService`.
