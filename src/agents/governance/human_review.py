@@ -1,4 +1,5 @@
 import logging
+from uuid import UUID, uuid4
 from datetime import datetime, timezone
 from src.models.decision import DecisionCandidate, DecisionValidation, DecisionStatus
 from src.graph.neo4j_repo import Neo4jRepository
@@ -37,5 +38,12 @@ class HumanReviewAgent:
         # Spec says: "Update Graph with Decision Outcome"
         
         self.repo.record_decision_outcome(validation)
-        
         return candidate
+
+    def review_decision(self, decision_id: str, is_approved: bool, validated_by: str, feedback: str = None) -> bool:
+        v = DecisionValidation(validation_id=f"val-{uuid4()}", decision_id=UUID(decision_id), validated_by=validated_by, is_approved=is_approved, feedback=feedback, validated_at=datetime.now(timezone.utc))
+        try:
+            self.repo.record_decision_outcome(v)
+            return True
+        except Exception:
+            return False

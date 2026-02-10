@@ -13,10 +13,18 @@
         </time>
     </div>
 
-    <div class="hypothesis bg-slate-50 p-4 rounded-xl mb-6 border-l-4 border-blue-500">
-        <p class="text-slate-700 leading-relaxed font-medium">
+    <div class="hypothesis bg-slate-50 p-4 rounded-xl mb-6 border-l-4 border-blue-500 relative group">
+        <p id="hypothesis-{{ d.decision_id }}" class="text-slate-700 leading-relaxed font-medium">
             {{ d.primary_hypothesis }}
         </p>
+        <button
+            onclick="UI.copyToClipboard('hypothesis-{{ d.decision_id }}')"
+            class="absolute top-2 right-2 p-1.5 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-blue-600 hover:border-blue-300 opacity-0 group-hover:opacity-100 transition-all duration-200 focus:opacity-100 focus-ring"
+            aria-label="Copy hypothesis to clipboard"
+            title="Copy to clipboard"
+        >
+            <span class="text-sm">📋</span>
+        </button>
     </div>
 
     <div class="actions flex flex-col sm:flex-row gap-4">

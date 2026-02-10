@@ -72,7 +72,7 @@ class StrandsAPI {
      * Submit a review for a decision
      */
     static async submitReview(decisionId, isApproved, feedback = null) {
-        return this.request(`/decisions/${decisionId}/review`, {
+        return this.request('/decisions/review', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
