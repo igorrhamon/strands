@@ -1,14 +1,16 @@
 """
-Recommender Agent com Aprendizado Autônomo
+Recommender Agent com Aprendizado Autônomo (Adaptive V2)
 
 Versão que integra:
 - Busca de playbooks conhecidos (Neo4j)
 - Geração de novos playbooks (LLM)
 - Workflow de curação (aprovação humana)
+- Scoring adaptativo baseado em sucesso histórico e volume
 """
 
 import logging
 import uuid
+import math
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone
 
@@ -26,11 +28,10 @@ class RecommenderAgentWithLearning:
     Fluxo:
     1. Recebe correlação do CorrelatorAgent
     2. Busca playbooks conhecidos (ACTIVE) no Neo4j
-    3. Se encontrar, usa imediatamente
-    4. Se não encontrar, gera novo playbook via LLM
-    5. Armazena como PENDING_REVIEW
-    6. Humano aprova/rejeita
-    7. Próxima vez, playbook aprovado é reutilizado
+    3. Rankeia playbooks usando Score Adaptativo (Confiança * Sucesso * Volume)
+    4. Se encontrar, usa imediatamente (com downgrade de segurança se necessário)
+    5. Se não encontrar, gera novo playbook via LLM
+    6. Armazena como PENDING_REVIEW
     """
     
     agent_id = "recommender-with-learning"
@@ -44,6 +45,10 @@ class RecommenderAgentWithLearning:
         self.playbook_store = playbook_store
         self.playbook_generator = playbook_generator
         self.cache = {}  # Cache local de playbooks
+        
+        # Configurações de Scoring e Segurança
+        self.MIN_EXECUTIONS_FOR_CONFIDENCE = 5
+        self.DOWNGRADE_THRESHOLD = 0.5  # Taxa de sucesso < 50% causa downgrade
     
     def recommend(
         self,
@@ -51,12 +56,7 @@ class RecommenderAgentWithLearning:
         alert_fingerprint: str
     ) -> Dict[str, Any]:
         """
-        Recomenda ações baseado em correlação.
-        
-        Fluxo híbrido:
-        1. Buscar playbook ACTIVE no Neo4j
-        2. Se não encontrar, gerar via LLM
-        3. Retornar recomendação com playbook
+        Recomenda ações baseado em correlação e aprendizado histórico.
         """
         decision_id = str(uuid.uuid4())
         
@@ -67,19 +67,27 @@ class RecommenderAgentWithLearning:
             pattern_type = self._extract_pattern_type(correlation_result.hypothesis)
             service_name = self._extract_service_name(correlation_result.evidence)
             
-            # 1️⃣ BUSCAR PLAYBOOK CONHECIDO
-            playbook = self._lookup_active_playbook(pattern_type, service_name)
+            # 1️⃣ BUSCAR PLAYBOOKS CONHECIDOS
+            playbooks = self._lookup_active_playbooks(pattern_type, service_name)
             
-            if playbook:
-                logger.info(f"Found active playbook: {playbook.get('playbook_id')}")
+            if playbooks:
+                # 2️⃣ RANKEAR PLAYBOOKS (Score Adaptativo)
+                ranked_playbooks = self._rank_playbooks(playbooks, correlation_result.confidence)
+                best_playbook = ranked_playbooks[0]
+                
+                logger.info(f"Selected playbook via history: {best_playbook['playbook_id']} (Score: {best_playbook.get('score', 0):.2f})")
+                
+                # 3️⃣ VERIFICAR NECESSIDADE DE DOWNGRADE (Safety Check)
+                best_playbook = self._apply_safety_downgrade(best_playbook)
+                
                 return self._build_recommendation(
                     decision_id=decision_id,
-                    playbook=playbook,
+                    playbook=best_playbook,
                     source="KNOWN",
                     correlation_result=correlation_result
                 )
             
-            # 2️⃣ GERAR NOVO PLAYBOOK VIA LLM
+            # 4️⃣ GERAR NOVO PLAYBOOK VIA LLM (Cold Start)
             logger.info(f"No active playbook found. Generating via LLM...")
             
             generated_playbook = self.playbook_generator.generate_playbook(
@@ -103,6 +111,9 @@ class RecommenderAgentWithLearning:
             
             if generated_playbook:
                 logger.info(f"Generated playbook: {generated_playbook.playbook_id} (PENDING_REVIEW)")
+                # Salvar no Neo4j
+                self.playbook_store.store_playbook(generated_playbook)
+                
                 return self._build_recommendation(
                     decision_id=decision_id,
                     playbook=self._playbook_to_dict(generated_playbook),
@@ -111,7 +122,7 @@ class RecommenderAgentWithLearning:
                     requires_approval=True
                 )
             
-            # 3️⃣ FALLBACK: Usar ações sugeridas do correlator
+            # 5️⃣ FALLBACK
             logger.warning("Failed to generate playbook. Using fallback actions.")
             return self._build_fallback_recommendation(
                 decision_id=decision_id,
@@ -126,59 +137,63 @@ class RecommenderAgentWithLearning:
                 error=str(e)
             )
     
-    def _lookup_active_playbook(
+    def _lookup_active_playbooks(
         self,
         pattern_type: str,
         service_name: Optional[str] = None
-    ) -> Optional[Dict[str, Any]]:
-        """Busca playbook ativo no Neo4j."""
+    ) -> List[Dict[str, Any]]:
+        """Busca todos os playbooks ativos no Neo4j."""
         if not self.playbook_store.connected:
-            logger.debug("Playbook store not connected")
-            return None
+            return []
         
         try:
-            # Verificar cache local primeiro
-            cache_key = f"{pattern_type}:{service_name}"
-            if cache_key in self.cache:
-                logger.debug(f"Using cached playbook: {cache_key}")
-                return self.cache[cache_key]
-            
-            # Buscar no Neo4j
-            playbooks = self.playbook_store.get_active_playbooks_for_pattern(
+            return self.playbook_store.get_active_playbooks_for_pattern(
                 pattern_type=pattern_type,
                 service_name=service_name
             )
-            
-            if playbooks:
-                # Usar playbook com maior taxa de sucesso
-                best_playbook = max(
-                    playbooks,
-                    key=lambda p: self._calculate_playbook_score(p)
-                )
-                
-                # Cachear
-                self.cache[cache_key] = best_playbook
-                
-                return best_playbook
-            
-            return None
-        
         except Exception as e:
-            logger.error(f"Error looking up playbook: {e}")
-            return None
-    
-    def _calculate_playbook_score(self, playbook: Dict[str, Any]) -> float:
-        """Calcula score de um playbook."""
-        executions = playbook.get("executions_count", 1)
-        successes = playbook.get("success_count", 0)
+            logger.error(f"Error looking up playbooks: {e}")
+            return []
+
+    def _rank_playbooks(self, playbooks: List[Dict[str, Any]], correlation_confidence: float) -> List[Dict[str, Any]]:
+        """Rankeia playbooks usando Score Adaptativo.
         
-        if executions == 0:
-            return 0.0
+        Fórmula:
+        Score = Correlation * SuccessRate * log(1 + Executions)
+        """
+        ranked = []
+        for pb in playbooks:
+            success_rate = pb.get('success_rate', 0.0)
+            total_executions = pb.get('total_executions', 0)
+            
+            # Logarithmic boost para volume (recompensa experiência)
+            # log(1) = 0, então usamos log(1 + executions) para garantir score positivo
+            # Se executions=0, boost=0.1 (penalidade para cold start)
+            volume_boost = math.log1p(total_executions) if total_executions > 0 else 0.1
+            
+            # Score final
+            score = correlation_confidence * success_rate * volume_boost
+            
+            pb['score'] = score
+            ranked.append(pb)
         
-        success_rate = successes / executions
+        # Ordenar por score decrescente
+        return sorted(ranked, key=lambda x: x['score'], reverse=True)
+
+    def _apply_safety_downgrade(self, playbook: Dict[str, Any]) -> Dict[str, Any]:
+        """Aplica downgrade de automação se performance for ruim."""
+        success_rate = playbook.get('success_rate', 1.0)
+        total_executions = playbook.get('total_executions', 0)
         
-        # Favorecer playbooks com mais execuções bem-sucedidas
-        return success_rate * (1 + (executions / 100))
+        # Só penaliza se tiver volume mínimo estatístico
+        if total_executions >= self.MIN_EXECUTIONS_FOR_CONFIDENCE:
+            if success_rate < self.DOWNGRADE_THRESHOLD:
+                logger.warning(f"Downgrading playbook {playbook['playbook_id']} due to low success rate ({success_rate:.2f})")
+                playbook['automation_level'] = "MANUAL"
+                playbook['risk_level'] = "HIGH"
+                playbook['downgrade_reason'] = f"Low success rate: {success_rate:.2f}"
+                
+        return playbook
     
     def _extract_pattern_type(self, hypothesis: str) -> str:
         """Extrai tipo de padrão da hipótese."""
@@ -194,10 +209,8 @@ class RecommenderAgentWithLearning:
     def _extract_service_name(self, evidence: List[Any]) -> Optional[str]:
         """Extrai nome do serviço da evidência."""
         if evidence:
-            # Tentar extrair do source_url
             for e in evidence:
                 if hasattr(e, 'source_url') and e.source_url:
-                    # Simples heurística
                     if "app=" in e.source_url:
                         return e.source_url.split("app=")[1].split("&")[0]
         return None
@@ -248,7 +261,8 @@ class RecommenderAgentWithLearning:
             "risk_assessment": {
                 "risk_level": playbook.get("risk_level", "UNKNOWN"),
                 "requires_approval": requires_approval,
-                "rollback_available": bool(playbook.get("rollback_procedure"))
+                "rollback_available": bool(playbook.get("rollback_procedure")),
+                "downgrade_reason": playbook.get("downgrade_reason")
             }
         }
     
@@ -310,7 +324,6 @@ class RecommenderAgentWithLearning:
         )
         
         if success:
-            # Limpar cache
             self.cache.clear()
             logger.info(f"Playbook approved and cache cleared: {playbook_id}")
         
@@ -334,7 +347,6 @@ class RecommenderAgentWithLearning:
         )
         
         if success:
-            # Limpar cache
             self.cache.clear()
             logger.info(f"Playbook rejected: {playbook_id}")
         

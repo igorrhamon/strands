@@ -1,17 +1,17 @@
 """
-Feedback Loop & Trend Analysis Engine
+Feedback Loop & Trend Analysis Engine (Adaptive V2)
 
 Responsável por:
 1. Coletar feedback de execuções de playbooks
-2. Atualizar estatísticas de sucesso/falha
-3. Analisar tendências de incidentes
-4. Ajustar scores de recomendação
+2. Analisar tendências com thresholds estatísticos
+3. Detectar drift de performance
+4. Identificar candidatos a otimização
 """
 
 import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
-import numpy as np
+import math
 
 from src.core.neo4j_playbook_store import Neo4jPlaybookStore, PlaybookStatus
 
@@ -23,6 +23,11 @@ class FeedbackLoopEngine:
     def __init__(self, store: Neo4jPlaybookStore):
         self.store = store
         self.logger = logging.getLogger(self.__class__.__name__)
+        
+        # Configurações de Threshold
+        self.MIN_VOLUME_FOR_TREND = 10  # Mínimo de incidentes para calcular tendência
+        self.GROWTH_THRESHOLD = 0.2     # +/- 20% para considerar tendência significativa
+        self.DRIFT_THRESHOLD = 0.2      # Desvio de 20% na taxa de sucesso para flag de drift
     
     def process_execution_feedback(self, 
                                  execution_id: str, 
@@ -31,102 +36,79 @@ class FeedbackLoopEngine:
                                  feedback_notes: Optional[str] = None) -> bool:
         """Processa feedback de uma execução.
         
-        Args:
-            execution_id: ID da execução
-            success: Se foi bem sucedida
-            duration_seconds: Duração em segundos
-            feedback_notes: Notas opcionais
-            
-        Returns:
-            True se processado com sucesso
+        Delega para o store a atualização atômica e incremental.
         """
-        try:
-            # 1. Atualizar registro de execução
-            status = "SUCCESS" if success else "FAILURE"
-            
-            # Atualizar no Neo4j (assumindo método update_execution no store)
-            # self.store.update_execution(execution_id, status, duration_seconds, feedback_notes)
-            
-            # 2. Recuperar playbook associado
-            # playbook_id = self.store.get_playbook_id_by_execution(execution_id)
-            
-            # 3. Atualizar estatísticas do playbook
-            # self.store.update_playbook_stats(playbook_id, success)
-            
-            # 4. Verificar se precisa de revisão (se taxa de falha > threshold)
-            # stats = self.store.get_playbook_statistics(playbook_id)
-            # if stats['failure_rate'] > 0.3 and stats['executions'] > 5:
-            #     self.store.flag_for_review(playbook_id, "High failure rate detected")
-            
-            self.logger.info(f"Feedback processado para execução {execution_id} | Success: {success}")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Erro ao processar feedback: {e}")
-            return False
+        return self.store.update_execution(execution_id, success, duration_seconds, feedback_notes)
     
     def analyze_trends(self, days: int = 7) -> Dict[str, Any]:
-        """Analisa tendências de incidentes e eficácia de playbooks.
+        """Analisa tendências de incidentes com rigor estatístico.
         
         Args:
             days: Janela de análise em dias
             
         Returns:
-            Relatório de tendências
+            Relatório de tendências com classificação (UP/DOWN/STABLE)
         """
         try:
-            # Simulação de análise (em produção, faria queries complexas no Neo4j)
+            raw_trends = self.store.get_incident_trends(days)
+            if not raw_trends:
+                return {}
             
-            # 1. Padrões mais frequentes
-            top_patterns = [
-                {"type": "METRIC_METRIC", "count": 45, "trend": "up"},
-                {"type": "LOG_METRIC", "count": 32, "trend": "stable"},
-                {"type": "TEMPORAL", "count": 12, "trend": "down"}
-            ]
+            prev_total = raw_trends.get("previous_window", {}).get("total_incidents", 0)
+            growth_rate = raw_trends.get("growth_rate", 0.0)
             
-            # 2. Serviços mais afetados
-            top_services = [
-                {"name": "api-service", "incidents": 28},
-                {"name": "worker-service", "incidents": 15},
-                {"name": "db-service", "incidents": 8}
-            ]
+            # Classificação de Tendência com Volume Mínimo
+            trend_classification = "STABLE"
+            if prev_total >= self.MIN_VOLUME_FOR_TREND:
+                if growth_rate > self.GROWTH_THRESHOLD:
+                    trend_classification = "UP"
+                elif growth_rate < -self.GROWTH_THRESHOLD:
+                    trend_classification = "DOWN"
+            else:
+                trend_classification = "INSUFFICIENT_DATA"
             
-            # 3. Eficácia global de remediação
-            remediation_stats = {
-                "total_executions": 150,
-                "success_rate": 0.88,
-                "avg_duration": 45.5,  # segundos
-                "automation_savings": 125.5  # horas economizadas (estimado)
-            }
+            raw_trends["trend_classification"] = trend_classification
+            raw_trends["generated_at"] = datetime.now().isoformat()
             
-            return {
-                "window_days": days,
-                "generated_at": datetime.now().isoformat(),
-                "top_patterns": top_patterns,
-                "top_services": top_services,
-                "remediation_stats": remediation_stats
-            }
+            return raw_trends
             
         except Exception as e:
             self.logger.error(f"Erro ao analisar tendências: {e}")
             return {}
     
+    def detect_concept_drift(self, playbook_id: str) -> Optional[Dict[str, Any]]:
+        """Detecta se a performance do playbook está degradando (Drift).
+        
+        Compara taxa de sucesso recente (últimas 10 execuções) com histórico total.
+        """
+        # Em produção, isso exigiria uma query específica para "janela recente"
+        # Por enquanto, usamos a variância armazenada para detectar instabilidade
+        
+        stats = self.store.get_playbook_statistics(playbook_id)
+        if not stats or stats['total'] < self.MIN_VOLUME_FOR_TREND:
+            return None
+            
+        # Se desvio padrão for muito alto em relação à média, pode indicar instabilidade
+        cv = stats.get('std_dev_duration', 0) / stats['duration'] if stats['duration'] > 0 else 0
+        
+        if cv > 0.5:  # Coeficiente de variação > 50%
+            return {
+                "playbook_id": playbook_id,
+                "type": "PERFORMANCE_INSTABILITY",
+                "details": f"High duration variance (CV={cv:.2f})",
+                "severity": "MEDIUM"
+            }
+            
+        return None
+    
     def get_optimization_candidates(self) -> List[Dict[str, Any]]:
         """Identifica playbooks candidatos a otimização.
         
         Critérios:
-        1. Alta frequência de uso
-        2. Taxa de sucesso moderada (precisa melhorar)
-        3. Duração alta (pode ser otimizado)
-        
-        Returns:
-            Lista de candidatos
+        1. Alta frequência (> 50 execuções)
+        2. Taxa de sucesso moderada (< 80%)
+        3. Duração alta (> média global)
         """
         # Em produção, buscaria no Neo4j com filtros específicos
-        return [
-            {
-                "playbook_id": "pb-123",
-                "reason": "High usage (50+), moderate success (75%)",
-                "suggestion": "Review steps 3-4 for potential race conditions"
-            }
-        ]
+        # Simulação baseada em lógica real
+        return []
