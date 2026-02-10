@@ -45,9 +45,24 @@ class UI {
     }
 
     /**
+     * Copy text content to clipboard
+     */
+    static async copyToClipboard(id) {
+        const text = document.getElementById(id)?.innerText;
+        if (!text) return;
+        try {
+            await navigator.clipboard.writeText(text);
+            UI.showNotification('Hypothesis copied to clipboard!', 'success');
+        } catch (e) {
+            UI.showNotification('Failed to copy text', 'error');
+        }
+    }
+
+    /**
      * Handle review button click (approve/reject)
      */
     static async handleReview(decisionId, isApproved, button) {
+        if (!isApproved && !window.confirm('Reject this decision?')) return;
         const originalText = button.innerText;
         const originalClass = button.className;
 
