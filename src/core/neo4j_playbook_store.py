@@ -9,9 +9,42 @@ import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 import json
+from dataclasses import dataclass, field
 from neo4j import GraphDatabase
 
 logger = logging.getLogger(__name__)
+
+class PlaybookSource:
+    MANUAL = "MANUAL"
+    LLM_GENERATED = "LLM_GENERATED"
+    LEARNED = "LEARNED"
+
+@dataclass
+class Playbook:
+    playbook_id: str
+    title: str
+    description: str
+    pattern_type: str
+    service_name: str
+    status: str
+    source: str
+    steps: List[Dict[str, Any]]
+    estimated_time_minutes: int
+    automation_level: str
+    risk_level: str
+    prerequisites: List[str]
+    success_criteria: List[str]
+    rollback_procedure: str
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: Optional[str] = None
+    approved_at: Optional[datetime] = None
+    approved_by: Optional[str] = None
+    executions_count: int = 0
+    success_count: int = 0
+    failure_count: int = 0
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 class PlaybookStatus:
     DRAFT = "DRAFT"
@@ -212,10 +245,31 @@ class Neo4jPlaybookStore:
             result = session.run(query, id=playbook_id).single()
             return dict(result['p']) if result else None
 
-    def store_playbook(self, playbook_data: Dict[str, Any]):
+    def store_playbook(self, playbook_data: Any):
+        if hasattr(playbook_data, "__dataclass_fields__"):
+            from dataclasses import asdict
+            data = asdict(playbook_data)
+        else:
+            data = playbook_data.copy() if isinstance(playbook_data, dict) else playbook_data
+
+        # Serialize nested structures for Neo4j compatibility
+        for key in ["steps", "metadata", "prerequisites", "success_criteria"]:
+            if key in data and (isinstance(data[key], (dict, list))):
+                # Neo4j supports list of strings, but steps is list of dicts.
+                # To be safe, we JSON dump the complex ones.
+                if key == "steps" or key == "metadata":
+                    data[key] = json.dumps(data[key])
+                # prerequisites and success_criteria are usually list of strings, which Neo4j supports.
+                # But if they contain objects, they will fail.
+
         query = """
         MERGE (p:Playbook {playbook_id: $data.playbook_id})
         SET p += $data, p.updated_at = datetime()
         """
-        with self.driver.session() as session:
-            session.run(query, data=playbook_data)
+        try:
+            with self.driver.session() as session:
+                session.run(query, data=data)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to store playbook: {e}")
+            return False

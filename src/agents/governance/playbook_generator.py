@@ -7,9 +7,24 @@ permitindo que o sistema aprenda e evolua com o tempo.
 
 import logging
 import uuid
+import os
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone
 import json
+
+from strands import Agent
+try:
+    from http_provider import HTTPModel
+except ImportError:
+    # Handle cases where root is not in path but src is
+    try:
+        import sys
+        import os
+        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../")))
+        from http_provider import HTTPModel
+    except ImportError:
+        logger.warning("Could not import HTTPModel from root. LLM generation may fail.")
+        HTTPModel = None
 
 from src.core.neo4j_playbook_store import (
     Neo4jPlaybookStore, Playbook, PlaybookStatus, PlaybookSource
@@ -32,20 +47,21 @@ class PlaybookGeneratorAgent:
     
     agent_id = "playbook-generator"
     
-    def __init__(self, playbook_store: Neo4jPlaybookStore):
+    def __init__(self, playbook_store: Neo4jPlaybookStore, endpoint: Optional[str] = None):
         """Inicializa gerador de playbooks."""
         self.playbook_store = playbook_store
-        self.llm_client = None  # Será inicializado com LLM real
+        self.endpoint = endpoint or os.environ.get("AGENT_MODEL_ENDPOINT", "http://localhost:8000/generate")
+        self.llm_agent = None
         self._initialize_llm()
     
     def _initialize_llm(self):
-        """Inicializa cliente LLM."""
+        """Inicializa agente LLM usando strands-agents."""
         try:
-            # Tentar importar cliente LLM (pode ser OpenAI, Anthropic, etc)
-            # Por enquanto, usamos um mock que simula LLM
-            logger.info("LLM client initialized (mock mode)")
+            model = HTTPModel(self.endpoint)
+            self.llm_agent = Agent(self.agent_id, model)
+            logger.info(f"LLM agent initialized with endpoint: {self.endpoint}")
         except Exception as e:
-            logger.warning(f"Failed to initialize LLM: {e}")
+            logger.error(f"Failed to initialize LLM agent: {e}")
     
     def generate_playbook(
         self,
@@ -199,78 +215,43 @@ Generate a practical, executable playbook that an SRE can follow step-by-step.
     
     def _call_llm(self, prompt: str) -> Optional[Dict[str, Any]]:
         """
-        Chama LLM para gerar playbook.
-        
-        NOTA: Esta é uma implementação mock. Em produção, seria:
-        - client = OpenAI.Client()
-        - response = client.chat.completions.create(...)
+        Chama LLM para gerar playbook via strands-agents.
         """
         try:
-            # Mock: Simular resposta LLM
-            # Em produção, seria uma chamada real ao LLM
+            if not self.llm_agent:
+                logger.error("LLM agent not initialized")
+                return None
             
-            mock_response = {
-                "title": "Remediate High Error Rate in Logs",
-                "description": "This playbook addresses high error rates detected in application logs correlated with increased HTTP 5xx responses.",
-                "steps": [
-                    {
-                        "step": 1,
-                        "title": "Investigate Error Logs",
-                        "description": "Examine recent error logs to identify the root cause",
-                        "commands": [
-                            "kubectl logs <pod-name> --tail=500 | grep -i error",
-                            "kubectl logs <pod-name> --previous | grep -i error"
-                        ],
-                        "expected_output": "Stack traces and error messages",
-                        "rollback_command": "N/A"
-                    },
-                    {
-                        "step": 2,
-                        "title": "Check Resource Usage",
-                        "description": "Verify CPU and memory usage",
-                        "commands": [
-                            "kubectl top pod <pod-name>",
-                            "kubectl describe pod <pod-name>"
-                        ],
-                        "expected_output": "Resource metrics",
-                        "rollback_command": "N/A"
-                    },
-                    {
-                        "step": 3,
-                        "title": "Scale Up Service",
-                        "description": "Increase replicas if resource-constrained",
-                        "commands": [
-                            "kubectl scale deployment <service> --replicas=3"
-                        ],
-                        "expected_output": "Deployment scaled",
-                        "rollback_command": "kubectl scale deployment <service> --replicas=1"
-                    }
-                ],
-                "estimated_time_minutes": 20,
-                "automation_level": "ASSISTED",
-                "risk_level": "MEDIUM",
-                "prerequisites": [
-                    "kubectl access to cluster",
-                    "Deployment knowledge"
-                ],
-                "success_criteria": [
-                    "Error rate drops below 1%",
-                    "HTTP 5xx responses decrease",
-                    "Pod restarts stabilize"
-                ],
-                "rollback_procedure": "Revert replica count and monitor metrics"
-            }
+            logger.info("Calling LLM to generate playbook...")
+            response_text = self.llm_agent.think(prompt)
             
-            return mock_response
-        
+            if not response_text:
+                logger.warning("LLM returned empty response")
+                return None
+
+            # Clean up markdown code blocks if present
+            cleaned_text = response_text.strip()
+            if "```json" in cleaned_text:
+                cleaned_text = cleaned_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in cleaned_text:
+                cleaned_text = cleaned_text.split("```")[1].split("```")[0].strip()
+
+            try:
+                return json.loads(cleaned_text)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse LLM response as JSON: {e}")
+                logger.debug(f"Raw response: {response_text}")
+                # Tentativa de recuperação básica se o JSON estiver quase certo
+                return None
+
         except Exception as e:
-            logger.error(f"Error calling LLM: {e}")
+            logger.error(f"Error calling LLM: {e}", exc_info=True)
             return None
     
     def get_status(self) -> dict:
         """Retorna status do agente."""
         return {
             "agent_id": self.agent_id,
-            "llm_connected": self.llm_client is not None,
-            "playbook_store_connected": self.playbook_store.connected
+            "llm_connected": self.llm_agent is not None,
+            "endpoint": self.endpoint
         }
