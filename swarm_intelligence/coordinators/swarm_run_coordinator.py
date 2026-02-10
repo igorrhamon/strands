@@ -21,7 +21,10 @@ from swarm_intelligence.controllers.swarm_decision_controller import (
     SwarmDecisionController,
 )
 from swarm_intelligence.services.confidence_service import ConfidenceService
-from swarm_intelligence.policy.confidence_policy import ConfidencePolicy
+from swarm_intelligence.policy.confidence_policy import (
+    ConfidencePolicy,
+    DefaultConfidencePolicy,
+)
 
 
 class SwarmRunCoordinator:
@@ -104,6 +107,14 @@ class SwarmRunCoordinator:
         final_successful_executions = [
             ex for ex in all_executions if ex.step_id in successful_step_ids
         ]
+
+        swarm_run = SwarmRun(
+            run_id=run_id,
+            domain=domain,
+            plan=plan,
+            master_seed=master_seed,
+            executions=all_executions,
+        )
 
         if not all(s.step_id in successful_step_ids for s in plan.steps if s.mandatory):
             if self.llm_agent_id:

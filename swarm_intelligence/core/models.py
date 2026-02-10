@@ -1,10 +1,10 @@
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 import uuid
 from datetime import datetime
 from swarm_intelligence.policy.retry_policy import RetryPolicy
-from .enums import EvidenceType, HumanAction
+from .enums import EvidenceType, HumanAction, RiskLevel
 
 # Forward declaration for type hinting
 class DecisionContext: pass
@@ -150,6 +150,7 @@ class RetryEvaluationResult:
     retry_attempts: List[RetryAttempt] = field(default_factory=list)
     retry_decisions: List[RetryDecision] = field(default_factory=list)
     max_delay_seconds: float = 0.0
+    newly_successful_step_ids: Set[str] = field(default_factory=set)
 
 @dataclass(frozen=True)
 class Domain:
