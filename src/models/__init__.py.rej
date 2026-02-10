@@ -1,0 +1,18 @@
+diff a/src/models/__init__.py b/src/models/__init__.py	(rejected hunks)
+@@ -6,7 +6,6 @@ All entities are immutable after creation.
+ No inference of entities from external data.
+ """
+ 
+-from src.models.embedding import VectorEmbedding, SimilarityResult
+ from src.models.alert import Alert, NormalizedAlert
+ from src.models.cluster import AlertCluster
+ from src.models.metric_trend import MetricTrend, TrendState
+@@ -14,8 +13,6 @@ from src.models.decision import Decision, DecisionState, HumanValidationStatus
+ from src.models.audit_log import AuditLog
+ 
+ __all__ = [
+-    "VectorEmbedding",
+-    "SimilarityResult",
+     "Alert",
+     "NormalizedAlert",
+     "AlertCluster",

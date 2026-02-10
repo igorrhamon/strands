@@ -1,0 +1,297 @@
+diff a/src/agents/report_agent.py b/src/agents/report_agent.py	(rejected hunks)
+@@ -2,7 +2,7 @@
+ Report Agent - Generate Structured Audit Reports
+ 
+ Produces human-readable reports and persists decisions.
+-Coordinates with EmbeddingAgent for post-confirmation persistence.
++Constitution Principle IV: Rastreabilidade - All decisions are logged.
+ """
+ 
+ import logging
+@@ -14,7 +14,6 @@ from src.models.metric_trend import MetricTrend
+ from src.models.decision import Decision, DecisionState
+ from src.models.audit_log import AuditLog
+ from src.utils.audit_logger import AuditLogger
+-from src.agents.embedding_agent import EmbeddingAgent
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -29,10 +28,8 @@ class ReportAgent:
+     Agent responsible for:
+     1. Generating structured reports for human review
+     2. Persisting decisions to audit log
+-    3. Triggering embedding persistence on confirmation
+     
+     Constitution Principle IV: Rastreabilidade - All decisions are logged.
+-    Constitution Principle III: Embeddings only after human confirmation.
+     """
+     
+     AGENT_NAME = "ReportAgent"
+@@ -42,17 +39,14 @@ class ReportAgent:
+     def __init__(
+         self,
+         audit_logger: Optional[AuditLogger] = None,
+-        embedding_agent: Optional[EmbeddingAgent] = None,
+     ):
+         """
+         Initialize report agent.
+         
+         Args:
+             audit_logger: AuditLogger instance.
+-            embedding_agent: EmbeddingAgent for post-confirmation persistence.
+         """
+         self._audit_logger = audit_logger or AuditLogger()
+-        self._embedding_agent = embedding_agent or EmbeddingAgent()
+     
+     async def generate_report(
+         self,
+@@ -62,20 +56,11 @@ class ReportAgent:
+     ) -> dict:
+         """
+         Generate a structured report for human review.
+-        
+-        Args:
+-            decision: The decision to report on.
+-            cluster: Alert cluster being analyzed.
+-            trends: Metric trends for the cluster.
+-        
+-        Returns:
+-            Dict containing the formatted report.
+         """
+         logger.info(
+             f"[{self.AGENT_NAME}] Generating report for decision {decision.decision_id}"
+         )
+         
+-        # Build report sections
+         report = {
+             "report_type": "decision_recommendation",
+             "decision_id": str(decision.decision_id),
+@@ -89,10 +74,6 @@ class ReportAgent:
+             "actions": self._build_action_section(decision),
+         }
+         
+-        logger.info(
+-            f"[{self.AGENT_NAME}] Report generated: {len(report)} sections"
+-        )
+-        
+         return report
+     
+     def persist_decision(
+@@ -100,16 +81,7 @@ class ReportAgent:
+         decision: Decision,
+         cluster: AlertCluster,
+     ) -> AuditLog:
+-        """
+-        Persist a decision to the audit log.
+-        
+-        Args:
+-            decision: Decision to persist.
+-            cluster: Alert cluster for context.
+-        
+-        Returns:
+-            The created AuditLog entry.
+-        """
++        """Persist a decision to the audit log."""
+         alert_fingerprints = [a.fingerprint for a in cluster.alerts]
+         
+         audit_log = self._audit_logger.log_decision(
+@@ -119,10 +91,6 @@ class ReportAgent:
+             agent_version=self.AGENT_VERSION,
+         )
+         
+-        logger.info(
+-            f"[{self.AGENT_NAME}] Decision persisted: {audit_log.log_id}"
+-        )
+-        
+         return audit_log
+     
+     async def handle_confirmation(
+@@ -131,91 +99,34 @@ class ReportAgent:
+         cluster: AlertCluster,
+         validator_id: str,
+     ) -> None:
+-        """
+-        Handle human confirmation of a decision.
+-        
+-        Constitution Principle III: Embedding persistence only after confirmation.
+-        
+-        Args:
+-            decision: Decision being confirmed.
+-            cluster: Alert cluster for embedding context.
+-            validator_id: ID of the human validator.
+-        """
++        """Handle human confirmation of a decision."""
+         logger.info(
+-            f"[{self.AGENT_NAME}] Handling confirmation for {decision.decision_id} "
+-            f"by {validator_id}"
++            f"[{self.AGENT_NAME}] Handling confirmation for {decision.decision_id} by {validator_id}"
+         )
+-        
+-        # Mark decision as confirmed
+         decision.confirm(validator_id)
+-        
+-        # Log validation event
+         self._audit_logger.log_validation(
+             decision_id=decision.decision_id,
+             validated_by=validator_id,
+             approved=True,
+         )
+-        
+-        # Persist embedding (Constitution Principle III)
+-        try:
+-            point_id = await self._embedding_agent.persist_confirmed_decision(
+-                decision=decision,
+-                cluster=cluster,
+-            )
+-            
+-            # Log embedding creation
+-            self._audit_logger.log_embedding_created(
+-                decision_id=decision.decision_id,
+-                point_id=point_id,
+-            )
+-            
+-            logger.info(
+-                f"[{self.AGENT_NAME}] Embedding persisted: {point_id}"
+-            )
+-        except Exception as e:
+-            logger.error(f"[{self.AGENT_NAME}] Failed to persist embedding: {e}")
+-            raise ReportAgentError(f"Embedding persistence failed: {e}") from e
+     
+     async def handle_rejection(
+         self,
+         decision: Decision,
+         validator_id: str,
+     ) -> None:
+-        """
+-        Handle human rejection of a decision.
+-        
+-        Constitution Principle III: NO embedding for rejected decisions.
+-        
+-        Args:
+-            decision: Decision being rejected.
+-            validator_id: ID of the human validator.
+-        """
++        """Handle human rejection of a decision."""
+         logger.info(
+-            f"[{self.AGENT_NAME}] Handling rejection for {decision.decision_id} "
+-            f"by {validator_id}"
++            f"[{self.AGENT_NAME}] Handling rejection for {decision.decision_id} by {validator_id}"
+         )
+-        
+-        # Mark decision as rejected
+         decision.reject(validator_id)
+-        
+-        # Log validation event
+         self._audit_logger.log_validation(
+             decision_id=decision.decision_id,
+             validated_by=validator_id,
+             approved=False,
+         )
+-        
+-        # NO embedding persistence for rejected decisions
+-        logger.info(
+-            f"[{self.AGENT_NAME}] Rejection logged, no embedding created"
+-        )
+     
+-    def _build_summary(
+-        self,
+-        decision: Decision,
+-        cluster: AlertCluster,
+-    ) -> dict:
+-        """Build report summary section."""
++    def _build_summary(self, decision: Decision, cluster: AlertCluster) -> dict:
+         return {
+             "service": cluster.primary_service,
+             "severity": cluster.primary_severity,
+@@ -226,7 +137,6 @@ class ReportAgent:
+         }
+     
+     def _build_cluster_section(self, cluster: AlertCluster) -> dict:
+-        """Build cluster details section."""
+         return {
+             "cluster_id": cluster.cluster_id,
+             "primary_service": cluster.primary_service,
+@@ -238,15 +148,11 @@ class ReportAgent:
+                     "description": a.description,
+                     "timestamp": a.timestamp.isoformat(),
+                 }
+-                for a in cluster.alerts[:10]  # Limit to first 10
++                for a in cluster.alerts[:10]
+             ],
+         }
+     
+-    def _build_trends_section(
+-        self,
+-        trends: dict[str, MetricTrend],
+-    ) -> dict:
+-        """Build trend analysis section."""
++    def _build_trends_section(self, trends: dict[str, MetricTrend]) -> dict:
+         return {
+             "metrics_analyzed": len(trends),
+             "trends": [
+@@ -261,7 +167,6 @@ class ReportAgent:
+         }
+     
+     def _build_recommendation_section(self, decision: Decision) -> dict:
+-        """Build recommendation section."""
+         return {
+             "action": decision.decision_state.value,
+             "confidence": decision.confidence,
+@@ -272,7 +177,6 @@ class ReportAgent:
+         }
+     
+     def _build_evidence_section(self, decision: Decision) -> dict:
+-        """Build evidence section (semantic context)."""
+         return {
+             "historical_matches": len(decision.semantic_evidence),
+             "evidence": [
+@@ -286,45 +190,25 @@ class ReportAgent:
+         }
+     
+     def _build_audit_section(self, decision: Decision) -> dict:
+-        """Build audit trail section."""
+         return {
+             "decision_id": str(decision.decision_id),
+             "created_at": decision.created_at.isoformat(),
+             "validation_status": decision.human_validation_status.value,
+             "validated_by": decision.validated_by,
+-            "validated_at": (
+-                decision.validated_at.isoformat()
+-                if decision.validated_at else None
+-            ),
++            "validated_at": (decision.validated_at.isoformat() if decision.validated_at else None),
+         }
+     
+     def _build_action_section(self, decision: Decision) -> dict:
+-        """Build available actions section."""
+         if decision.is_confirmed:
+-            return {
+-                "status": "confirmed",
+-                "available_actions": [],
+-            }
+-        
++            return {"status": "confirmed", "available_actions": []}
+         return {
+             "status": "pending",
+             "available_actions": [
+-                {
+-                    "action": "approve",
+-                    "description": "Confirm the recommendation and persist to semantic memory",
+-                },
+-                {
+-                    "action": "reject",
+-                    "description": "Reject the recommendation (no semantic persistence)",
+-                },
+-                {
+-                    "action": "modify",
+-                    "description": "Modify the recommendation before confirming",
+-                },
++                {"action": "approve", "description": "Confirm the recommendation"},
++                {"action": "reject", "description": "Reject the recommendation"},
+             ],
+         }
+ 
+-
+ # Strands agent tool definition
+ REPORT_AGENT_TOOL = {
+     "name": "generate_report",
