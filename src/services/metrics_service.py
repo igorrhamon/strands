@@ -4,6 +4,7 @@ Exposes operational metrics for monitoring and governance.
 """
 
 import logging
+import os
 from prometheus_client import Counter, Histogram, Gauge, start_http_server
 from typing import Optional
 
@@ -23,11 +24,12 @@ class MetricsService:
             cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self, port: int = 9090):
+    def __init__(self, port: Optional[int] = None):
         if self._initialized:
             return
             
-        self.port = port
+        # Port configurable via ENV or parameter, default to 9090
+        self.port = port or int(os.getenv("STRANDS_METRICS_PORT", 9090))
         
         # 1. Execution Metrics
         self.swarm_execution_time = Histogram(
@@ -37,10 +39,12 @@ class MetricsService:
         )
         
         # 2. Decision Metrics
+        # Custom buckets for granular confidence analysis
         self.decision_confidence = Histogram(
             'strands_decision_confidence_score',
             'Confidence scores of generated decisions',
-            ['decision_state']
+            ['decision_state'],
+            buckets=[0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
         )
         
         self.human_override_rate = Counter(
@@ -64,7 +68,7 @@ class MetricsService:
         )
         
         self._initialized = True
-        logger.info(f"[METRICS] Initialized Prometheus metrics on port {self.port}")
+        logger.info(f"[METRICS] Initialized Prometheus metrics (Port: {self.port}, Custom Buckets: Enabled)")
 
     def start_server(self):
         """Starts the Prometheus metrics server."""
@@ -72,7 +76,7 @@ class MetricsService:
             start_http_server(self.port)
             logger.info(f"[METRICS] Prometheus server started on port {self.port}")
         except Exception as e:
-            logger.error(f"[METRICS] Failed to start Prometheus server: {e}")
+            logger.error(f"[METRICS] Failed to start Prometheus server on port {self.port}: {e}")
 
     def record_execution(self, duration: float, domain: str, risk: str):
         self.swarm_execution_time.labels(domain=domain, risk_level=risk).observe(duration)
