@@ -28,6 +28,15 @@ class SemanticRecoveryService:
         self.ner_extractor = NERExtractor(method="ml", model="en_core_web_sm")
         self.graph_builder = GraphBuilder()
         
+        # Initialize embedding model for real semantic search
+        try:
+            from sentence_transformers import SentenceTransformer
+            self._model = SentenceTransformer('all-MiniLM-L6-v2')
+            logger.info("[SEMANTIC_RECOVERY] Initialized real embedding model: all-MiniLM-L6-v2")
+        except Exception as e:
+            logger.warning(f"[SEMANTIC_RECOVERY] Failed to load embedding model: {e}")
+            self._model = None
+
         # Cache for semantic results
         self._cache: Dict[str, RuleResult] = {}
         self._cache_size = cache_size
@@ -57,10 +66,21 @@ class SemanticRecoveryService:
         )
         
         try:
-            # 1. Entity Extraction
-            context_text = f"Service: {cluster.primary_service}. Description: {cluster.alerts[0].description}"
+            # 1. Entity Extraction & Rich Context Generation
+            symptoms = [a.description for a in cluster.alerts[:3]]
+            context_text = (
+                f"Service: {cluster.primary_service}. "
+                f"Severity: {cluster.primary_severity}. "
+                f"Symptoms: {' | '.join(symptoms)}"
+            )
             entities = self.ner_extractor.extract(context_text)
             logger.debug(f"[SEMANTIC_RECOVERY_ENTITIES] Extracted: {entities}")
+            
+            # Generate real embedding for the query
+            if self._model:
+                query_embedding = self._model.encode(context_text).tolist()
+                # This embedding can be used to query a vector DB or the GraphRAG
+                logger.debug("[SEMANTIC_RECOVERY_EMBEDDING] Generated real embedding for query")
             
             # 2. Enriquecimento com GitHub (Opcional, se a entidade for um serviço/repo)
             github_context = await self._get_github_context(cluster.primary_service)

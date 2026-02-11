@@ -8,6 +8,7 @@ Constitution Principle III: Provide semantic evidence from similar cases.
 """
 
 import logging
+import os
 from typing import TYPE_CHECKING, List, Optional, Any
 from uuid import UUID
 from datetime import datetime, timezone
@@ -67,22 +68,12 @@ class GraphAgent:
         collection_name: str = COLLECTION_NAME,
         enable_qdrant: bool = False,
         enable_neo4j: bool = False,
-        neo4j_uri: str = "bolt://localhost:7687",
-        neo4j_user: str = "neo4j",
-        neo4j_password: str = "strads123"
+        neo4j_uri: Optional[str] = None,
+        neo4j_user: Optional[str] = None,
+        neo4j_password: Optional[str] = None
     ):
         """
         Initialize graph agent.
-        
-        Args:
-            qdrant_client: Optional Qdrant client (for testing).
-            neo4j_driver: Optional Neo4j driver (for testing).
-            collection_name: Name of Qdrant collection.
-            enable_qdrant: Enable Qdrant storage (requires running instance).
-            enable_neo4j: Enable Neo4j knowledge graph (requires running instance).
-            neo4j_uri: Neo4j connection URI.
-            neo4j_user: Neo4j username.
-            neo4j_password: Neo4j password.
         """
         self._collection_name = collection_name
         self.enable_qdrant = enable_qdrant and QDRANT_AVAILABLE
@@ -90,6 +81,20 @@ class GraphAgent:
         self._client = qdrant_client
         self._neo4j_driver = neo4j_driver
         
+        # Use environment variables for security as suggested by ChatGPT
+        neo4j_uri = neo4j_uri or os.getenv("NEO4J_URI", "bolt://localhost:7687")
+        neo4j_user = neo4j_user or os.getenv("NEO4J_USER", "neo4j")
+        neo4j_password = neo4j_password or os.getenv("NEO4J_PASSWORD", "strads123")
+        
+        # Initialize embedding model
+        try:
+            from sentence_transformers import SentenceTransformer
+            self._model = SentenceTransformer('all-MiniLM-L6-v2')
+            logger.info(f"[{self.AGENT_NAME}] Initialized real embedding model: all-MiniLM-L6-v2")
+        except Exception as e:
+            logger.warning(f"[{self.AGENT_NAME}] Failed to load embedding model, falling back to dummy: {e}")
+            self._model = None
+
         # In-memory fallback for offline mode
         self._memory_store: List[dict] = []
         
@@ -256,73 +261,59 @@ class GraphAgent:
     ) -> bool:
         """
         Store a confirmed decision for future retrieval.
-        
-        Args:
-            decision: Confirmed decision to store.
-            cluster: Alert cluster that led to this decision.
-            embedding: Optional embedding vector (generated if None).
-        
-        Returns:
-            True if stored successfully.
         """
         if not decision.is_confirmed:
-            logger.debug(f"[{self.AGENT_NAME}] Skipping unconfirmed decision {decision.decision_id}")
+            logger.warning(f"[{self.AGENT_NAME}] Skipping unconfirmed decision {decision.decision_id}")
             return False
-        
-        # Create summary for semantic search
-        summary = self._create_summary(decision, cluster)
-        
-        # Generate or use provided embedding
-        if embedding is None:
+            
+        # Generate summary and embedding if not provided
+        summary = self._generate_summary(decision, cluster)
+        if not embedding:
             embedding = self._generate_embedding(summary)
+            
+        # 1. Store in Neo4j (Knowledge Graph)
+        self._store_in_neo4j(decision, cluster)
         
-        # Store in Qdrant if enabled
-        qdrant_success = False
-        if self.enable_qdrant and self._client and QDRANT_AVAILABLE:
+        # 2. Store in Qdrant (Vector Search)
+        if self.enable_qdrant and self._client:
             try:
-                point = PointStruct(  # type: ignore
-                    id=str(decision.decision_id),
-                    vector=embedding,
-                    payload={
-                        "decision_state": decision.decision_state.value,
-                        "confidence": decision.confidence,
-                        "summary": summary,
-                        "service": cluster.primary_service,
-                        "severity": cluster.primary_severity,
-                        "alert_count": cluster.alert_count,
-                        "rules_applied": decision.rules_applied,
-                        "created_at": decision.created_at.isoformat(),
-                        "validated_by": decision.validated_by
-                    }
-                )
                 self._client.upsert(
                     collection_name=self._collection_name,
-                    points=[point]
+                    points=[
+                        PointStruct(
+                            id=str(decision.decision_id),
+                            vector=embedding,
+                            payload={
+                                "service": cluster.primary_service,
+                                "severity": cluster.primary_severity,
+                                "decision_state": decision.decision_state.value,
+                                "confidence": decision.confidence,
+                                "summary": summary,
+                                "created_at": decision.created_at.isoformat()
+                            }
+                        )
+                    ]
                 )
-                logger.info(f"[{self.AGENT_NAME}] Stored decision {decision.decision_id} in Qdrant")
-                qdrant_success = True
+                logger.debug(f"[{self.AGENT_NAME}] Stored decision {decision.decision_id} in Qdrant")
             except Exception as e:
                 logger.error(f"[{self.AGENT_NAME}] Failed to store in Qdrant: {e}")
         
-        # Store in Neo4j knowledge graph if enabled
-        if self.enable_neo4j:
-            self._store_in_neo4j(decision, cluster)
-        
-        # Fallback: store in memory if no other backend succeeded
-        if not qdrant_success and not self.enable_neo4j:
-            self._memory_store.append({
-                "decision_id": str(decision.decision_id),
+        # 3. Always store in memory as fallback
+        self._memory_store.append({
+            "id": str(decision.decision_id),
+            "vector": embedding,
+            "payload": {
+                "service": cluster.primary_service,
+                "severity": cluster.primary_severity,
                 "decision_state": decision.decision_state.value,
                 "confidence": decision.confidence,
                 "summary": summary,
-                "service": cluster.primary_service,
-                "severity": cluster.primary_severity,
-                "embedding": embedding
-            })
-            logger.debug(f"[{self.AGENT_NAME}] Stored decision {decision.decision_id} in memory")
+                "created_at": decision.created_at.isoformat()
+            }
+        })
         
         return True
-    
+
     def find_similar_decisions(
         self,
         cluster: AlertCluster,
@@ -330,40 +321,32 @@ class GraphAgent:
         min_similarity: float = 0.7
     ) -> List[SemanticEvidence]:
         """
-        Find semantically similar past decisions.
-        
-        Args:
-            cluster: Current alert cluster to match.
-            top_k: Number of similar decisions to return.
-            min_similarity: Minimum similarity score (0-1).
-        
-        Returns:
-            List of SemanticEvidence objects.
+        Find past decisions semantically similar to the current cluster.
         """
-        # Create query summary
-        query_summary = f"Service: {cluster.primary_service}, Severity: {cluster.primary_severity}, " \
-                       f"Alerts: {cluster.alert_count}, Score: {cluster.correlation_score:.2f}"
-        
-        # Generate query embedding
-        query_embedding = self._generate_embedding(query_summary)
+        # Generate query text from cluster context
+        symptoms = [a.description for a in cluster.alerts[:3]]
+        query_text = f"Service: {cluster.primary_service} | Severity: {cluster.primary_severity} | Symptoms: {' | '.join(symptoms)}"
+        query_embedding = self._generate_embedding(query_text)
         
         # Search in Qdrant if enabled
-        if self.enable_qdrant and self._client and QDRANT_AVAILABLE:
+        if self.enable_qdrant and self._client:
             try:
-                results = self._client.query_points(  # type: ignore
+                results = self._client.search(
                     collection_name=self._collection_name,
-                    query=query_embedding,
+                    query_vector=query_embedding,
                     limit=top_k,
                     score_threshold=min_similarity
-                ).points
+                )
                 
-                evidence = []
-                for result in results:
-                    evidence.append(SemanticEvidence(
-                        decision_id=UUID(result.id),
-                        similarity_score=result.score,
-                        summary=result.payload.get("summary", "")
-                    ))
+                evidence = [
+                    SemanticEvidence(
+                        decision_id=UUID(str(res.id)),
+                        similarity=res.score,
+                        summary=res.payload.get("summary", ""),
+                        metadata=res.payload
+                    )
+                    for res in results
+                ]
                 
                 logger.info(f"[{self.AGENT_NAME}] Found {len(evidence)} similar decisions in Qdrant")
                 return evidence
@@ -374,34 +357,52 @@ class GraphAgent:
         evidence = self._search_memory(query_embedding, top_k, min_similarity)
         logger.debug(f"[{self.AGENT_NAME}] Found {len(evidence)} similar decisions in memory")
         return evidence
-    
-    def _create_summary(self, decision: Decision, cluster: AlertCluster) -> str:
-        """Create searchable summary from decision and cluster."""
-        return (
-            f"Service: {cluster.primary_service}, "
-            f"Severity: {cluster.primary_severity}, "
-            f"Decision: {decision.decision_state.value}, "
-            f"Confidence: {decision.confidence:.2f}, "
-            f"Rules: {', '.join(decision.rules_applied)}, "
+
+    def _generate_summary(self, decision: Decision, cluster: AlertCluster) -> str:
+        """
+        Generate a rich semantic summary of the decision for embedding.
+        Includes symptoms, metrics, and context as suggested by ChatGPT.
+        """
+        # Extract symptoms from alerts
+        symptoms = [a.description for a in cluster.alerts[:3]]
+        
+        # Extract relevant metrics from labels if available
+        metrics = []
+        for alert in cluster.alerts:
+            for k, v in alert.labels.items():
+                if any(m in k.lower() for m in ["cpu", "memory", "error", "latency", "rate", "count"]):
+                    metrics.append(f"{k}={v}")
+        
+        summary_parts = [
+            f"Service: {cluster.primary_service}",
+            f"Severity: {cluster.primary_severity}",
+            f"Symptoms: {' | '.join(symptoms)}",
+            f"Metrics: {', '.join(list(set(metrics))[:5])}",
+            f"Decision: {decision.decision_state.value}",
+            f"Confidence: {decision.confidence:.2f}",
+            f"Rules: {', '.join(decision.rules_applied)}",
             f"Justification: {decision.justification}"
-        )
+        ]
+        return " | ".join(summary_parts)
     
     def _generate_embedding(self, text: str) -> List[float]:
         """
-        Generate embedding for text.
-        
-        TODO: Integrate with actual embedding model (sentence-transformers).
-        For now, returns dummy embedding.
+        Generate real embedding for text using sentence-transformers.
         """
-        # Dummy embedding for offline mode
+        if hasattr(self, '_model') and self._model:
+            try:
+                embedding = self._model.encode(text)
+                return embedding.tolist()
+            except Exception as e:
+                logger.error(f"[{self.AGENT_NAME}] Embedding generation failed: {e}")
+        
+        # Fallback to dummy embedding if model is not available
         import hashlib
         hash_val = int(hashlib.md5(text.encode()).hexdigest(), 16)
-        
-        # Generate deterministic pseudo-random vector
         import random
         random.seed(hash_val)
         return [random.random() for _ in range(self.VECTOR_SIZE)]
-    
+
     def _search_memory(
         self,
         query_embedding: List[float],
@@ -412,92 +413,47 @@ class GraphAgent:
         if not self._memory_store:
             return []
         
-        # Calculate cosine similarity for each stored decision
         import math
         
         def cosine_similarity(v1: List[float], v2: List[float]) -> float:
             dot_product = sum(a * b for a, b in zip(v1, v2))
             mag1 = math.sqrt(sum(a * a for a in v1))
-            mag2 = math.sqrt(sum(b * b for b in v2))
-            return dot_product / (mag1 * mag2) if mag1 and mag2 else 0.0
-        
-        # Score all stored decisions
-        scored = []
+            mag2 = math.sqrt(sum(a * a for a in v2))
+            if mag1 == 0 or mag2 == 0:
+                return 0
+            return dot_product / (mag1 * mag2)
+            
+        results = []
         for item in self._memory_store:
-            similarity = cosine_similarity(query_embedding, item["embedding"])
-            if similarity >= min_similarity:
-                scored.append((similarity, item))
+            sim = cosine_similarity(query_embedding, item["vector"])
+            if sim >= min_similarity:
+                results.append(
+                    SemanticEvidence(
+                        decision_id=UUID(item["id"]),
+                        similarity=sim,
+                        summary=item["payload"].get("summary", ""),
+                        metadata=item["payload"]
+                    )
+                )
         
-        # Sort by similarity and take top_k
-        scored.sort(reverse=True, key=lambda x: x[0])
-        
-        evidence = []
-        for similarity, item in scored[:top_k]:
-            evidence.append(SemanticEvidence(
-                decision_id=UUID(item["decision_id"]),
-                similarity_score=similarity,
-                summary=item["summary"]
-            ))
-        
-        return evidence
-    
-    def get_stats(self) -> dict:
-        """Get statistics about stored decisions."""
-        stats = {
-            "backends": [],
-            "total_decisions": 0,
-            "neo4j_nodes": None,
-            "neo4j_relationships": None
-        }
-        
-        if self.enable_qdrant and self._client:
-            try:
-                info = self._client.get_collection(self._collection_name)
-                stats["backends"].append("qdrant")
-                stats["total_decisions"] = info.points_count
-                stats["qdrant_collection"] = self._collection_name
-            except Exception as e:
-                logger.error(f"[{self.AGENT_NAME}] Failed to get Qdrant stats: {e}")
-        
-        if self.enable_neo4j and self._neo4j_driver:
-            try:
-                with self._neo4j_driver.session() as session:
-                    result = session.run("""
-                        MATCH (d:Decision)
-                        RETURN count(d) as decisions,
-                               count{(d)-[:FOR_SERVICE]->()} as services,
-                               count{(d)-[:APPLIED_RULE]->()} as rules
-                    """)
-                    record = result.single()
-                    stats["backends"].append("neo4j")
-                    stats["neo4j_nodes"] = {
-                        "decisions": record["decisions"],
-                        "services": record["services"],
-                        "rules": record["rules"]
-                    }
-            except Exception as e:
-                logger.error(f"[{self.AGENT_NAME}] Failed to get Neo4j stats: {e}")
-        
-        if not stats["backends"]:
-            stats["backends"].append("memory")
-            stats["total_decisions"] = len(self._memory_store)
-        
-        stats["backends"] = ", ".join(stats["backends"])
-        return stats
-    
+        # Sort by similarity and return top_k
+        results.sort(key=lambda x: x.similarity, reverse=True)
+        return results[:top_k]
+
     def get_service_history(self, service_name: str, limit: int = 10) -> List[dict]:
-        """Get decision history for a specific service from Neo4j."""
+        """Retrieve recent decisions for a service from Neo4j."""
         if not self.enable_neo4j or not self._neo4j_driver:
             return []
         
         try:
             with self._neo4j_driver.session() as session:
                 result = session.run("""
-                    MATCH (d:Decision)-[:FOR_SERVICE]->(s:Service {name: $service})
-                    OPTIONAL MATCH (d)-[:APPLIED_RULE]->(r:Rule)
-                    RETURN d.id as decision_id,
-                           d.state as state,
-                           d.confidence as confidence,
+                    MATCH (s:Service {name: $service})<-[:FOR_SERVICE]-(d:Decision)
+                    MATCH (d)-[:APPLIED_RULE]->(r:Rule)
+                    RETURN d.id as id, 
+                           d.state as state, 
+                           d.confidence as confidence, 
+                           d.justification as justification,
                            d.created_at as created_at,
                            collect(r.name) as rules
                     ORDER BY d.created_at DESC
