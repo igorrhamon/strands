@@ -88,9 +88,6 @@ services:
       - '--storage.path=/alertmanager'
     networks:
       - strads_network
-    depends_on:
-      strands-agent-orchestrator:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "http://localhost:9093/-/ready"]
       interval: 10s
@@ -142,6 +139,8 @@ services:
     restart: unless-stopped
 
   strands-agent-orchestrator:
+    env_file:
+      - .env
     build:
       context: .
       dockerfile: Dockerfile
@@ -186,6 +185,8 @@ services:
     command: ["python3", "main.py"]
 
   strands-dashboard:
+    env_file:
+      - .env
     build:
       context: .
       dockerfile: Dockerfile
