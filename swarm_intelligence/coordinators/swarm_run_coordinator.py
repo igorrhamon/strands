@@ -152,12 +152,34 @@ class SwarmRunCoordinator:
             if all_evidence:
                 current_avg_confidence = sum(ev.confidence for ev in all_evidence) / len(all_evidence)
 
-        if use_llm_fallback and not all_mandatory_successful and current_avg_confidence >= llm_fallback_threshold:
-            if self.llm_agent_id:
-                llm_step = SwarmStep(agent_id=self.llm_agent_id, mandatory=True)
-                llm_executions = await self.execution_controller.execute([llm_step])
-                all_executions.extend(llm_executions)
-                final_successful_executions.extend(llm_executions)
+        should_trigger_llm = (
+            use_llm_fallback
+            and self.llm_agent_id is not None
+            and (
+                (not all_mandatory_successful)
+                or (current_avg_confidence <= llm_fallback_threshold)
+            )
+        )
+        if should_trigger_llm:
+            llm_input = {
+                "alert": alert.data,
+                "run_id": run_id,
+                "evidence": [
+                    {
+                        "agent_id": ev.agent_id,
+                        "confidence": ev.confidence,
+                        "content": ev.content,
+                    }
+                    for ex in final_successful_executions
+                    for ev in ex.output_evidence
+                ],
+                "avg_confidence": current_avg_confidence,
+                "mandatory_success": all_mandatory_successful,
+            }
+            llm_step = SwarmStep(agent_id=self.llm_agent_id, mandatory=True, parameters=llm_input)
+            llm_executions = await self.execution_controller.execute([llm_step])
+            all_executions.extend(llm_executions)
+            final_successful_executions.extend([ex for ex in llm_executions if ex and ex.is_successful()])
 
         decision = await self.decision_controller.decide(
             plan,

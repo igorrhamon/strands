@@ -58,15 +58,12 @@ ENV PATH=/home/strands/.local/bin:$PATH \
 # Switch to non-root user
 USER strands
 
-# Health check
+# Health check (main.py FastAPI listener)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/ || exit 1
+    CMD curl -f http://localhost:8080/api/v1/health || exit 1
 
 # Expose ports
-EXPOSE 8000 8001
+EXPOSE 8080 8000 8001
 
-# Run the application
-CMD ["python", "-m", "uvicorn", "server_fastapi:app", \
-    "--host", "0.0.0.0", \
-    "--port", "8000", \
-    "--workers", "4"]
+# Run default entrypoint for Alertmanager webhook listener
+CMD ["python", "main.py"]

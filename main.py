@@ -31,7 +31,7 @@ from swarm_intelligence.memory.neo4j_adapter import Neo4jAdapter
 from swarm_intelligence.policy.retry_policy import ExponentialBackoffPolicy
 from swarm_intelligence.services.confidence_service import ConfidenceService
 from swarm_intelligence.replay import ReplayEngine
-from swarm_intelligence.registry import get_registry, load_mock_agents, load_all_agents, create_agent
+from swarm_intelligence.registry import get_registry, load_all_agents, create_agent
 
 
 def setup_logging(log_level: str = "INFO") -> None:
@@ -141,9 +141,9 @@ async def main():
     
     logger.info(f"Starting Strands in {config.environment} mode")
     
-    # Load agents: 3 Mock agents + 5 Real agent adapters
+    # Load agents: 8 operational agents (3 core + 5 adapters)
     registry = get_registry()
-    logger.info(f"[{config.environment.upper()}] Loading all agents (mock + real adapters)...")
+    logger.info(f"[{config.environment.upper()}] Loading all operational agents...")
     load_all_agents()
     
     # Verify agents are registered
@@ -153,12 +153,12 @@ async def main():
         sys.exit(1)
     
     # Log detailed agent inventory
-    mock_agents = ["threatintel", "loganalysis", "networkscanner"]
-    real_agents = ["correlator", "loginspector", "metricsanalyzer", "alertcorrelator", "recommender"]
+    core_agents = ["threatintel", "loganalysis", "networkscanner"]
+    adapter_agents = ["correlator", "loginspector", "metricsanalyzer", "alertcorrelator", "recommender", "llm_agent"]
     
     logger.info(f"\n📊 AGENT INVENTORY:")
-    logger.info(f"  ✅ MOCK AGENTS (3): {', '.join(mock_agents)}")
-    logger.info(f"  🔧 REAL AGENTS (5): {', '.join(real_agents)}")
+    logger.info(f"  ⚙️ CORE OPERATIONAL AGENTS (3): {', '.join(core_agents)}")
+    logger.info(f"  🔧 ADAPTER AGENTS (6): {', '.join(adapter_agents)}")
     logger.info(f"  📈 TOTAL: {len(available_agents)} agents ready for execution\n")
     
     # Initialize Neo4j connection with retry logic
@@ -182,7 +182,7 @@ async def main():
         agents = []
         all_agent_ids = [
             "threatintel", "loganalysis", "networkscanner",
-            "correlator", "loginspector", "metricsanalyzer", "alertcorrelator", "recommender",
+            "correlator", "loginspector", "metricsanalyzer", "alertcorrelator", "recommender", "llm_agent",
         ]
         
         logger.info("\n🚀 INSTANTIATING SWARM AGENTS:")
@@ -190,13 +190,13 @@ async def main():
             try:
                 agent = create_agent(agent_id)
                 agents.append(agent)
-                agent_type = "(MOCK)" if agent_id in mock_agents else "(REAL)"
+                agent_type = "(CORE)" if agent_id in core_agents else "(ADAPTER)"
                 logger.info(f"  ✅ {agent_id:18s} {agent_type}  →  {agent.__class__.__name__}")
             except Exception as e:
-                agent_type = "(MOCK)" if agent_id in mock_agents else "(REAL)"
+                agent_type = "(CORE)" if agent_id in core_agents else "(ADAPTER)"
                 logger.error(f"  ❌ {agent_id:18s} {agent_type}  →  ERROR: {e}")
-                if agent_id not in real_agents:
-                    logger.error(f"Failed to load mock agent: {agent_id}")
+                if agent_id not in adapter_agents:
+                    logger.error(f"Failed to load core operational agent: {agent_id}")
                     sys.exit(1)
         
         if not agents:
@@ -205,7 +205,7 @@ async def main():
         
         logger.info(f"\n✨ Successfully instantiated {len(agents)}/{len(all_agent_ids)} agents\n")
         
-        orchestrator = SwarmOrchestrator(agents)
+        orchestrator = SwarmOrchestrator(agents, max_concurrency=len(all_agent_ids))
         
         # Initialize controllers
         execution_controller = SwarmExecutionController(orchestrator)
@@ -270,21 +270,58 @@ async def main():
                 logger.info(f"📋 Total steps: 8 | Mandatory: 5\n")
                 
                 # Define retry policies
-                mock_fast = ExponentialBackoffPolicy(max_attempts=2, base_delay=0.1)
-                real_slow = ExponentialBackoffPolicy(max_attempts=3, base_delay=0.5)
-                real_moderate = ExponentialBackoffPolicy(max_attempts=2, base_delay=0.2)
-                
+                fast_policy = ExponentialBackoffPolicy(max_attempts=2, base_delay=0.1)
+                moderate_policy = ExponentialBackoffPolicy(max_attempts=2, base_delay=0.2)
+                slow_policy = ExponentialBackoffPolicy(max_attempts=3, base_delay=0.5)
+
+                primary_alert = alert_data.get("alerts", [{}])[0]
+                labels = primary_alert.get("labels", {})
+                annotations = primary_alert.get("annotations", {})
+                alert_signature = f"{labels.get('alertname', 'unknown')}|{labels.get('service', labels.get('job', 'unknown'))}|{labels.get('severity', 'unknown')}"
+                known_procedure = neo4j.find_procedure_by_signature(alert_signature)
+
+                common_params = {
+                    "alert": {"alertname": alert_name, "raw_data": alert_data},
+                    "service_name": labels.get("service", labels.get("job", "unknown")),
+                    "namespace": labels.get("namespace", "default"),
+                    "instance": labels.get("instance", "unknown"),
+                    "severity": labels.get("severity", "unknown"),
+                    "summary": annotations.get("summary", ""),
+                    "description": annotations.get("description", ""),
+                    "context": f"{annotations.get('summary', '')} {annotations.get('description', '')}",
+                    "logs": annotations.get("description", ""),
+                    "metrics": ["cpu", "memory", "request_rate", "latency", "error_rate"],
+                    "lookback_minutes": int(labels.get("lookback_minutes", 60)) if str(labels.get("lookback_minutes", "")).isdigit() else 60,
+                    "alert_count": len(alert_data.get("alerts", [])),
+                    "known_procedure": known_procedure,
+                    "decision_candidates": [
+                        {
+                            "severity": labels.get("severity", "medium"),
+                            "service": labels.get("service", labels.get("job", "unknown")),
+                            "issue_type": "cpu" if "cpu" in (annotations.get("summary", "") + annotations.get("description", "")).lower() else "error",
+                            "reason": annotations.get("summary", "Alertmanager signal"),
+                            "known_procedure": known_procedure.get("description", "") if isinstance(known_procedure, dict) else "",
+                        }
+                    ],
+                    "network_info": {
+                        "open_ports": [int(p) for p in labels.get("open_ports", "").split(",") if p.strip().isdigit()]
+                    },
+                }
+
+                if known_procedure:
+                    logger.info(f"♻️ Reusing known procedure for pattern {alert_signature}: {known_procedure.get('description', 'n/a')}")
+
                 plan = SwarmPlan(
-                    objective=f"Incident Response: {alert_name} on {alert_data.get('alerts', [{}])[0].get('labels', {}).get('instance', 'unknown')}",
+                    objective=f"Incident Response: {alert_name} on {labels.get('instance', 'unknown')}",
                     steps=[
-                        SwarmStep(agent_id="loganalysis", mandatory=True, retry_policy=mock_fast),
-                        SwarmStep(agent_id="networkscanner", mandatory=True, retry_policy=real_slow),
-                        SwarmStep(agent_id="threatintel", mandatory=True, retry_policy=real_moderate),
-                        SwarmStep(agent_id="correlator", mandatory=True, retry_policy=real_moderate),
-                        SwarmStep(agent_id="loginspector", mandatory=False, retry_policy=real_slow),
-                        SwarmStep(agent_id="metricsanalyzer", mandatory=False, retry_policy=mock_fast),
-                        SwarmStep(agent_id="alertcorrelator", mandatory=False, retry_policy=mock_fast),
-                        SwarmStep(agent_id="recommender", mandatory=True, retry_policy=real_moderate),
+                        SwarmStep(agent_id="loganalysis", mandatory=True, retry_policy=fast_policy, parameters=common_params),
+                        SwarmStep(agent_id="networkscanner", mandatory=True, retry_policy=slow_policy, parameters=common_params),
+                        SwarmStep(agent_id="threatintel", mandatory=True, retry_policy=moderate_policy, parameters=common_params),
+                        SwarmStep(agent_id="correlator", mandatory=True, retry_policy=moderate_policy, parameters=common_params),
+                        SwarmStep(agent_id="loginspector", mandatory=False, retry_policy=slow_policy, parameters=common_params),
+                        SwarmStep(agent_id="metricsanalyzer", mandatory=False, retry_policy=fast_policy, parameters=common_params),
+                        SwarmStep(agent_id="alertcorrelator", mandatory=False, retry_policy=fast_policy, parameters=common_params),
+                        SwarmStep(agent_id="recommender", mandatory=True, retry_policy=moderate_policy, parameters=common_params),
                     ]
                 )
                 

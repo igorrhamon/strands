@@ -192,6 +192,8 @@ class Neo4jAdapter:
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:ReplayReport) REQUIRE n.id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:ConfidenceSnapshot) REQUIRE n.id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:Domain) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:Procedure) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:AlertPattern) REQUIRE n.signature IS UNIQUE",
         ]
         for query in constraints:
             self.run_transaction(query)
@@ -234,6 +236,22 @@ class Neo4jAdapter:
             dc.automation = "PARTIAL",
             dc.created_at = datetime()
         MERGE (alert)-[:HAS_CANDIDATE]->(dc)
+
+        MERGE (ap:AlertPattern {signature: $alert_signature})
+        ON CREATE SET ap.last_seen = datetime(), ap.occurrences = 1
+        ON MATCH SET ap.last_seen = datetime(), ap.occurrences = coalesce(ap.occurrences, 0) + 1
+        MERGE (alert)-[:MATCHES_PATTERN]->(ap)
+
+        MERGE (proc:Procedure {id: coalesce($procedure_id, dec.id)})
+        ON CREATE SET proc.description = coalesce($procedure_description, dec.summary),
+                      proc.confidence = coalesce($procedure_confidence, dec.confidence, 0.5),
+                      proc.success_count = 0,
+                      proc.failure_count = 0,
+                      proc.created_at = datetime(),
+                      proc.updated_at = datetime()
+        ON MATCH SET proc.updated_at = datetime()
+        MERGE (dc)-[:SUGGESTS_PROCEDURE]->(proc)
+        MERGE (ap)-[:HAS_PROCEDURE]->(proc)
 
         WITH run, dec
         UNWIND $steps as step_param
@@ -338,6 +356,10 @@ class Neo4jAdapter:
             "decision_id": swarm_run.final_decision.decision_id, "summary": swarm_run.final_decision.summary,
             "action_proposed": swarm_run.final_decision.action_proposed, "confidence": swarm_run.final_decision.confidence,
             "service_name": service_name, "severity": severity, "description": description,
+            "alert_signature": f"{first_alert.get('labels', {}).get('alertname', 'unknown')}|{service_name or 'unknown'}|{severity or 'unknown'}",
+            "procedure_id": swarm_run.final_decision.decision_id,
+            "procedure_description": swarm_run.final_decision.action_proposed,
+            "procedure_confidence": swarm_run.final_decision.confidence,
             "steps": steps_params,
             "influencing_evidence": [ev.evidence_id for ev in swarm_run.final_decision.supporting_evidence],
             "retries": [r.__dict__ for r in retry_attempts],
@@ -381,6 +403,43 @@ class Neo4jAdapter:
         self.run_transaction(query, params)
         logging.info(f"Human override by {human_decision.author} saved atomically.")
 
+
+
+    def find_procedure_by_signature(self, alert_signature: str) -> Dict[str, Any]:
+        query = """
+        MATCH (ap:AlertPattern {signature: $signature})-[:HAS_PROCEDURE]->(p:Procedure)
+        RETURN p.id as id, p.description as description, p.confidence as confidence,
+               p.success_count as success_count, p.failure_count as failure_count
+        ORDER BY p.confidence DESC, p.success_count DESC
+        LIMIT 1
+        """
+        rows = self.run_read_transaction(query, {"signature": alert_signature})
+        return rows[0] if rows else {}
+
+    def register_procedure_feedback(self, decision_id: str, approved: bool, worked: bool, validated_by: str, feedback: str = ""):
+        query = """
+        MATCH (dc:DecisionCandidate {decision_id: $decision_id})-[:SUGGESTS_PROCEDURE]->(p:Procedure)
+        SET p.success_count = coalesce(p.success_count, 0) + CASE WHEN $worked THEN 1 ELSE 0 END,
+            p.failure_count = coalesce(p.failure_count, 0) + CASE WHEN $worked THEN 0 ELSE 1 END,
+            p.confidence = CASE
+                WHEN $worked THEN CASE WHEN coalesce(p.confidence, 0.5) + 0.05 > 0.99 THEN 0.99 ELSE coalesce(p.confidence, 0.5) + 0.05 END
+                ELSE CASE WHEN coalesce(p.confidence, 0.5) - 0.05 < 0.1 THEN 0.1 ELSE coalesce(p.confidence, 0.5) - 0.05 END
+            END,
+            p.updated_at = datetime()
+        CREATE (pf:ProcedureFeedback {
+            id: randomUUID(), approved: $approved, worked: $worked,
+            validated_by: $validated_by, feedback: $feedback, timestamp: datetime()
+        })
+        MERGE (dc)-[:HAS_FEEDBACK]->(pf)
+        MERGE (p)-[:HAS_FEEDBACK]->(pf)
+        """
+        self.run_transaction(query, {
+            "decision_id": decision_id,
+            "approved": approved,
+            "worked": worked,
+            "validated_by": validated_by,
+            "feedback": feedback or "",
+        })
     def save_replay_report(self, report: ReplayReport):
         """Saves a replay report to the graph, linking it to the involved decisions."""
         query = """

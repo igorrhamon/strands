@@ -33,10 +33,8 @@ route:
 receivers:
   - name: 'strands-webhook'
     webhook_configs:
-      - url: 'http://strands-agent-orchestrator:8080/api/v1/alerts'
+      - url: '${STRANDS_WEBHOOK_URL}'
         send_resolved: true
-        # Retry configuration
-        http_sd_configs: []
 
 inhibit_rules:
   # Don't send out firing alerts if the alerts for this service are already
