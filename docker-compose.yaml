@@ -1,4 +1,4 @@
-version: '3.8'
+
 
 services:
   qdrant:
@@ -180,7 +180,7 @@ services:
         condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 30s
+      interval: 300s
       timeout: 10s
       retries: 3
       start_period: 10s
@@ -209,8 +209,7 @@ volumes:
     driver: local
   ollama_data:
     driver: local
-  strands_app:
-    driver: local
+  # strands_app: (unused) - removed to simplify compose
 
 networks:
   strads_network:
