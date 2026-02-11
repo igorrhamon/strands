@@ -1,191 +1,418 @@
 <!DOCTYPE html>
-<html class="dark" lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
-    <title>Swarm Run Overview Dashboard</title>
-    <link href="https://fonts.googleapis.com" rel="preconnect" />
-    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
-      rel="stylesheet"
-    />
-    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-    <script>
-      tailwind.config = {
-        darkMode: 'class',
-        theme: {
-          extend: {
-            colors: {
-              primary: '#135bec',
-              'background-light': '#f6f6f8',
-              'background-dark': '#101622',
-              'surface-dark': '#1c1f27',
-              'border-dark': '#2d333b'
-            },
-            fontFamily: {
-              display: ['Inter', 'sans-serif'],
-              mono: [
-                'ui-monospace',
-                'SFMono-Regular',
-                'Menlo',
-                'Monaco',
-                'Consolas',
-                'Liberation Mono',
-                'Courier New',
-                'monospace'
-              ]
-            }
-          }
-        }
-      };
-    </script>
-    <style>
-      body {
-        font-family: 'Inter', sans-serif;
-      }
-      .scrollbar-hide::-webkit-scrollbar {
-        display: none;
-      }
-      .scrollbar-hide {
-        -ms-overflow-style: none;
-        scrollbar-width: none;
-      }
-    </style>
-  </head>
-  <body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-white overflow-hidden h-screen flex">
-    <aside class="w-64 h-full bg-[#111318] border-r border-border-dark flex flex-col shrink-0 transition-all duration-300">
-      <div class="p-6 pb-2">
-        <div class="flex flex-col gap-1">
-          <div class="flex items-center gap-2">
-            <span class="material-symbols-outlined text-primary text-3xl">hub</span>
-            <h1 class="text-white text-lg font-bold tracking-tight">Swarm</h1>
-          </div>
-          <p class="text-[#9da6b9] text-xs font-medium pl-9 opacity-80">Cognitive Orchestrator</p>
-        </div>
-      </div>
-      <nav class="flex-1 overflow-y-auto py-6 px-3 flex flex-col gap-1">
-        <div class="px-3 py-2">
-          <p class="text-[#9da6b9] text-xs font-semibold uppercase tracking-wider mb-2">Monitoring</p>
-          <a class="flex items-center gap-3 px-3 py-2 rounded-lg bg-primary/10 text-primary border border-primary/20 group transition-colors" href="#">
-            <span class="material-symbols-outlined text-[20px] fill-1">dashboard</span>
-            <span class="text-sm font-medium">Run Overview</span>
-          </a>
-          <a class="flex items-center gap-3 px-3 py-2 rounded-lg text-[#9da6b9] hover:text-white hover:bg-[#282e39] transition-colors mt-1" href="#">
-            <span class="material-symbols-outlined text-[20px]">terminal</span>
-            <span class="text-sm font-medium">Execution Logs</span>
-          </a>
-          <a class="flex items-center gap-3 px-3 py-2 rounded-lg text-[#9da6b9] hover:text-white hover:bg-[#282e39] transition-colors mt-1" href="#">
-            <span class="material-symbols-outlined text-[20px]">memory</span>
-            <span class="text-sm font-medium">Decision Engine</span>
-          </a>
-        </div>
-        <div class="px-3 py-2">
-          <p class="text-[#9da6b9] text-xs font-semibold uppercase tracking-wider mb-2">Control</p>
-          <a class="flex items-center gap-3 px-3 py-2 rounded-lg text-[#9da6b9] hover:text-white hover:bg-[#282e39] transition-colors" href="#">
-            <span class="material-symbols-outlined text-[20px]">gavel</span>
-            <span class="text-sm font-medium">Governance Rules</span>
-          </a>
-          <a class="flex items-center gap-3 px-3 py-2 rounded-lg text-[#9da6b9] hover:text-white hover:bg-[#282e39] transition-colors mt-1" href="#">
-            <span class="material-symbols-outlined text-[20px]">model_training</span>
-            <span class="text-sm font-medium">Learning Loops</span>
-          </a>
-        </div>
-      </nav>
-      <div class="p-4 border-t border-border-dark">
-        <div class="flex items-center gap-3 px-3 py-2 rounded-lg bg-[#1c1f27] border border-border-dark">
-          <div class="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse"></div>
-          <div class="flex flex-col">
-            <span class="text-xs font-medium text-[#9da6b9]">System Status</span>
-            <span class="text-xs font-bold text-emerald-500">Operational</span>
-          </div>
-        </div>
-      </div>
-    </aside>
+<html class="dark" lang="pt-BR">
+<head>
+  <meta charset="utf-8"/>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <title>Detalhes de Execução do Swarm</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "primary": "#135bec",
+            "background-light": "#f6f6f8",
+            "background-dark": "#101622",
+            "surface-dark": "#161e2e",
+            "border-dark": "#2a3447",
+          },
+          fontFamily: {
+            "display": ["Inter", "sans-serif"],
+            "mono": ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "Menlo", "Monaco", "Consolas", "monospace"],
+          },
+          borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "2xl": "1rem", "full": "9999px"},
+        },
+      },
+    }
+  </script>
+  <style type="text/tailwindcss">
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #101622; 
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #2a3447; 
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #3b4760; 
+    }
+  </style>
+</head>
 
-    <main class="flex-1 flex flex-col min-w-0 overflow-hidden bg-background-dark relative">
-      <div class="px-8 pt-6 pb-2 shrink-0">
-        <div class="flex items-center gap-2 text-sm mb-4">
-          <span class="text-[#9da6b9]">Swarm</span>
-          <span class="text-[#9da6b9] material-symbols-outlined text-[16px]">chevron_right</span>
-          <span class="text-white font-medium">Overview</span>
+<body class="overflow-hidden h-screen flex bg-background">
+  <!-- Sidebar Navigation -->
+  <aside class="w-24 lg:w-80 border-r border-border bg-surface flex flex-col shrink-0 transition-all duration-300">
+    <!-- Brand -->
+    <div class="p-6 border-b border-border">
+      <div class="flex items-center gap-4">
+        <div class="w-12 h-12 rounded-lg bg-gradient-to-br from-primary to-cyan-500 flex items-center justify-center shrink-0">
+          <span class="material-symbols-outlined text-white text-2xl">hub</span>
         </div>
-        <div class="flex flex-wrap justify-between items-end gap-4 mb-6">
-          <div class="flex flex-col gap-1">
-            <h2 class="text-3xl font-bold text-white tracking-tight">Swarm Run Overview</h2>
-            <p class="text-[#9da6b9] text-sm max-w-2xl">Real-time monitoring of autonomous financial decisions and risk assessment.</p>
-          </div>
-          <div class="flex items-center gap-3">
-            <span class="text-[#9da6b9] text-xs font-mono">Last updated: 14:32:05 UTC</span>
-            <button class="h-9 px-4 bg-[#282e39] hover:bg-[#343a46] text-white text-sm font-medium rounded-lg border border-border-dark flex items-center gap-2 transition-colors">
-              <span class="material-symbols-outlined text-[18px]">refresh</span>
-              Refresh
-            </button>
-            <button class="h-9 px-4 bg-primary hover:bg-blue-600 text-white text-sm font-medium rounded-lg shadow-lg shadow-blue-900/20 flex items-center gap-2 transition-colors">
-              <span class="material-symbols-outlined text-[18px]">download</span>
-              Export Report
-            </button>
-          </div>
+        <div class="hidden lg:flex flex-col">
+          <h1 class="text-lg font-bold text-white tracking-tight">Swarm</h1>
+          <p class="text-xs text-muted font-medium mt-0.5">Cognitive Orchestrator</p>
         </div>
       </div>
+    </div>
 
-      <div class="px-8 pb-4 shrink-0">
-        <div class="bg-surface-dark border border-border-dark rounded-xl p-4 flex flex-col md:flex-row gap-4 items-center justify-between shadow-sm">
-          <div class="relative w-full md:w-80">
-            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-[#9da6b9]"><span class="material-symbols-outlined text-[20px]">search</span></span>
-            <input class="w-full bg-[#111318] text-white text-sm rounded-lg border border-border-dark pl-10 pr-4 py-2.5 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder-[#545a69]" placeholder="Search by Alert ID..." type="text" />
-          </div>
+    <!-- Navigation -->
+    <nav class="flex-1 flex flex-col gap-2 p-4 overflow-y-auto">
+      <a href="#" class="flex items-center gap-3 px-3 py-3 rounded-lg bg-primary/10 text-primary border border-primary/20 transition-all duration-200">
+        <span class="material-symbols-outlined text-2xl">dashboard</span>
+        <span class="text-sm font-semibold hidden lg:block">Decisions</span>
+      </a>
+      
+      <a href="#" class="flex items-center gap-3 px-3 py-3 rounded-lg text-muted hover:text-white hover:bg-surface-light transition-all duration-200">
+        <span class="material-symbols-outlined text-2xl">timeline</span>
+        <span class="text-sm font-medium hidden lg:block">Analysis</span>
+      </a>
+      
+      <a href="#" class="flex items-center gap-3 px-3 py-3 rounded-lg text-muted hover:text-white hover:bg-surface-light transition-all duration-200">
+        <span class="material-symbols-outlined text-2xl">history</span>
+        <span class="text-sm font-medium hidden lg:block">Audit Log</span>
+      </a>
+      
+      <a href="#" class="flex items-center gap-3 px-3 py-3 rounded-lg text-muted hover:text-white hover:bg-surface-light transition-all duration-200">
+        <span class="material-symbols-outlined text-2xl">settings</span>
+        <span class="text-sm font-medium hidden lg:block">Config</span>
+      </a>
+    </nav>
+
+    <!-- User Profile -->
+    <div class="p-4 border-t border-border">
+      <button class="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-surface-light transition-colors">
+        <div class="w-10 h-10 rounded-full bg-primary/30 flex items-center justify-center text-sm font-bold text-primary shrink-0">AI</div>
+        <div class="hidden lg:block text-left">
+          <p class="text-sm font-medium text-white">Analyst</p>
+          <p class="text-xs text-muted">System View</p>
+        </div>
+      </button>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="flex-1 flex flex-col overflow-hidden">
+    <!-- Header -->
+    <header class="border-b border-border bg-surface/80 backdrop-blur-xs h-20 flex items-center px-gutter shrink-0">
+      <div class="flex items-center justify-between w-full">
+        <div>
+          <h2 class="text-2xl font-bold text-white">Pending Decisions</h2>
+          <p class="text-xs text-muted mt-1">Real-time swarm analysis queue</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <button id="refresh-btn" class="px-4 py-2.5 bg-surface-light border border-border rounded-lg text-sm font-medium text-white hover:bg-surface-light hover:border-primary transition-all duration-200 flex items-center gap-2">
+            <span class="material-symbols-outlined text-lg">refresh</span>
+            <span class="hidden sm:inline">Refresh</span>
+          </button>
+          <button class="px-4 py-2.5 bg-primary text-white rounded-lg text-sm font-semibold shadow-lg shadow-primary/25 hover:bg-primary-dark transition-all duration-200 flex items-center gap-2">
+            <span class="material-symbols-outlined text-lg">settings</span>
+            <span class="hidden sm:inline">Export</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Content Area -->
+    <div class="flex-1 overflow-y-auto p-gutter">
+      <!-- Search/Filter Bar -->
+      <div class="mb-8 max-w-7xl">
+        <div class="relative">
+          <span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-muted text-xl">search</span>
+          <input 
+            id="search-input"
+            type="text" 
+            placeholder="Search decisions by ID, domain, or status..." 
+            class="w-full bg-surface-light border border-border rounded-lg pl-12 pr-4 py-3 text-sm text-white placeholder-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-all"
+          />
         </div>
       </div>
 
-      <div class="flex-1 overflow-hidden px-8 pb-6">
-        <div class="h-full flex flex-col bg-surface-dark border border-border-dark rounded-xl shadow-sm overflow-hidden">
-          <div class="overflow-auto flex-1">
-            <table class="w-full text-left border-collapse">
-              <thead class="bg-[#242933] sticky top-0 z-10 shadow-sm">
-                <tr>
-                  <th class="px-4 py-3 text-xs font-semibold text-[#9da6b9] uppercase tracking-wider border-b border-border-dark">Alert ID</th>
-                  <th class="px-4 py-3 text-xs font-semibold text-[#9da6b9] uppercase tracking-wider border-b border-border-dark">Domain</th>
-                  <th class="px-4 py-3 text-xs font-semibold text-[#9da6b9] uppercase tracking-wider border-b border-border-dark">Risk Level</th>
-                  <th class="px-4 py-3 text-xs font-semibold text-[#9da6b9] uppercase tracking-wider border-b border-border-dark">Final Action</th>
-                  <th class="px-4 py-3 text-xs font-semibold text-[#9da6b9] uppercase tracking-wider border-b border-border-dark">Confidence</th>
-                  <th class="px-4 py-3 text-xs font-semibold text-[#9da6b9] uppercase tracking-wider border-b border-border-dark">Status</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-border-dark text-sm">
-                <tr class="hover:bg-[#282e39]/50 transition-colors">
-                  <td class="px-4 py-3 font-mono text-white">SW-8832-XJ</td>
-                  <td class="px-4 py-3 text-purple-400">Fraud</td>
-                  <td class="px-4 py-3 text-red-400">Critical</td>
-                  <td class="px-4 py-3 text-gray-300">Block Transaction</td>
-                  <td class="px-4 py-3 text-white">98%</td>
-                  <td class="px-4 py-3 text-emerald-400">Completed</td>
-                </tr>
-                <tr class="hover:bg-[#282e39]/50 transition-colors">
-                  <td class="px-4 py-3 font-mono text-white">SW-8833-BK</td>
-                  <td class="px-4 py-3 text-blue-400">Security</td>
-                  <td class="px-4 py-3 text-orange-400">High</td>
-                  <td class="px-4 py-3 text-gray-300">Flag Account</td>
-                  <td class="px-4 py-3 text-white">65%</td>
-                  <td class="px-4 py-3 text-yellow-400">Reviewing</td>
-                </tr>
-                <tr class="hover:bg-[#282e39]/50 transition-colors">
-                  <td class="px-4 py-3 font-mono text-white">SW-8834-LM</td>
-                  <td class="px-4 py-3 text-slate-400">Infra</td>
-                  <td class="px-4 py-3 text-blue-300">Low</td>
-                  <td class="px-4 py-3 text-gray-300">Auto-scale Nodes</td>
-                  <td class="px-4 py-3 text-white">99%</td>
-                  <td class="px-4 py-3 text-emerald-400">Completed</td>
-                </tr>
-              </tbody>
-            </table>
+      <!-- Decisions Grid/List -->
+      <div class="max-w-7xl">
+        <!-- Cards Grid -->
+        <div id="decisions-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pb-12">
+          <!-- Loader -->
+          <div class="col-span-3 text-center py-12">
+            <div class="inline-block">
+              <div class="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div>
+            </div>
+            <p class="text-muted text-sm mt-3">Loading decisions from Neo4j...</p>
           </div>
         </div>
+
+        <!-- Empty State -->
+        <div id="empty-state" class="col-span-3 text-center py-16 hidden">
+          <span class="material-symbols-outlined text-5xl text-muted/30 mx-auto block mb-4">inbox</span>
+          <h3 class="text-lg font-semibold text-muted mb-1">No decisions found</h3>
+          <p class="text-sm text-muted/60">Check back soon for new pending decisions</p>
+        </div>
       </div>
-    </main>
-  </body>
+    </div>
+  </main>
+  <!-- Detail Modal -->
+  <div id="detail-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+    <div class="bg-surface rounded-xl border border-border w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl">
+      <!-- Modal Header -->
+      <div class="sticky top-0 border-b border-border bg-surface/95 backdrop-blur px-8 py-6 flex items-start justify-between">
+        <div>
+          <h3 id="modal-title" class="text-2xl font-bold text-white">Decision Details</h3>
+          <p id="modal-id" class="text-sm text-muted font-mono mt-2"></p>
+        </div>
+        <button onclick="closeModal()" class="text-muted hover:text-white transition-colors p-1">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+
+      <!-- Modal Content -->
+      <div class="p-8 space-y-6">
+        <!-- Status & Metadata -->
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <p class="text-xs text-muted uppercase tracking-wide font-semibold mb-2">Status</p>
+            <p id="modal-status" class="text-white font-semibold">—</p>
+          </div>
+          <div>
+            <p class="text-xs text-muted uppercase tracking-wide font-semibold mb-2">Severity</p>
+            <p id="modal-severity" class="text-white font-semibold">—</p>
+          </div>
+          <div>
+            <p class="text-xs text-muted uppercase tracking-wide font-semibold mb-2">Risk Level</p>
+            <p id="modal-risk" class="text-white font-semibold">—</p>
+          </div>
+          <div>
+            <p class="text-xs text-muted uppercase tracking-wide font-semibold mb-2">Created</p>
+            <p id="modal-created" class="text-white font-semibold text-sm font-mono">—</p>
+          </div>
+        </div>
+
+        <!-- Evidence / Summary -->
+        <div>
+          <p class="text-xs text-muted uppercase tracking-wide font-semibold mb-3">Analysis Evidence</p>
+          <div class="bg-surface-light rounded-lg p-4 border border-border">
+            <p id="modal-summary" class="text-sm text-white/80 leading-relaxed font-mono text-xs max-h-48 overflow-y-auto">—</p>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="flex gap-3 pt-4 border-t border-border">
+          <button onclick="closeModal()" class="flex-1 px-4 py-2.5 border border-border rounded-lg text-sm font-medium text-muted hover:text-white hover:bg-surface-light transition-colors">
+            Close
+          </button>
+          <button class="flex-1 px-4 py-2.5 bg-primary text-white rounded-lg text-sm font-semibold hover:bg-primary-dark transition-colors">
+            Approve
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = '/api/decisions'
+    let allDecisions = []
+    let filteredDecisions = []
+
+    function getRiskColor(risk) {
+      const r = String(risk || 'MEDIUM').toUpperCase()
+      if (r.includes('CRITICAL') || r.includes('HIGH')) return 'danger'
+      if (r.includes('MEDIUM')) return 'warning'
+      return 'success'
+    }
+
+    function getRiskBg(risk) {
+      const color = getRiskColor(risk)
+      if (color === 'danger') return 'bg-red-500/10 border-red-500/30'
+      if (color === 'warning') return 'bg-amber-500/10 border-amber-500/30'
+      return 'bg-green-500/10 border-green-500/30'
+    }
+
+    function getRiskText(risk) {
+      const color = getRiskColor(risk)
+      if (color === 'danger') return 'text-red-400'
+      if (color === 'warning') return 'text-amber-400'
+      return 'text-green-400'
+    }
+
+    function formatDate(iso) {
+      try {
+        const d = new Date(iso)
+        return d.toLocaleString('en-US', { 
+          month: 'short', 
+          day: 'numeric', 
+          hour: '2-digit', 
+          minute: '2-digit', 
+          second: '2-digit'
+        })
+      } catch {
+        return iso
+      }
+    }
+
+    function truncate(text, len = 80) {
+      if (!text) return '—'
+      const s = String(text)
+      return s.length > len ? s.substring(0, len) + '…' : s
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/[&<>"']/g, s => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      })[s])
+    }
+
+    function renderCard(d, index) {
+      const card = document.createElement('div')
+      card.className = 'bg-surface border border-border rounded-lg p-6 hover-lift transition-all-soft row-fade'
+      card.style.animationDelay = `${index * 50}ms`
+      
+      const summary = truncate(d.summary, 100)
+      
+      card.innerHTML = `
+        <div class="flex items-start justify-between mb-4">
+          <div class="flex-1">
+            <h3 class="text-sm font-mono text-primary font-semibold">${d.decision_id}</h3>
+            <p class="text-xs text-muted mt-1">${d.service || 'Unknown'}</p>
+          </div>
+          <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
+            d.status === 'APPROVED' ? 'bg-green-500/10 text-green-400' :
+            d.status === 'PROPOSED' ? 'bg-blue-500/10 text-blue-400' :
+            'bg-amber-500/10 text-amber-400'
+          }">
+            ${d.status || 'PENDING'}
+          </span>
+        </div>
+        
+        <p class="text-xs text-white/70 mb-4 line-clamp-2">${escapeHtml(summary)}</p>
+        
+        <div class="flex items-center justify-between pt-4 border-t border-border/30">
+          <div class="flex gap-2">
+            <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-surface-light border border-border text-muted font-mono">
+              ${d.severity || 'LOW'}
+            </span>
+            <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-surface-light border border-border text-muted font-mono">
+              ${d.risk_assessment || 'MEDIUM'}
+            </span>
+          </div>
+          <button onclick="showDetail(${index})" class="text-primary hover:text-cyan-400 text-xs font-semibold transition-colors">
+            VIEW →
+          </button>
+        </div>
+      `
+      
+      return card
+    }
+
+    function renderDecisions(decisions) {
+      const grid = document.getElementById('decisions-grid')
+      const empty = document.getElementById('empty-state')
+      
+      if (!decisions || decisions.length === 0) {
+        grid.innerHTML = ''
+        empty.classList.remove('hidden')
+        return
+      }
+
+      empty.classList.add('hidden')
+      grid.innerHTML = ''
+      
+      decisions.forEach((d, i) => {
+        grid.appendChild(renderCard(d, i))
+      })
+    }
+
+    function showDetail(index) {
+      const d = filteredDecisions[index]
+      if (!d) return
+
+      document.getElementById('modal-title').textContent = 'Decision Analysis'
+      document.getElementById('modal-id').textContent = d.decision_id
+      document.getElementById('modal-status').textContent = d.status || '—'
+      document.getElementById('modal-severity').textContent = d.severity || '—'
+      document.getElementById('modal-risk').textContent = d.risk_assessment || 'MEDIUM'
+      document.getElementById('modal-created').textContent = formatDate(d.created_at)
+      document.getElementById('modal-summary').textContent = escapeHtml(String(d.summary || '—'))
+
+      document.getElementById('detail-modal').classList.remove('hidden')
+    }
+
+    function closeModal() {
+      document.getElementById('detail-modal').classList.add('hidden')
+    }
+
+    function filterDecisions(query) {
+      if (!query.trim()) {
+        filteredDecisions = allDecisions
+      } else {
+        const q = query.toLowerCase()
+        filteredDecisions = allDecisions.filter(d =>
+          (d.decision_id || '').toLowerCase().includes(q) ||
+          (d.service || '').toLowerCase().includes(q) ||
+          (d.status || '').toLowerCase().includes(q)
+        )
+      }
+      renderDecisions(filteredDecisions)
+    }
+
+    async function fetchDecisions() {
+      try {
+        const res = await fetch(API_URL)
+        if (!res.ok) throw new Error('API failed')
+        
+        const data = await res.json()
+        allDecisions = Array.isArray(data) ? data : []
+        filteredDecisions = allDecisions
+        
+        renderDecisions(filteredDecisions)
+      } catch (err) {
+        console.error('Error fetching decisions:', err)
+        const grid = document.getElementById('decisions-grid')
+        grid.innerHTML = `
+          <div class="col-span-3 text-center py-12">
+            <span class="material-symbols-outlined text-5xl text-danger/30 mx-auto block mb-4">error</span>
+            <p class="text-muted text-sm">Failed to load decisions. Check console.</p>
+          </div>
+        `
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      // Initial fetch
+      fetchDecisions()
+
+      // Search
+      const searchInput = document.getElementById('search-input')
+      searchInput.addEventListener('input', (e) => filterDecisions(e.target.value))
+
+      // Refresh button
+      document.getElementById('refresh-btn').addEventListener('click', fetchDecisions)
+
+      // Auto-refresh every 30s
+      setInterval(fetchDecisions, 30000)
+
+      // Close modal on escape
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeModal()
+      })
+
+      // Close modal on outside click
+      document.getElementById('detail-modal').addEventListener('click', (e) => {
+        if (e.target === e.currentTarget) closeModal()
+      })
+    })
+  </script>
+</body>
 </html>

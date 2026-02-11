@@ -161,3 +161,29 @@ async def health_check():
 @app.get("/metrics")
 async def metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+@app.get("/api/decisions")
+async def api_decisions():
+    """Return pending decisions as JSON for the dashboard frontend."""
+    if not repo:
+        return []
+    try:
+        decisions = repo.get_pending_decisions()
+        # Ensure created_at is JSON-serializable (string)
+        processed = []
+        for d in decisions:
+            item = dict(d)
+            ca = item.get('created_at')
+            try:
+                if hasattr(ca, 'isoformat'):
+                    item['created_at'] = ca.isoformat()
+                else:
+                    item['created_at'] = str(ca)
+            except Exception:
+                item['created_at'] = str(ca)
+            processed.append(item)
+        return processed
+    except Exception as e:
+        logger.error(f"Error fetching decisions for API: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch decisions")
