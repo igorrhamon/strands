@@ -24,7 +24,7 @@ class SwarmDecisionController:
         alert: Alert,
         confidence_service: ConfidenceService,
         confidence_policy: ConfidencePolicy,
-        human_hook: Optional[Callable[[Decision], HumanDecision]],
+        human_hook: Optional[Callable[[Decision], Optional[HumanDecision]]],
         run_id: str,
         master_seed: int,
     ) -> Decision:
@@ -80,7 +80,7 @@ class SwarmDecisionController:
     def _request_human_review(
         self,
         decision: Decision,
-        human_hook: Optional[Callable[[Decision], HumanDecision]],
+        human_hook: Optional[Callable[[Decision], Optional[HumanDecision]]],
         confidence_service: ConfidenceService,
         confidence_policy: ConfidencePolicy,
     ) -> Decision:
@@ -88,7 +88,7 @@ class SwarmDecisionController:
         if human_hook:
             human_decision = human_hook(decision)
             decision.human_decision = human_decision
-            if human_decision.action == HumanAction.OVERRIDE:
+            if human_decision and human_decision.action == HumanAction.OVERRIDE:
                 for evidence in decision.supporting_evidence:
                     confidence_service.penalize_for_override(
                         evidence.agent_id,
