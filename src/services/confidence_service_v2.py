@@ -38,8 +38,12 @@ class ConfidenceServiceV2:
     Evolved Confidence Engine for Enterprise Readiness.
     """
     
-    def __init__(self, config_path: str = "/home/ubuntu/strands/config/confidence_weights_v2026_02.yaml", historical_provider: Optional[Any] = None):
-        self.config_path = config_path
+    def __init__(self, config_path: Optional[str] = None, historical_provider: Optional[Any] = None):
+        # Prioritize passed config_path, then ENV, then default
+        self.config_path = config_path or os.getenv(
+            "CONFIDENCE_CONFIG_PATH", 
+            "/home/ubuntu/strands/config/confidence_weights_v2026_02.yaml"
+        )
         self.historical_provider = historical_provider
         self.config = self._load_config()
         self.version = self.config.get("version", "unknown")
