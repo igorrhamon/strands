@@ -1,6 +1,10 @@
 import asyncio
 import random
+import logging
+import uuid
 from typing import List, Dict, Optional, Callable, Any
+from datetime import datetime, timezone
+
 from swarm_intelligence.core.models import (
     SwarmPlan,
     Alert,
@@ -27,6 +31,7 @@ from swarm_intelligence.policy.confidence_policy import (
 )
 from src.deduplication.distributed_deduplicator import DistributedEventDeduplicator, DeduplicationAction
 
+logger = logging.getLogger(__name__)
 
 class SwarmRunCoordinator:
     """
@@ -49,6 +54,9 @@ class SwarmRunCoordinator:
         self.confidence_service = confidence_service
         self.llm_agent_id = llm_agent_id
         self.deduplicator = deduplicator or DistributedEventDeduplicator()
+        
+        # Cache em memória para o Console Operacional (em produção usar Redis/DB)
+        self._execution_history: Dict[str, Dict[str, Any]] = {}
 
     async def aexecute_plan(
         self,
@@ -67,6 +75,22 @@ class SwarmRunCoordinator:
         use_llm_fallback: bool = True,
         llm_fallback_threshold: float = 0.5,
     ) -> (SwarmRun, List[RetryAttempt], List[RetryDecision]):
+        
+        # Registrar início da execução para o console
+        self._execution_history[run_id] = {
+            "run_id": run_id,
+            "status": "RUNNING",
+            "start_time": datetime.now(timezone.utc).isoformat(),
+            "alert_name": alert.data.get("alertname", "Unknown Alert"),
+            "domain": domain.name if hasattr(domain, 'name') else str(domain),
+            "risk_level": alert.data.get("severity", "MEDIUM").upper(),
+            "agents": [],
+            "confidence_breakdown": {},
+            "rag_evidence": [],
+            "retries": [],
+            "raw_data": alert.data
+        }
+
         # 0. Distributed Deduplication Check
         if not replay_mode and self.deduplicator:
             # Generate alert signature for dedup
@@ -87,8 +111,6 @@ class SwarmRunCoordinator:
                     
                     if action == DeduplicationAction.UPDATE_EXISTING:
                         # In a real scenario, we might want to attach this alert to the existing run
-                        # For now, we return a special status or the existing run
-                        # This fulfills the "UPDATE_EXISTING" requirement from ChatGPT
                         pass 
                 finally:
                     self.deduplicator.release_lock(lock_name)
@@ -127,6 +149,11 @@ class SwarmRunCoordinator:
                 new_executions = await self.execution_controller.execute(
                     steps_to_process, replay_mode, replay_results
                 )
+                
+                # Registrar execuções para o console
+                for ex in new_executions:
+                    self._record_agent_step(run_id, ex)
+                
                 all_executions.extend(new_executions)
 
                 retry_eval = await self.retry_controller.evaluate(
@@ -207,6 +234,8 @@ class SwarmRunCoordinator:
             }
             llm_step = SwarmStep(agent_id=self.llm_agent_id, mandatory=True, parameters=llm_input)
             llm_executions = await self.execution_controller.execute([llm_step])
+            for ex in llm_executions:
+                self._record_agent_step(run_id, ex)
             all_executions.extend(llm_executions)
             final_successful_executions.extend([ex for ex in llm_executions if ex and ex.is_successful()])
 
@@ -224,6 +253,17 @@ class SwarmRunCoordinator:
         swarm_run.executions = all_executions
         swarm_run.final_decision = decision
 
+        # Registrar decisão final para o console
+        if run_id in self._execution_history:
+            self._execution_history[run_id]["status"] = "FINISHED"
+            self._execution_history[run_id]["final_decision"] = decision.recommended_action
+            self._execution_history[run_id]["final_confidence"] = decision.confidence_score
+            self._execution_history[run_id]["confidence_breakdown"] = {
+                "base_score": decision.confidence_score,
+                "explanation": decision.evidence_summary,
+                "factors": decision.metadata or {}
+            }
+
         # Register successful execution in deduplicator
         if not replay_mode and self.deduplicator:
             self.deduplicator.register_execution(
@@ -235,3 +275,45 @@ class SwarmRunCoordinator:
             )
 
         return swarm_run, all_retry_attempts, all_retry_decisions
+
+    def _record_agent_step(self, run_id: str, execution: AgentExecution):
+        """Registra um passo de agente no histórico para o console."""
+        if run_id in self._execution_history:
+            status = "SUCCESS" if execution.is_successful() else "FAILED"
+            step = {
+                "name": execution.agent_id,
+                "status": status,
+                "latency": f"{execution.duration_seconds:.2f}s" if hasattr(execution, 'duration_seconds') else "0.0s",
+                "details": f"Agent {execution.agent_id} finished with status {status}"
+            }
+            self._execution_history[run_id]["agents"].append(step)
+
+    # --- API Endpoints para o Console Operacional ---
+
+    def get_run_details(self, run_id: str) -> Optional[Dict]:
+        """Retorna detalhes de uma execução específica."""
+        return self._execution_history.get(run_id)
+
+    def get_run_agents(self, run_id: str) -> List[Dict]:
+        """Retorna a timeline de agentes de uma execução."""
+        run = self._execution_history.get(run_id)
+        return run.get("agents", []) if run else []
+
+    def get_run_confidence(self, run_id: str) -> Dict:
+        """Retorna o breakdown de confiança de uma execução."""
+        run = self._execution_history.get(run_id)
+        return run.get("confidence_breakdown", {}) if run else {}
+
+    def get_run_rag_evidence(self, run_id: str) -> List[Dict]:
+        """Retorna as evidências de RAG de uma execução."""
+        run = self._execution_history.get(run_id)
+        return run.get("rag_evidence", []) if run else []
+
+    def get_run_retries(self, run_id: str) -> List[Dict]:
+        """Retorna o histórico de retries de uma execução."""
+        run = self._execution_history.get(run_id)
+        return run.get("retries", []) if run else []
+
+    def get_all_runs(self) -> List[Dict]:
+        """Retorna lista de todas as execuções recentes."""
+        return list(self._execution_history.values())
