@@ -162,10 +162,10 @@ class Neo4jRepository:
 
     def get_pending_decisions(self) -> list[Dict[str, Any]]:
         """
-        Retrieves all DecisionCandidate nodes with status 'PROPOSED'.
+        Retrieves all DecisionCandidate nodes.
         """
         query = """
-        MATCH (d:DecisionCandidate {status: 'PROPOSED'})
+        MATCH (d:DecisionCandidate)
         OPTIONAL MATCH (a:Alert)-[:HAS_CANDIDATE]->(d)
         RETURN d, a.service as service, a.severity as severity
         ORDER BY d.created_at DESC

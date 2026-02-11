@@ -211,8 +211,8 @@ class Neo4jAdapter:
         MERGE (dec:Decision {id: $decision_id})
         ON CREATE SET dec.summary = $summary, dec.action_proposed = $action_proposed, dec.confidence = $confidence, dec.timestamp = datetime()
 
-        MATCH (run:SwarmRun), (dec:Decision)
-        WHERE run.id = $run_id AND dec.id = $decision_id
+        WITH run, alert, dec
+        MATCH (run:SwarmRun {id: $run_id}), (dec:Decision {id: $decision_id})
         MERGE (run)-[:HAS_FINAL_DECISION]->(dec)
 
         // Compatibility legacy dashboard (src/graph/neo4j_repo.py)
