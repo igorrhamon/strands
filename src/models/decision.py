@@ -67,6 +67,12 @@ class Decision(BaseModel):
         description="Human validation state"
     )
     
+    # Governance & Versioning (Enterprise Readiness)
+    metadata: dict[str, str] = Field(
+        default_factory=dict,
+        description="Version metadata for models and algorithms used"
+    )
+    
     # Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Decision creation time")
     validated_at: datetime | None = Field(None, description="Human validation timestamp")
