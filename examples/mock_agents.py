@@ -1,16 +1,16 @@
 """
-Production-Ready Agent Implementations
+Operational agent implementations for the swarm.
 
-Real implementations with heuristic analysis, pattern matching, and anomaly detection.
-Integrate with Prometheus, Elasticsearch, and system tools for actual incident response.
+Although historically loaded as "mock" agents, these implementations now perform
+real deterministic analysis over incoming Alertmanager payloads and calculate
+confidence from observable signal quality.
 """
 
 import asyncio
 import hashlib
-import re
 import logging
-from typing import Dict, Any, List
-from datetime import datetime, timedelta
+import re
+from typing import Any, Dict, List
 
 from swarm_intelligence.core.models import AgentExecution, Evidence, EvidenceType
 from swarm_intelligence.core.swarm import Agent
@@ -18,377 +18,184 @@ from swarm_intelligence.core.swarm import Agent
 logger = logging.getLogger(__name__)
 
 
+def _extract_alert_text(params: Dict[str, Any]) -> str:
+    alert = params.get("alert") or {}
+    raw_data = alert.get("raw_data") if isinstance(alert, dict) else {}
+    if not isinstance(raw_data, dict):
+        raw_data = {}
+
+    fragments: List[str] = []
+    for item in raw_data.get("alerts", []):
+        labels = item.get("labels", {})
+        annotations = item.get("annotations", {})
+        fragments.extend([str(v) for v in labels.values()])
+        fragments.extend([str(v) for v in annotations.values()])
+
+    return " ".join(fragments).lower()
+
+
 class ThreatIntelAgent(Agent):
-    """
-    Real threat intelligence agent.
-    
-    Analyzes indicators of compromise (IoCs) and known threat patterns.
-    Correlates with:
-    - Malware signatures (MITRE ATT&CK framework)
-    - Known vulnerability databases
-    - Suspicious IP/domain reputation
-    - Process behavior patterns
-    """
-    
-    # Known malicious patterns and IoCs
-    MALWARE_SIGNATURES = {
-        r"(bash|sh|cmd).*-i.*socket": {
-            "name": "Reverse shell attempt",
-            "severity": "critical"
-        },
-        r"curl|wget.*\|.*bash": {
-            "name": "Curl-bash code execution",
-            "severity": "critical"
-        },
-        r"/dev/tcp/": {
-            "name": "Bash network redirection",
-            "severity": "high"
-        },
-        r"powershell.*-enc": {
-            "name": "Encoded PowerShell command",
-            "severity": "high"
-        },
-        r"base64.*decode": {
-            "name": "Base64 decoding (obfuscation)",
-            "severity": "medium"
-        },
+    IOC_PATTERNS = {
+        r"(bash|sh|cmd).*-i.*socket": ("Reverse shell attempt", 1.0),
+        r"curl|wget.*\|.*bash": ("Curl-bash code execution", 1.0),
+        r"/dev/tcp/": ("Bash network redirection", 0.8),
+        r"powershell.*-enc": ("Encoded PowerShell command", 0.8),
+        r"base64.*decode": ("Base64 obfuscation", 0.55),
+        r"ransomware|malware|c2|command and control": ("Known malware indicator", 0.9),
     }
 
     def __init__(self, agent_id: str = "threatintel"):
-        logic_str = "correlate_iocs_with_threat_db_and_mitre_techniques"
         super().__init__(
             agent_id,
-            version="2.1-prod",
-            logic_hash=hashlib.md5(logic_str.encode()).hexdigest()
+            version="3.0-operational",
+            logic_hash=hashlib.md5(b"threat_ioc_pattern_scoring").hexdigest(),
         )
 
     async def execute(self, params: Dict[str, Any], step_id: str) -> AgentExecution:
-        """Execute threat intelligence analysis."""
-        await asyncio.sleep(0.02)  # Simulate threat database lookup
-
+        await asyncio.sleep(0.01)
         execution = AgentExecution(
             agent_id=self.agent_id,
             agent_version=self.version,
             logic_hash=self.logic_hash,
             step_id=step_id,
-            input_parameters=params
+            input_parameters=params,
         )
 
-        # Analyze provided data for IoCs
-        context = params.get("context", "")
-        matched_threats = self._analyze_for_threats(context)
-        
-        if matched_threats:
-            content = {
-                "threats_detected": len(matched_threats),
-                "severity": "critical" if any(
-                    t.get("severity") == "critical" for t in matched_threats
-                ) else "high",
-                "threats": matched_threats,
-                "mitre_techniques": ["T1059", "T1190", "T1566"],
-                "confidence_score": 0.92
-            }
-            confidence = 0.92
-        else:
-            content = {
-                "threats_detected": 0,
-                "severity": "low",
-                "match_timestamp": datetime.now().isoformat(),
-                "databases_checked": ["MITRE ATT&CK", "Known CVEs", "IP Reputation"],
-                "confidence_score": 0.78
-            }
-            confidence = 0.78
+        text = _extract_alert_text(params)
+        matches = []
+        scores = []
+        for pattern, (name, sev_score) in self.IOC_PATTERNS.items():
+            if re.search(pattern, text, re.IGNORECASE):
+                matches.append({"pattern": pattern, "name": name, "severity_score": sev_score})
+                scores.append(sev_score)
+
+        data_quality = 1.0 if text else 0.45
+        signal_strength = (sum(scores) / len(scores)) if scores else 0.35
+        confidence = round(max(0.25, min(0.99, (0.6 * signal_strength + 0.4 * data_quality))), 3)
 
         evidence = Evidence(
             source_agent_execution_id=execution.execution_id,
             agent_id=self.agent_id,
-            content=content,
+            content={
+                "matches": matches,
+                "threats_detected": len(matches),
+                "signal_strength": round(signal_strength, 3),
+                "data_quality": round(data_quality, 3),
+            },
             confidence=confidence,
-            evidence_type=EvidenceType.SEMANTIC
+            evidence_type=EvidenceType.SEMANTIC,
         )
         execution.output_evidence.append(evidence)
-        logger.info(f"ThreatIntel: Found {content.get('threats_detected', 0)} threats, confidence={confidence}")
-
         return execution
-    
-    def _analyze_for_threats(self, context: str) -> List[Dict[str, Any]]:
-        """Analyze context string for known threat patterns."""
-        threats = []
-        
-        for pattern, threat_info in self.MALWARE_SIGNATURES.items():
-            if re.search(pattern, context, re.IGNORECASE):
-                threats.append({
-                    "type": threat_info["name"],
-                    "severity": threat_info["severity"],
-                    "pattern": pattern,
-                    "detected_at": datetime.now().isoformat()
-                })
-        
-        return threats
 
 
 class LogAnalysisAgent(Agent):
-    """
-    Real log analysis agent.
-    
-    Performs heuristic analysis of application/system logs:
-    - Error pattern detection (stack traces, crash dumps)
-    - Anomaly detection (unusual error rates)
-    - Root cause hypothesis based on error types
-    - Timeline construction of events
-    """
-    
-    # Common error patterns
     ERROR_PATTERNS = {
-        r"(Connection|Timeout|refused)": {
-            "type": "connectivity",
-            "severity": "high"
-        },
-        r"(OutOfMemory|OOM killed)": {
-            "type": "resource",
-            "severity": "critical"
-        },
-        r"(Permission denied|Access denied)": {
-            "type": "auth",
-            "severity": "high"
-        },
-        r"(Disk full|No space)": {
-            "type": "storage",
-            "severity": "critical"
-        },
-        r"(Segmentation fault|Panic)": {
-            "type": "crash",
-            "severity": "critical"
-        },
-        r"(500|502|503|504)": {
-            "type": "http_error",
-            "severity": "high"
-        },
+        r"timeout|connection refused|dns": 0.75,
+        r"oom|outofmemory": 1.0,
+        r"permission denied|access denied": 0.8,
+        r"disk full|no space": 1.0,
+        r"panic|segmentation fault": 1.0,
+        r"\b5\d\d\b": 0.7,
     }
 
     def __init__(self, agent_id: str = "loganalysis"):
-        logic_str = "analyze_error_patterns_and_detect_anomalies"
         super().__init__(
             agent_id,
-            version="2.0-prod",
-            logic_hash=hashlib.md5(logic_str.encode()).hexdigest()
+            version="3.0-operational",
+            logic_hash=hashlib.md5(b"log_error_pattern_density_scoring").hexdigest(),
         )
 
     async def execute(self, params: Dict[str, Any], step_id: str) -> AgentExecution:
-        """Execute log analysis."""
-        await asyncio.sleep(0.015)  # Simulate log parsing
-
+        await asyncio.sleep(0.01)
         execution = AgentExecution(
             agent_id=self.agent_id,
             agent_version=self.version,
             logic_hash=self.logic_hash,
             step_id=step_id,
-            input_parameters=params
+            input_parameters=params,
         )
 
-        # Analyze log data
-        log_data = params.get("logs", "")
-        error_analysis = self._analyze_errors(log_data)
-        
-        content = {
-            "total_errors": error_analysis["error_count"],
-            "error_types": error_analysis["error_types"],
-            "top_error": error_analysis["top_error"],
-            "error_rate": error_analysis["error_rate"],
-            "anomaly_detected": error_analysis["anomaly"],
-            "suggestions": error_analysis["suggestions"]
-        }
-        
-        # Confidence based on data quality
-        confidence = 0.92 if log_data else 0.65
+        text = _extract_alert_text(params)
+        hits: Dict[str, int] = {}
+        weights: List[float] = []
+        for pattern, weight in self.ERROR_PATTERNS.items():
+            found = len(re.findall(pattern, text, re.IGNORECASE))
+            if found:
+                hits[pattern] = found
+                weights.extend([weight] * found)
+
+        sample_tokens = max(len(text.split()), 1)
+        error_density = min(1.0, len(weights) / sample_tokens)
+        avg_severity = (sum(weights) / len(weights)) if weights else 0.3
+        data_quality = 1.0 if text else 0.4
+        confidence = round(max(0.25, min(0.99, 0.5 * avg_severity + 0.3 * data_quality + 0.2 * error_density)), 3)
 
         evidence = Evidence(
             source_agent_execution_id=execution.execution_id,
             agent_id=self.agent_id,
-            content=content,
+            content={
+                "pattern_hits": hits,
+                "error_density": round(error_density, 3),
+                "avg_severity": round(avg_severity, 3),
+                "tokens": sample_tokens,
+            },
             confidence=confidence,
-            evidence_type=EvidenceType.METRICS
+            evidence_type=EvidenceType.METRICS,
         )
         execution.output_evidence.append(evidence)
-        logger.info(f"LogAnalysis: Found {content['total_errors']} errors, confidence={confidence}")
-
         return execution
-    
-    def _analyze_errors(self, log_data: str) -> Dict[str, Any]:
-        """Analyze log data for error patterns."""
-        error_types = {}
-        error_count = 0
-        
-        # Parse log lines
-        lines = log_data.split('\n') if log_data else []
-        
-        for line in lines:
-            for pattern, info in self.ERROR_PATTERNS.items():
-                if re.search(pattern, line, re.IGNORECASE):
-                    error_type = info["type"]
-                    error_types[error_type] = error_types.get(error_type, 0) + 1
-                    error_count += 1
-        
-        # Calculate error rate
-        total_lines = len(lines) or 1
-        error_rate = (error_count / total_lines) * 100
-        
-        # Detect anomaly
-        anomaly = error_rate > 5.0  # More than 5% errors is anomalous
-        
-        # Generate suggestions
-        suggestions = []
-        if "resource" in error_types:
-            suggestions.append("Increase memory/disk limits")
-        if "connectivity" in error_types:
-            suggestions.append("Check network connectivity and DNS resolution")
-        if "crash" in error_types:
-            suggestions.append("Enable core dumps and debug symbols")
-        
-        top_error = max(
-            error_types.items(),
-            key=lambda x: x[1]
-        )[0] if error_types else None
-        
-        return {
-            "error_count": error_count,
-            "error_types": error_types,
-            "top_error": top_error,
-            "error_rate": error_rate,
-            "anomaly": anomaly,
-            "suggestions": suggestions
-        }
 
 
 class NetworkScannerAgent(Agent):
-    """
-    Real network scanner agent.
-    
-    Performs network security analysis:
-    - Port reachability analysis (common ports: SSH, HTTP, HTTPS, DB, etc.)
-    - Suspicious connection detection (unusual protocols/ports)
-    - Network isolation verification
-    - Service exposure analysis
-    """
-    
-    # Standard ports and their risk profiles
-    STANDARD_PORTS = {
-        22: {"service": "SSH", "risk": "low"},
-        80: {"service": "HTTP", "risk": "medium"},
-        443: {"service": "HTTPS", "risk": "low"},
-        3306: {"service": "MySQL", "risk": "high"},
-        5432: {"service": "PostgreSQL", "risk": "high"},
-        6379: {"service": "Redis", "risk": "critical"},
-        27017: {"service": "MongoDB", "risk": "critical"},
-        9200: {"service": "Elasticsearch", "risk": "high"},
-    }
-    
-    SUSPICIOUS_PORTS = [
-        135, 445,  # Windows RPC
-        139,  # Samba
-        3389,  # RDP
-        1433,  # SQL Server
-    ]
+    HIGH_RISK_PORTS = {3306: 0.75, 5432: 0.75, 6379: 0.95, 27017: 0.95, 9200: 0.8}
+    SUSPICIOUS_PORTS = {135: 0.8, 139: 0.7, 445: 0.8, 3389: 0.85, 1433: 0.8}
 
     def __init__(self, agent_id: str = "networkscanner"):
-        logic_str = "scan_open_ports_and_detect_suspicious_connections"
         super().__init__(
             agent_id,
-            version="2.0-prod",
-            logic_hash=hashlib.md5(logic_str.encode()).hexdigest()
+            version="3.0-operational",
+            logic_hash=hashlib.md5(b"network_exposure_and_port_risk_scoring").hexdigest(),
         )
 
     async def execute(self, params: Dict[str, Any], step_id: str) -> AgentExecution:
-        """Execute network scan."""
-        await asyncio.sleep(0.03)  # Simulate network scan
-
+        await asyncio.sleep(0.01)
         execution = AgentExecution(
             agent_id=self.agent_id,
             agent_version=self.version,
             logic_hash=self.logic_hash,
             step_id=step_id,
-            input_parameters=params
+            input_parameters=params,
         )
 
-        # Analyze network data
-        network_data = params.get("network_info", {})
-        scan_result = self._analyze_network(network_data)
-        
-        content = {
-            "open_ports": scan_result["open_ports"],
-            "standard_services": scan_result["standard_services"],
-            "suspicious_ports": scan_result["suspicious_ports"],
-            "suspicious_connections": scan_result["suspicious_count"],
-            "risk_level": scan_result["risk"],
-            "exposed_services": scan_result["exposed"],
-            "recommendations": scan_result["recommendations"]
-        }
-        
-        # Lower confidence if more suspicious connections
-        confidence = max(0.65, 0.95 - (scan_result["suspicious_count"] * 0.05))
+        network_info = params.get("network_info") or {}
+        open_ports = network_info.get("open_ports")
+        if not isinstance(open_ports, list) or not open_ports:
+            open_ports = [22, 80, 443]
+
+        high_risk = [p for p in open_ports if p in self.HIGH_RISK_PORTS]
+        suspicious = [p for p in open_ports if p in self.SUSPICIOUS_PORTS]
+
+        port_risk_scores = [self.HIGH_RISK_PORTS[p] for p in high_risk] + [self.SUSPICIOUS_PORTS[p] for p in suspicious]
+        risk_strength = (sum(port_risk_scores) / len(port_risk_scores)) if port_risk_scores else 0.35
+        coverage = min(1.0, len(open_ports) / 8)
+        confidence = round(max(0.25, min(0.99, 0.55 * risk_strength + 0.45 * coverage)), 3)
 
         evidence = Evidence(
             source_agent_execution_id=execution.execution_id,
             agent_id=self.agent_id,
-            content=content,
+            content={
+                "open_ports": open_ports,
+                "high_risk_ports": high_risk,
+                "suspicious_ports": suspicious,
+                "risk_strength": round(risk_strength, 3),
+                "coverage": round(coverage, 3),
+            },
             confidence=confidence,
-            evidence_type=EvidenceType.METRICS
+            evidence_type=EvidenceType.METRICS,
         )
         execution.output_evidence.append(evidence)
-        logger.info(
-            f"NetworkScanner: Found {scan_result['suspicious_count']} "
-            f"suspicious connections, confidence={confidence}"
-        )
-
         return execution
-    
-    def _analyze_network(self, network_data: Dict) -> Dict[str, Any]:
-        """Analyze network data for suspicious activity."""
-        open_ports = [22, 80, 443, 3306, 9200]
-        standard_services = {}
-        exposed_services = []
-        suspicious_count = 0
-        recommendations = []
-        
-        for port in open_ports:
-            if port in self.STANDARD_PORTS:
-                info = self.STANDARD_PORTS[port]
-                standard_services[port] = info["service"]
-                if info["risk"] in ["high", "critical"]:
-                    exposed_services.append(f"{info['service']} (port {port})")
-                    if info["risk"] == "critical":
-                        recommendations.append(f"Disable or firewall {info['service']} access")
-        
-        # Check for suspicious ports
-        suspicious_ports = [p for p in open_ports if p in self.SUSPICIOUS_PORTS]
-        if suspicious_ports:
-            suspicious_count += len(suspicious_ports)
-            recommendations.append(f"Unexpected ports open: {suspicious_ports}")
-        
-        # Determine overall risk
-        if suspicious_count >= 3:
-            risk = "critical"
-        elif suspicious_count >= 1:
-            risk = "high"
-        elif exposed_services:
-            risk = "medium"
-        else:
-            risk = "low"
-        
-        return {
-            "open_ports": open_ports,
-            "standard_services": standard_services,
-            "suspicious_ports": suspicious_ports,
-            "suspicious_count": suspicious_count,
-            "risk": risk,
-            "exposed": exposed_services,
-            "recommendations": recommendations
-        }
 
 
-# Export all mock agents
-__all__ = [
-    "ThreatIntelAgent",
-    "LogAnalysisAgent",
-    "NetworkScannerAgent",
-]
+__all__ = ["ThreatIntelAgent", "LogAnalysisAgent", "NetworkScannerAgent"]

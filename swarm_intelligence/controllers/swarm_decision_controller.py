@@ -49,16 +49,30 @@ class SwarmDecisionController:
                 supporting_evidence=[],
             )
 
-        avg_confidence = sum(ev.confidence for ev in all_evidence) / len(
-            all_evidence
-        )
+        avg_confidence = sum(ev.confidence for ev in all_evidence) / len(all_evidence)
         summary = "; ".join([str(ev.content) for ev in all_evidence])
+
+        llm_hypotheses = []
+        for ev in all_evidence:
+            ev_type = getattr(ev, "evidence_type", None)
+            ev_type_value = getattr(ev_type, "value", str(ev_type)).lower()
+            if ev_type_value == "hypothesis":
+                llm_hypotheses.append(ev)
+
+        if llm_hypotheses:
+            llm_content = llm_hypotheses[-1].content if isinstance(llm_hypotheses[-1].content, dict) else {"recommended_procedure": str(llm_hypotheses[-1].content)}
+            root_cause = llm_content.get("root_cause", "LLM fallback analysis")
+            procedure = llm_content.get("recommended_procedure", "manual_review")
+            return Decision(
+                summary=f"LLM-enriched analysis: {root_cause}; procedimento sugerido: {procedure}; evidence={summary}",
+                action_proposed="human_review_required",
+                confidence=avg_confidence,
+                supporting_evidence=all_evidence,
+            )
 
         return Decision(
             summary=f"Aggregated Evidence: {summary}",
-            action_proposed="auto_remediate"
-            if avg_confidence > 0.8
-            else "log_for_review",
+            action_proposed="auto_remediate" if avg_confidence > 0.8 else "human_review_required",
             confidence=avg_confidence,
             supporting_evidence=all_evidence,
         )

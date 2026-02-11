@@ -89,7 +89,7 @@ class AgentRegistry:
                 agent_id = class_name.lower().replace("agent", "").replace("_", "")
                 self.register(agent_id, agent_class)
                 
-        except ImportError as e:
+        except Exception as e:
             logger.error(f"Failed to load module {module_path}: {e}")
             raise
 
@@ -116,14 +116,14 @@ def create_agent(agent_id: str, **kwargs) -> Agent:
     return get_registry().create(agent_id, **kwargs)
 
 
-def load_mock_agents() -> None:
-    """Load mock agents for testing/development."""
+def load_core_agents() -> None:
+    """Load core operational agents used by the swarm."""
     registry = get_registry()
     registry.load_from_module(
         "examples.mock_agents",
         ["ThreatIntelAgent", "LogAnalysisAgent", "NetworkScannerAgent"]
     )
-    logger.info("Loaded mock agents for development")
+    logger.info("Loaded core operational agents")
 
 
 def load_real_agents() -> None:
@@ -141,6 +141,7 @@ def load_real_agents() -> None:
             MetricsAnalysisAgentAdapter,
             AlertCorrelatorAgentAdapter,
             RecommenderAgentAdapter,
+            LLMResolutionAgentAdapter,
         )
         
         # Register with explicit agent IDs to avoid naming conflicts
@@ -149,14 +150,21 @@ def load_real_agents() -> None:
         registry.register("metricsanalyzer", MetricsAnalysisAgentAdapter)
         registry.register("alertcorrelator", AlertCorrelatorAgentAdapter)
         registry.register("recommender", RecommenderAgentAdapter)
+        registry.register("llm_agent", LLMResolutionAgentAdapter)
         
         logger.info("Loaded real agent adapters for production")
-    except ImportError as e:
-        logger.warning(f"Real agents not available, using mock agents only: {e}")
+    except Exception as e:
+        logger.warning(f"Adapter agents not available, using core agents only: {e}")
 
 
 def load_all_agents() -> None:
-    """Load both mock and real agents."""
-    load_mock_agents()
+    """Load both core operational and adapter agents."""
+    load_core_agents()
     load_real_agents()
-    logger.info("Loaded all agents (mock + real adapters)")
+    logger.info("Loaded all agents (core + adapters)")
+
+
+
+def load_mock_agents() -> None:
+    """Backward-compatible alias."""
+    load_core_agents()

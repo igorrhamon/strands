@@ -68,7 +68,8 @@ services:
     networks:
       - strads_network
     depends_on:
-      - alertmanager
+      alertmanager:
+        condition: service_healthy
     restart: unless-stopped
 
   alertmanager:
@@ -79,11 +80,23 @@ services:
     volumes:
       - ./run/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
       - alertmanager_data:/alertmanager
+    environment:
+      - STRANDS_WEBHOOK_URL=http://strands-agent-orchestrator:8080/api/v1/alerts
     command:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--config.expand-env'
       - '--storage.path=/alertmanager'
     networks:
       - strads_network
+    depends_on:
+      strands-agent-orchestrator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:9093/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   grafana:
@@ -161,10 +174,14 @@ services:
         condition: service_started
       prometheus:
         condition: service_started
-      alertmanager:
-        condition: service_started
       ollama:
         condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     restart: on-failure
     command: ["python3", "main.py"]
 
@@ -201,6 +218,8 @@ services:
         condition: service_started
       prometheus:
         condition: service_started
+      alertmanager:
+        condition: service_healthy
       ollama:
         condition: service_started
     healthcheck:

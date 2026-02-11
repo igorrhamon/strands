@@ -444,3 +444,65 @@ curl -X POST http://localhost:8000/api/alerts \
 **Arquivo**: ENTRY_POINT_ARCHITECTURE.md  
 **Versão**: 1.0  
 **Última atualização**: 2026-02-06
+
+---
+
+## ✅ Atualização: executar `main.py` no Docker para escutar Alertmanager
+
+### Status dos agentes usados por `main.py`
+
+No fluxo de `main.py`, o registry carrega 8 agentes:
+
+- **3 mock**: `threatintel`, `loganalysis`, `networkscanner`
+- **5 adapters reais**: `correlator`, `loginspector`, `metricsanalyzer`, `alertcorrelator`, `recommender`
+
+**Conclusão:** os agentes necessários já estão codificados. Os adapters reais têm fallback para comportamento mock caso import/execução falhe.
+
+### Contrato HTTP do listener
+
+`main.py` sobe um FastAPI em `0.0.0.0:8080` com:
+
+- `POST /api/v1/alerts` (webhook Alertmanager)
+- `GET /api/v1/health` (healthcheck)
+
+O `run/alertmanager/alertmanager.yml` deve apontar para `http://strands-agent-orchestrator:8080/api/v1/alerts`.
+
+### Mudanças necessárias no Dockerfile (já aplicadas)
+
+1. **CMD padrão** para subir o listener:
+   - `CMD ["python", "main.py"]`
+2. **Healthcheck** do container para o endpoint correto:
+   - `curl -f http://localhost:8080/api/v1/health`
+3. **EXPOSE** com porta `8080` incluída.
+
+### Checklist de validação
+
+```bash
+# build
+docker compose build strands-agent-orchestrator
+
+# subir stack mínima
+docker compose up -d neo4j qdrant prometheus alertmanager ollama strands-agent-orchestrator
+
+# health do listener
+curl -s http://localhost:8080/api/v1/health
+
+# teste de webhook
+curl -X POST http://localhost:8080/api/v1/alerts \
+  -H 'Content-Type: application/json' \
+  -d '{"alerts":[{"labels":{"alertname":"HighCPUUsage","instance":"node-1","severity":"critical"}}]}'
+
+# logs
+docker logs -f strands-agent-orchestrator
+```
+
+### Ajustes no `docker-compose` para conexão com Alertmanager
+
+Para garantir entrega dos alertas ao listener dos agentes:
+
+- `alertmanager` agora usa `STRANDS_WEBHOOK_URL` e `--config.expand-env` para injetar o endpoint webhook sem hardcode.
+- `alertmanager` depende do `strands-agent-orchestrator` saudável antes de iniciar envio.
+- `strands-agent-orchestrator` ganhou `healthcheck` em `http://localhost:8080/api/v1/health`.
+- `prometheus` e `strands-dashboard` aguardam `alertmanager` saudável via `depends_on` com `condition: service_healthy`.
+
+Isso reduz corrida de startup e evita perda de notificações no boot inicial da stack.

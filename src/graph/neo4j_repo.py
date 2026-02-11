@@ -142,10 +142,33 @@ class Neo4jRepository:
              timestamp: $validated_at
         })
         MERGE (d)-[:HAS_REVIEW]->(r)
+
+        WITH d, r
+        OPTIONAL MATCH (d)-[:SUGGESTS_PROCEDURE]->(p:Procedure)
+        FOREACH (_ IN CASE WHEN p IS NULL THEN [] ELSE [1] END |
+            SET p.success_count = coalesce(p.success_count, 0) + CASE WHEN $worked THEN 1 ELSE 0 END,
+                p.failure_count = coalesce(p.failure_count, 0) + CASE WHEN $worked THEN 0 ELSE 1 END,
+                p.confidence = CASE
+                    WHEN $worked THEN CASE WHEN coalesce(p.confidence, 0.5) + 0.05 > 0.99 THEN 0.99 ELSE coalesce(p.confidence, 0.5) + 0.05 END
+                    ELSE CASE WHEN coalesce(p.confidence, 0.5) - 0.05 < 0.1 THEN 0.1 ELSE coalesce(p.confidence, 0.5) - 0.05 END
+                END,
+                p.updated_at = datetime()
+            CREATE (pf:ProcedureFeedback {
+                feedback: $feedback,
+                worked: $worked,
+                validated_by: $validated_by,
+                timestamp: $validated_at
+            })
+            MERGE (p)-[:HAS_FEEDBACK]->(pf)
+            MERGE (d)-[:HAS_FEEDBACK]->(pf)
+        )
         """
         
         # Use current time if validation.validated_at is None
         val_time = validation.validated_at or datetime.now(timezone.utc)
+
+        feedback_text = (validation.feedback or "").lower()
+        worked = validation.is_approved and any(k in feedback_text for k in ["funcionou", "resolved", "resolvido", "worked", "sucesso", "success"])
 
         params = {
             "did": str(validation.decision_id),
@@ -154,7 +177,8 @@ class Neo4jRepository:
             "validated_at": val_time.isoformat(),
             "vid": validation.validation_id,
             "is_approved": validation.is_approved,
-            "validated_by": validation.validated_by
+            "validated_by": validation.validated_by,
+            "worked": worked,
         }
         
         with self._driver.session() as session:
