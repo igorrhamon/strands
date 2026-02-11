@@ -63,7 +63,10 @@ else:
 
 
 # Logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger("prometheus-analyzer")
 
 # Configuration
@@ -182,14 +185,14 @@ class PrometheusAnalyzer:
 
             # Models: primary plus optional fallbacks (comma-separated env var)
             primary_model = os.getenv("OLLAMA_MODEL", "ministral-3:3b")
-            fallback_env = os.getenv("OLLAMA_FALLBACK_MODELS", "mistral-nano,mistral-small")
+            fallback_env = os.getenv("OLLAMA_FALLBACK_MODELS", "")
             fallback_models = [m.strip() for m in fallback_env.split(",") if m.strip()]
             models_to_try = [primary_model] + [m for m in fallback_models if m != primary_model]
 
             # Configuráveis via ambiente
             # Increase defaults: more retries and longer timeout to accommodate slow model responses
             retries = int(os.getenv("OLLAMA_RETRIES", "4"))
-            timeout_sec = int(os.getenv("OLLAMA_TIMEOUT", "300"))
+            timeout_sec = int(os.getenv("OLLAMA_TIMEOUT", "3000"))
 
             if aiohttp_mod is None:
                 raise RuntimeError(AIOHTTP_MISSING)
@@ -205,7 +208,7 @@ class PrometheusAnalyzer:
                     "temperature": 0.7,
                 }
 
-                logger.info("Calling LLM", extra={"url": url, "model": model_name})
+                logger.info(f"Calling LLM with model '{model_name}' at {url}")
 
                 last_error = None
                 for attempt in range(1, retries + 1):
@@ -218,12 +221,13 @@ class PrometheusAnalyzer:
                                 except Exception:
                                     body_text = None
                                 last_error = f"http_{resp.status}"
-                                logger.error("LLM request failed", extra={"status": resp.status, "body": body_text, "attempt": attempt, "model": model_name})
+                                logger.error(f"LLM request failed - HTTP {resp.status} (attempt {attempt}/{retries}, model: {model_name})")
                                 break  # don't retry on HTTP error
 
                             # If streaming, consume chunks as they arrive
                             if payload.get("stream"):
                                 accumulated = ""
+                                streaming_error = None
                                 try:
                                     async for chunk in resp.content.iter_chunked(1024):
                                         try:
@@ -235,21 +239,27 @@ class PrometheusAnalyzer:
                                 except asyncio.CancelledError:
                                     raise
                                 except Exception as e:
-                                    logger.warning("Error while streaming LLM response", extra={"error": str(e), "model": model_name})
+                                    streaming_error = str(e)
+                                    logger.warning(f"Error while streaming LLM response: {streaming_error} (accumulated: {len(accumulated)} bytes, model: {model_name})")
 
                                 # Try to parse accumulated JSON if possible, otherwise return raw text
-                                try:
-                                    parsed = json.loads(accumulated)
-                                    raw = parsed
-                                    analysis_text = (
-                                        parsed.get("response")
-                                        or parsed.get("text")
-                                        or parsed.get("output")
-                                        or ("\n".join(c.get("text", "") for c in parsed.get("choices", [])) if parsed.get("choices") else None)
-                                    ) or ""
-                                    return {"status": "success", "analysis": analysis_text, "timestamp": datetime.now().isoformat(), "raw": raw, "model": model_name}
-                                except Exception:
-                                    return {"status": "success", "analysis": accumulated, "timestamp": datetime.now().isoformat(), "model": model_name}
+                                if accumulated:
+                                    try:
+                                        parsed = json.loads(accumulated)
+                                        raw = parsed
+                                        analysis_text = (
+                                            parsed.get("response")
+                                            or parsed.get("text")
+                                            or parsed.get("output")
+                                            or ("\n".join(c.get("text", "") for c in parsed.get("choices", [])) if parsed.get("choices") else None)
+                                        ) or ""
+                                        return {"status": "success", "analysis": analysis_text, "timestamp": datetime.now().isoformat(), "raw": raw, "model": model_name}
+                                    except Exception:
+                                        # Return the accumulated text as-is if JSON parsing fails
+                                        return {"status": "success", "analysis": accumulated, "timestamp": datetime.now().isoformat(), "model": model_name}
+                                else:
+                                    # If nothing was accumulated, log error and try non-streaming fallback
+                                    logger.error(f"No data accumulated during streaming: {streaming_error} (model: {model_name})")
 
                             # Non-streaming fallback (should be rare with stream enabled)
                             body_text = None
@@ -260,7 +270,7 @@ class PrometheusAnalyzer:
                             try:
                                 result = json.loads(body_text) if body_text else {}
                             except Exception:
-                                logger.warning("LLM returned non-JSON response", extra={"body": body_text, "attempt": attempt, "model": model_name})
+                                logger.warning(f"LLM returned non-JSON - attempt {attempt}/{retries} (model: {model_name})")
                                 return {"status": "success", "analysis": body_text or "", "timestamp": datetime.now().isoformat(), "model": model_name}
 
                             analysis_text = ""
@@ -278,21 +288,21 @@ class PrometheusAnalyzer:
 
                     except asyncio.TimeoutError:
                         last_error = "timeout"
-                        logger.warning("Timeout when calling LLM", extra={"attempt": attempt, "timeout_sec": timeout_sec, "model": model_name})
+                        logger.warning(f"Timeout when calling LLM - {timeout_sec}s exceeded (attempt {attempt}/{retries}, model: {model_name})")
                     except Exception as e:
                         last_error = str(e)
-                        logger.warning("Error when calling LLM", extra={"attempt": attempt, "error": last_error, "model": model_name})
+                        logger.warning(f"Error when calling LLM - {last_error} (attempt {attempt}/{retries}, model: {model_name})")
 
                     if attempt < retries:
                         backoff = 2 ** (attempt - 1)
                         await asyncio.sleep(backoff)
 
                 overall_last_error = last_error
-                logger.info("Model attempt finished", extra={"model": model_name, "last_error": last_error})
+                logger.info(f"Model attempt finished (model: {model_name}, last_error: {last_error})")
                 # try next model if available
 
             # All models and retries exhausted
-            logger.error("All models exhausted for LLM call", extra={"models_tried": models_to_try, "last_error": overall_last_error})
+            logger.error(f"All models exhausted for LLM call - last error: {overall_last_error} (models tried: {models_to_try})")
             return {"status": "error", "error": "ollama_all_models_failed", "detail": overall_last_error, "models_tried": models_to_try}
 
         except Exception:

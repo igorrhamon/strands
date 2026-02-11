@@ -1,4 +1,5 @@
 
+import logging
 from datetime import datetime
 from swarm_intelligence.memory.neo4j_adapter import Neo4jAdapter
 from swarm_intelligence.core.swarm import Agent
@@ -37,6 +38,10 @@ class ConfidenceService:
 
         # Create the snapshot node
         snapshot_id = self.neo4j_adapter.create_confidence_snapshot(agent_id, clamped_value, source_event, sequence_id)
+        
+        if snapshot_id is None:
+            logging.warning(f"Failed to create confidence snapshot for agent {agent_id}, skipping cause linkage")
+            return
 
         # Link it to its cause
         if cause_id and cause_type:

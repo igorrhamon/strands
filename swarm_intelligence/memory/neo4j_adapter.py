@@ -1,6 +1,7 @@
 
 import logging
 import json
+from enum import Enum
 from neo4j import GraphDatabase, Driver
 from typing import Dict, Any, List
 
@@ -12,6 +13,38 @@ from swarm_intelligence.core.models import (
 from swarm_intelligence.core.enums import RiskLevel
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def _convert_enums_to_values(obj: Any) -> Any:
+    """
+    Recursively converts Enum instances, Exception objects, and complex types to primitive values for Neo4j serialization.
+    Neo4j driver only supports primitive types and arrays thereof.
+    Also converts non-string dictionary keys to strings.
+    """
+    if obj is None:
+        return None
+    elif isinstance(obj, bool):  # Must be before int (bool is subclass of int)
+        return obj
+    elif isinstance(obj, (int, float, str)):
+        return obj
+    elif isinstance(obj, Enum):
+        return obj.value
+    elif isinstance(obj, Exception):
+        return str(obj)
+    elif isinstance(obj, dict):
+        return {str(k): _convert_enums_to_values(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [_convert_enums_to_values(item) for item in obj]
+    else:
+        # For any other custom object, try to convert using __dict__
+        try:
+            if hasattr(obj, '__dict__'):
+                return _convert_enums_to_values(obj.__dict__)
+            else:
+                return str(obj)
+        except Exception:
+            return str(obj)
+
+
 
 class Neo4jAdapter:
     """
@@ -27,77 +60,119 @@ class Neo4jAdapter:
         logging.info("Neo4jAdapter connection closed.")
 
     def run_transaction(self, query: str, parameters: Dict[str, Any] = None):
+        if parameters:
+            parameters = _convert_enums_to_values(parameters)
         with self._driver.session() as session:
             session.execute_write(lambda tx: tx.run(query, parameters))
 
     def run_write_transaction(self, query: str, parameters: Dict[str, Any] = None) -> Any:
+        if parameters:
+            parameters = _convert_enums_to_values(parameters)
         with self._driver.session() as session:
             result = session.execute_write(lambda tx: tx.run(query, parameters).single())
         return result
 
     def run_read_transaction(self, query: str, parameters: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+        if parameters:
+            parameters = _convert_enums_to_values(parameters)
         with self._driver.session() as session:
             result = session.execute_read(lambda tx: tx.run(query, parameters).data())
         return result
 
     def fetch_full_run_context(self, run_id: str) -> Dict[str, Any]:
         """Fetches and reconstructs a complete SwarmRun context for deterministic replay."""
-        query = """
-        MATCH (run:SwarmRun {id: $run_id})<-[:TRIGGERED]-(alert:Alert)
-        MATCH (run)-[:BELONGS_TO]->(domain:Domain)
-        MATCH (run)-[:EXECUTED_STEP]->(step)-[:HAD_EXECUTION]->(exec:AgentExecution)-[:EXECUTED_BY]->(agent:Agent)
+        # Fetch core run data
+        run_query = "MATCH (run:SwarmRun {id: $run_id}) RETURN run LIMIT 1"
+        run_data = self.run_read_transaction(run_query, {"run_id": run_id})
+        
+        if not run_data:
+            logging.warning(f"No SwarmRun found with id: {run_id}")
+            return {}
+        
+        run_node = run_data[0]['run']
+        
+        # Fetch alert if it exists
+        alert_query = "MATCH (alert:Alert)-[:TRIGGERED]->(run:SwarmRun {id: $run_id}) RETURN alert LIMIT 1"
+        alert_data = self.run_read_transaction(alert_query, {"run_id": run_id})
+        alert_node = alert_data[0]['alert'] if alert_data else None
+        
+        # Fetch domain if it exists
+        domain_query = "MATCH (run:SwarmRun {id: $run_id})-[:BELONGS_TO]->(domain:Domain) RETURN domain LIMIT 1"
+        domain_data = self.run_read_transaction(domain_query, {"run_id": run_id})
+        domain_node = domain_data[0]['domain'] if domain_data else None
+        
+        # Fetch all executions for this run
+        exec_query = """
+        MATCH (run:SwarmRun {id: $run_id})-[:EXECUTED_STEP]->(step:SwarmStep)-[:HAD_EXECUTION]->(exec:AgentExecution)
+        OPTIONAL MATCH (agent:Agent)-[:EXECUTED]->(exec)
         OPTIONAL MATCH (exec)-[:PRODUCED]->(ev:Evidence)
-        WITH run, domain, alert, step, agent, exec, collect(ev) as evidences
-        WITH run, domain, alert, step, agent, collect({execution: exec, evidences: evidences}) as executions_data
-        WITH run, domain, alert, collect({step: step, agent: agent, executions: executions_data}) as step_data
-        OPTIONAL MATCH (decision:Decision)<-[:INFLUENCED]-(:Evidence)<-[:PRODUCED]-(:AgentExecution)<-[:HAD_EXECUTION]-(:SwarmStep)<-[:EXECUTED_STEP]-(run)
-        RETURN run, domain, alert, step_data, decision LIMIT 1
+        RETURN step, agent, exec, collect(ev) as evidences
+        ORDER BY step.id
         """
-        data = self.run_read_transaction(query, {"run_id": run_id})
-        if not data: return {}
-
-        raw_run = data[0]
+        exec_data = self.run_read_transaction(exec_query, {"run_id": run_id})
+        
+        if not exec_data:
+            logging.warning(f"No executions found for run_id: {run_id}")
+            return {}
+        
+        # Reconstruct plan and executions
+        seen_steps = set()
         reconstructed_steps = []
         reconstructed_results = {}
-        for step_info in raw_run['step_data']:
-            step_node = step_info['step']
-            reconstructed_steps.append(SwarmStep(agent_id=step_info['agent']['id'], step_id=step_node['id']))
-            for exec_info in step_info['executions']:
-                execution_node = exec_info['execution']
-                evidence_list = [Evidence(**ev) for ev in exec_info['evidences']]
-                reconstructed_results[execution_node['id']] = AgentExecution(
-                    execution_id=execution_node['id'],
-                    agent_id=step_info['agent']['id'],
-                    agent_version=execution_node['agent_version'],
-                    logic_hash=execution_node['logic_hash'],
-                    step_id=step_node['id'],
-                    input_parameters={}, # Simplified for this example
-                    output_evidence=evidence_list,
-                    error=execution_node['error']
-                )
-
+        
+        for row in exec_data:
+            step_node = row['step']
+            agent_node = row['agent']
+            exec_node = row['exec']
+            evidences = row['evidences'] or []
+            
+            # Add unique steps to plan
+            if step_node['id'] not in seen_steps:
+                reconstructed_steps.append(SwarmStep(
+                    agent_id=agent_node['id'] if agent_node else step_node['id'],
+                    step_id=step_node['id']
+                ))
+                seen_steps.add(step_node['id'])
+            
+            # Store execution results
+            reconstructed_results[exec_node['id']] = AgentExecution(
+                execution_id=exec_node['id'],
+                agent_id=agent_node['id'] if agent_node else "unknown",
+                agent_version=exec_node.get('agent_version', '1.0'),
+                logic_hash=exec_node.get('logic_hash', ''),
+                step_id=step_node['id'],
+                input_parameters={},
+                output_evidence=[
+                    Evidence(
+                        evidence_id=ev.get('id') or ev.get('evidence_id'),
+                        source_agent_execution_id=ev.get('source_agent_execution_id'),
+                        agent_id=ev.get('agent_id'),
+                        content=ev.get('content'),
+                        confidence=ev.get('confidence', 0.0),
+                        evidence_type=EvidenceType(ev.get('evidence_type', 'hypothesis'))
+                    )
+                    for ev in evidences if isinstance(ev, dict)
+                ],
+                error=exec_node.get('error')
+            )
+        
         reconstructed_plan = SwarmPlan(
-            plan_id=raw_run['run']['id'],
-            objective=raw_run['run']['objective'],
+            plan_id=run_node['id'],
+            objective=run_node.get('objective', 'Replayed execution'),
             steps=reconstructed_steps
         )
-
-        domain_node = raw_run['domain']
-        reconstructed_domain = Domain(
-            id=domain_node['id'],
-            name=domain_node['name'],
-            description=domain_node['description'],
-            risk_level=RiskLevel(domain_node['risk_level'])
-        )
-
+        
         return {
-            "plan": reconstructed_plan,
-            "domain": reconstructed_domain,
-            "alert": Alert(alert_id=raw_run['alert']['id'], data=json.loads(raw_run['alert']['data'])),
-            "results": reconstructed_results,
-            "decision": raw_run['decision'],
-            "master_seed": raw_run['run']['master_seed']
+            'run_id': run_node['id'],
+            'plan': reconstructed_plan,
+            'domain': domain_node,
+            'alert': alert_node,
+            'master_seed': run_node.get('master_seed'),
+            'results': reconstructed_results,
+            'evidence': [],
+            'decision': None
         }
+
 
     def setup_schema(self):
         """Sets up the unique constraints and indexes for the graph."""
@@ -129,11 +204,36 @@ class Neo4jAdapter:
         MERGE (run:SwarmRun {id: $run_id}) ON CREATE SET run.objective = $objective, run.timestamp = datetime(), run.master_seed = $master_seed
         MERGE (alert)-[:TRIGGERED]->(run)
 
+        WITH run, alert
         MATCH (domain:Domain {id: $domain_id})
         MERGE (run)-[:BELONGS_TO]->(domain)
 
         MERGE (dec:Decision {id: $decision_id})
         ON CREATE SET dec.summary = $summary, dec.action_proposed = $action_proposed, dec.confidence = $confidence, dec.timestamp = datetime()
+
+        WITH run, alert, dec
+        MATCH (run:SwarmRun {id: $run_id}), (dec:Decision {id: $decision_id})
+        MERGE (run)-[:HAS_FINAL_DECISION]->(dec)
+
+        // Compatibility legacy dashboard (src/graph/neo4j_repo.py)
+        WITH run, alert, dec
+        MERGE (s:Service {name: coalesce($service_name, "unknown-service")})
+        SET alert.fingerprint = alert.id,
+            alert.timestamp = datetime(),
+            alert.severity = coalesce($severity, "warning"),
+            alert.description = coalesce($description, "Alert from Strands"),
+            alert.source = "ORCHESTRATOR"
+        MERGE (alert)-[:IMPACTS]->(s)
+        
+        MERGE (dc:DecisionCandidate {decision_id: dec.id})
+        ON CREATE SET 
+            dc.summary = dec.summary,
+            dc.status = "PROPOSED",
+            dc.primary_hypothesis = "Swarm Analysis Result",
+            dc.risk = "MEDIUM",
+            dc.automation = "PARTIAL",
+            dc.created_at = datetime()
+        MERGE (alert)-[:HAS_CANDIDATE]->(dc)
 
         WITH run, dec
         UNWIND $steps as step_param
@@ -155,7 +255,7 @@ class Neo4jAdapter:
         MERGE (step)-[:HAD_EXECUTION]->(exec)
         MERGE (agent)-[:EXECUTED]->(exec)
 
-        WITH dec, exec, exec_param.evidence as evidences_param
+        WITH run, dec, exec, exec_param.evidence as evidences_param
         UNWIND evidences_param as ev_param
         CREATE (ev:Evidence {
             id: ev_param.evidence_id,
@@ -165,7 +265,7 @@ class Neo4jAdapter:
         })
         MERGE (exec)-[:PRODUCED]->(ev)
 
-        WITH dec
+        WITH run, dec
         UNWIND $influencing_evidence as ev_id
         MATCH (evidence:Evidence {id: ev_id})
         MERGE (evidence)-[:INFLUENCED {weight: 1.0}]->(dec)
@@ -174,15 +274,14 @@ class Neo4jAdapter:
         UNWIND $retries as retry_param
         MATCH (step:SwarmStep {id: retry_param.step_id})
         MATCH (failed_exec:AgentExecution {id: retry_param.failed_execution_id})
-        CREATE (ra:RetryAttempt {
-            id: retry_param.attempt_id,
-            attempt_number: retry_param.attempt_number,
-            delay_seconds: retry_param.delay_seconds,
-            reason: retry_param.reason,
-            timestamp: datetime()
-        })
-        CREATE (step)-[:RETRIED_WITH]->(ra)
-        CREATE (ra)-[:FAILED_EXECUTION]->(failed_exec)
+        MERGE (ra:RetryAttempt {id: retry_param.attempt_id})
+        ON CREATE SET 
+            ra.attempt_number = retry_param.attempt_number,
+            ra.delay_seconds = retry_param.delay_seconds,
+            ra.reason = retry_param.reason,
+            ra.timestamp = datetime()
+        MERGE (step)-[:RETRIED_WITH]->(ra)
+        MERGE (ra)-[:FAILED_EXECUTION]->(failed_exec)
 
         WITH run
         UNWIND $retry_decisions as rd_param
@@ -208,9 +307,28 @@ class Neo4jAdapter:
                 "agent_version": ex.agent_version,
                 "logic_hash": ex.logic_hash,
                 "error": ex.error,
-                "evidence": [e.__dict__ for e in ex.output_evidence]
+                "evidence": [{
+                    "evidence_id": e.evidence_id,
+                    "content": json.dumps(_convert_enums_to_values(e.content)) if isinstance(e.content, dict) else str(e.content),
+                    "confidence": e.confidence,
+                    "evidence_type": e.evidence_type.value if isinstance(e.evidence_type, Enum) else e.evidence_type
+                } for e in ex.output_evidence]
             } for ex in swarm_run.executions if ex.step_id == s.step_id]
         } for s in swarm_run.plan.steps]
+
+        # Extract metadata for legacy dashboard
+        alert_dict = alert.data if isinstance(alert.data, dict) else {}
+        if isinstance(alert.data, str):
+            try:
+                alert_dict = json.loads(alert.data)
+            except:
+                alert_dict = {}
+        
+        # Determine service name and severity from AlertManager format if present
+        first_alert = alert_dict.get("alerts", [{}])[0] if "alerts" in alert_dict else {}
+        service_name = first_alert.get("labels", {}).get("instance") or first_alert.get("labels", {}).get("alertname")
+        severity = first_alert.get("labels", {}).get("severity")
+        description = first_alert.get("annotations", {}).get("description") or alert_dict.get("alertname")
 
         params = {
             "alert_id": alert.alert_id, "alert_data": json.dumps(alert.data),
@@ -219,6 +337,7 @@ class Neo4jAdapter:
             "domain_id": swarm_run.domain.id,
             "decision_id": swarm_run.final_decision.decision_id, "summary": swarm_run.final_decision.summary,
             "action_proposed": swarm_run.final_decision.action_proposed, "confidence": swarm_run.final_decision.confidence,
+            "service_name": service_name, "severity": severity, "description": description,
             "steps": steps_params,
             "influencing_evidence": [ev.evidence_id for ev in swarm_run.final_decision.supporting_evidence],
             "retries": [r.__dict__ for r in retry_attempts],
@@ -233,6 +352,13 @@ class Neo4jAdapter:
         CREATE (hd:HumanDecision {id: $hd_id, author: $author, reason: $reason, timestamp: datetime()})
         CREATE (d)-[:OVERRULED]->(hd)
 
+        // Compatibility legacy dashboard (src/graph/neo4j_repo.py)
+        WITH d, hd
+        OPTIONAL MATCH (dc:DecisionCandidate {decision_id: $decision_id})
+        SET dc.status = CASE WHEN $status = 'success' THEN 'APPROVED' ELSE 'REJECTED' END,
+            dc.validated_at = datetime(),
+            dc.feedback = $reason
+        
         CREATE (o:OperationalOutcome {id: $outcome_id, status: $status, timestamp: datetime()})
         CREATE (hd)-[:LED_TO]->(o)
 
@@ -352,6 +478,9 @@ class Neo4jAdapter:
             "source_event": source_event,
             "sequence_id": sequence_id
         })
+        if result is None:
+            logging.error(f"Failed to create confidence snapshot for agent {agent_id}")
+            return None
         return result["snapshot_id"]
 
     def link_snapshot_to_cause(self, snapshot_id: str, cause_id: str, cause_type: str):

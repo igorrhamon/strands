@@ -35,17 +35,19 @@ RUN useradd -m -u 1000 strands
 COPY --from=builder /root/.local /home/strands/.local
 
 # Copy application code
-# The repository uses a `src/` layout — copy that into the image and
-# add it to PYTHONPATH so imports work without an in-repo `strands/` folder.
 COPY --chown=strands:strands src/ ./src/
+COPY --chown=strands:strands swarm_intelligence/ ./swarm_intelligence/
+COPY --chown=strands:strands semantica/ ./semantica/
 COPY --chown=strands:strands scripts/ ./scripts/
+COPY --chown=strands:strands static/ ./static/
+COPY --chown=strands:strands templates/ ./templates/
 
-# Copy top-level entrypoints expected by docker-compose runtime
-# e.g. `server_fastapi.py` (the compose command runs `uvicorn server_fastapi:app`).
+# Copy top-level entrypoints
 COPY --chown=strands:strands server_fastapi.py ./server_fastapi.py
+COPY --chown=strands:strands main.py ./main.py
 
-# Ensure Python can import modules from /app/src
-ENV PYTHONPATH=/app/src:$PYTHONPATH
+# Ensure Python can import modules from /app/src, /app and other internal packages
+ENV PYTHONPATH=/app:/app/src:/app/semantica:$PYTHONPATH
 
 # Set environment variables
 ENV PATH=/home/strands/.local/bin:$PATH \

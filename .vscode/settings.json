@@ -1,4 +1,5 @@
 {
+    "python.defaultInterpreterPath": "${workspaceFolder}/venv/bin/python",
     "chat.promptFilesRecommendations": {
         "speckit.constitution": true,
         "speckit.specify": true,
@@ -8,7 +9,10 @@
     },
     "chat.tools.terminal.autoApprove": {
         ".specify/scripts/bash/": true,
-        ".specify/scripts/powershell/": true
+        ".specify/scripts/powershell/": true,
+        "/^cd /mnt/c/Documents\\\\ and\\\\ Settings/F4352981/agents/strands && docker-compose down && docker-compose up -d strands-seo-analyzer --build$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
     }
 }
-
