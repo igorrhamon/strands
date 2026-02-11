@@ -38,14 +38,15 @@ COPY --from=builder /root/.local /home/strands/.local
 # The repository uses a `src/` layout — copy that into the image and
 # add it to PYTHONPATH so imports work without an in-repo `strands/` folder.
 COPY --chown=strands:strands src/ ./src/
+COPY --chown=strands:strands swarm_intelligence/ ./swarm_intelligence/
 COPY --chown=strands:strands scripts/ ./scripts/
 
 # Copy top-level entrypoints expected by docker-compose runtime
 # e.g. `server_fastapi.py` (the compose command runs `uvicorn server_fastapi:app`).
 COPY --chown=strands:strands server_fastapi.py ./server_fastapi.py
 
-# Ensure Python can import modules from /app/src
-ENV PYTHONPATH=/app/src:$PYTHONPATH
+# Ensure Python can import modules from /app/src and /app
+ENV PYTHONPATH=/app:/app/src:$PYTHONPATH
 
 # Set environment variables
 ENV PATH=/home/strands/.local/bin:$PATH \

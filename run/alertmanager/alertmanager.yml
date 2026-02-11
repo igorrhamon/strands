@@ -1,0 +1,48 @@
+global:
+  resolve_timeout: 5m
+  slack_api_url: ''
+
+# The root route with all parameters, which are inherited by the child
+# routes if they are not overwritten.
+route:
+  receiver: 'strands-webhook'
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 12h
+  routes:
+    # Send security alerts to Strands
+    - match:
+        severity: critical
+      receiver: 'strands-webhook'
+      group_wait: 5s
+      group_interval: 5s
+      continue: true
+    
+    # Send infrastructure alerts to Strands
+    - match:
+        alert_type: infrastructure
+      receiver: 'strands-webhook'
+      group_wait: 10s
+      group_interval: 10s
+      continue: true
+    
+    # Default: send to Strands
+    - receiver: 'strands-webhook'
+
+receivers:
+  - name: 'strands-webhook'
+    webhook_configs:
+      - url: 'http://strands-agent-orchestrator:8080/api/v1/alerts'
+        send_resolved: true
+        # Retry configuration
+        http_sd_configs: []
+
+inhibit_rules:
+  # Don't send out firing alerts if the alerts for this service are already
+  # in resolved state.
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance', 'service']

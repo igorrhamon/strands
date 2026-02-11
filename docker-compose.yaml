@@ -31,7 +31,7 @@ services:
       - neo4j_import:/var/lib/neo4j/import
       - neo4j_plugins:/plugins
     environment:
-      - NEO4J_AUTH=neo4j/strads123
+      - NEO4J_AUTH=${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD}
       - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
       - NEO4J_dbms_memory_pagecache_size=512M
       - NEO4J_dbms_memory_heap_initial__size=512M
@@ -41,7 +41,7 @@ services:
     networks:
       - strads_network
     healthcheck:
-      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "strads123", "RETURN 1"]
+      test: ["CMD", "cypher-shell", "-u", "${NEO4J_USERNAME:-neo4j}", "-p", "${NEO4J_PASSWORD}", "RETURN 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -62,8 +62,26 @@ services:
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
       - '--web.enable-lifecycle'
+      - '--alertmanager.url=http://alertmanager-strads:9093'
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - strads_network
+    depends_on:
+      - alertmanager
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: alertmanager-strads
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./run/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
     networks:
       - strads_network
     restart: unless-stopped
@@ -76,8 +94,8 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=strads_grafana
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
     networks:
       - strads_network
     depends_on:
@@ -110,6 +128,45 @@ services:
       - strads_network
     restart: unless-stopped
 
+  strands-agent-orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: strands-agent-orchestrator
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./examples:/app/examples
+      - ./src:/app/src
+      - ./swarm_intelligence:/app/swarm_intelligence
+      - ./main.py:/app/main.py
+    environment:
+      - NEO4J_URI=${NEO4J_URI:-bolt://neo4j-strads:7687}
+      - NEO4J_USERNAME=${NEO4J_USERNAME:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - NEO4J_DATABASE=${NEO4J_DATABASE:-neo4j}
+      - QDRANT_HOST=qdrant-strads
+      - QDRANT_PORT=6333
+      - PROMETHEUS_URL=${PROMETHEUS_URL:-http://prometheus-strads:9090}
+      - OLLAMA_URL=http://ollama:11434
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+    networks:
+      - strads_network
+    depends_on:
+      neo4j:
+        condition: service_started
+      qdrant:
+        condition: service_started
+      prometheus:
+        condition: service_started
+      alertmanager:
+        condition: service_started
+      ollama:
+        condition: service_started
+    restart: on-failure
+    command: ["python3", "main.py"]
+
   strands-dashboard:
     build:
       context: .
@@ -122,23 +179,26 @@ services:
       - ./static:/app/static
       - ./src:/app/src
     environment:
-      - NEO4J_URI=bolt://neo4j-strads:7687
-      - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=strads123
-      - QDRANT_URL=http://qdrant-strads:6333
-      - PROMETHEUS_URL=http://prometheus-strads:9090
+      - NEO4J_URI=${NEO4J_URI:-bolt://neo4j-strads:7687}
+      - NEO4J_USERNAME=${NEO4J_USERNAME:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - NEO4J_DATABASE=${NEO4J_DATABASE:-neo4j}
+      - QDRANT_HOST=qdrant-strads
+      - QDRANT_PORT=6333
+      - PROMETHEUS_URL=${PROMETHEUS_URL:-http://prometheus-strads:9090}
       - OLLAMA_URL=http://ollama:11434
-      - LOG_LEVEL=INFO
+      - API_LOG_LEVEL=${API_LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
     networks:
       - strads_network
     depends_on:
       neo4j:
-        # Neo4j healthcheck can be flaky in this environment; rely on the
-        # container being started instead of a strict healthy status.
         condition: service_started
       qdrant:
         condition: service_started
       prometheus:
+        condition: service_started
+      ollama:
         condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000"]
@@ -151,47 +211,10 @@ services:
       "uvicorn",
       "server_fastapi:app",
       "--host", "0.0.0.0",
-      "--port", "8000",
-      "--reload"
+      "--port", "8000"
     ]
 
-  strands-seo-analyzer:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: strands-seo-analyzer
-    ports:
-      - "8001:8001"
-    volumes:
-      - ./prometheus_analyzer.py:/app/prometheus_analyzer.py
-    environment:
-      - PROMETHEUS_URL=http://prometheus-strads:9090
-      - OLLAMA_URL=http://ollama:11434
-      - LOG_LEVEL=INFO
-      - NEO4J_URI=bolt://localhost:7687
-      - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=strads123
-    networks:
-      - strads_network
-    depends_on:
-      prometheus:
-        condition: service_started
-      ollama:
-        condition: service_started
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 300s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-    restart: unless-stopped
-    command: [
-      "uvicorn",
-      "prometheus_analyzer:app",
-      "--host", "0.0.0.0",
-      "--port", "8001"
-    ]
-
+  
 volumes:
   qdrant_storage:
     driver: local
@@ -205,11 +228,12 @@ volumes:
     driver: local
   prometheus_data:
     driver: local
+  alertmanager_data:
+    driver: local
   grafana_data:
     driver: local
   ollama_data:
     driver: local
-  # strands_app: (unused) - removed to simplify compose
 
 networks:
   strads_network:

@@ -124,7 +124,7 @@ class MetricsAnalysisAgent:
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 # If already in async context, return empty result
-                logger.warning("[MetricsAnalysisAgent] Cannot run async in event loop")
+                logger.debug("[MetricsAnalysisAgent] Skipping async execution in running event loop")
                 from src.models.metrics import TrendClassification
 
                 return MetricsAnalysisResult(
@@ -500,7 +500,7 @@ class MetricsAnalysisAgentSync:
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 # If already in async context, return empty results
-                logger.warning("[MetricsAnalysisAgent] Cannot run async in event loop")
+                logger.debug("[MetricsAnalysisAgent] Skipping async execution in running event loop")
                 return {}
         except RuntimeError:
             pass
