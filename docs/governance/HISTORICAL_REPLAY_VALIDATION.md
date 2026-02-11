@@ -20,13 +20,21 @@ Este documento define a estrutura formal para a Fase de Validação de Replay Hi
 
 ---
 
-## 2️⃣ Dataset Definition
-### 2.1 Critérios de Seleção
+## 2️⃣ Scope & Limitations (Crítico)
+- Este replay **não executa ações reais** em ambiente produtivo.
+- Não avalia o impacto operacional real (ex: tempo de reinício de serviços).
+- Não considera latência de rede ou de integrações externas (APIs de terceiros).
+- Dataset limitado a incidentes que possuem decisão humana explicitamente documentada.
+
+---
+
+## 3️⃣ Dataset Definition
+### 3.1 Critérios de Seleção
 - Apenas incidentes encerrados.
 - Decisão humana documentada disponível.
 - Runbook ou rastro de remediação registrado.
 
-### 2.2 Distribuição
+### 3.2 Distribuição
 | Categoria | Contagem |
 | :--- | :--- |
 | SLA Breach | |
@@ -37,7 +45,7 @@ Este documento define a estrutura formal para a Fase de Validação de Replay Hi
 
 ---
 
-## 3️⃣ Replay Configuration
+## 4️⃣ Replay Configuration
 - **confidence_model_version**: 
 - **weight_matrix_version**: 
 - **embedding_model_version**: 
@@ -49,8 +57,8 @@ Este documento define a estrutura formal para a Fase de Validação de Replay Hi
 
 ---
 
-## 4️⃣ Quantitative Results
-### 4.1 Alinhamento de Decisão
+## 5️⃣ Quantitative Results
+### 5.1 Alinhamento de Decisão
 **Definição**: Alinhamento = % de casos onde `decision_type` do Strands == decisão humana histórica.
 
 | Métrica | Valor |
@@ -60,24 +68,26 @@ Este documento define a estrutura formal para a Fase de Validação de Replay Hi
 | Divergências | |
 | Taxa de alinhamento | |
 
-**Análise de Divergência**:
-- Falsos positivos: 
-- Falsos negativos: 
-- Over-escalations: 
-- Under-escalations: 
-
-### 4.2 Calibração de Confiança
+### 5.2 Calibração de Confiança
 | Faixa de Confiança | Casos | Correção (%) |
 | :--- | :--- | :--- |
 | 0.50–0.69 | | |
 | 0.70–0.84 | | |
 | 0.85–1.00 | | |
 
-**Meta**: Maior confiança → maior taxa de acerto.
+---
+
+## 6️⃣ Unsafe Recommendation Analysis (Segurança)
+| Métrica | Valor |
+| :--- | :--- |
+| Decisões incorretas de alto risco | |
+| Casos críticos que bypassariam revisão | |
+
+> **Regra de Ouro**: Nenhuma decisão incorreta de alto risco pode ser classificada como auto-aprovável pelo sistema.
 
 ---
 
-## 5️⃣ Failure Case Deep Dive
+## 7️⃣ Failure Case Deep Dive
 Para cada divergência significativa:
 - **Case ID**: 
 - **Tipo de Alerta**: 
@@ -86,11 +96,10 @@ Para cada divergência significativa:
 - **Score de Confiança**: 
 - **Causa Raiz da Divergência**: 
 - **Ajuste de Peso Necessário?** (S/N)
-- **Gap de Runbook Identificado?** (S/N)
 
 ---
 
-## 6️⃣ Final Committee Recommendation
+## 8️⃣ Final Committee Recommendation
 - [ ] Prosseguir para piloto limitado (shadow mode)
 - [ ] Requer calibração adicional
 - [ ] Expandir dataset e re-executar validação
@@ -98,9 +107,10 @@ Para cada divergência significativa:
 
 ---
 
-## 📌 Governance Note
+## 📌 Governance & Reprodutibilidade
 Este relatório deve ser arquivado junto com:
-- Snapshot do dataset de replay.
-- Identificadores de versão do modelo.
-- Versão da matriz de pesos.
-- Commit SHA utilizado.
+- **Docker image hash**:
+- **Python version**:
+- **Dependency lockfile hash**:
+- **Replay script version**:
+- **Commit SHA utilizado**:
