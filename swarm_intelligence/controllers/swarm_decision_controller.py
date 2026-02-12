@@ -47,6 +47,7 @@ class SwarmDecisionController:
                 action_proposed="manual_review",
                 confidence=0.0,
                 supporting_evidence=[],
+                metadata={}
             )
 
         avg_confidence = sum(ev.confidence for ev in all_evidence) / len(all_evidence)
@@ -68,6 +69,7 @@ class SwarmDecisionController:
                 action_proposed="human_review_required",
                 confidence=avg_confidence,
                 supporting_evidence=all_evidence,
+                metadata={"llm_enriched": True, "llm_procedure": procedure}
             )
 
         return Decision(
@@ -75,6 +77,7 @@ class SwarmDecisionController:
             action_proposed="auto_remediate" if avg_confidence > 0.8 else "human_review_required",
             confidence=avg_confidence,
             supporting_evidence=all_evidence,
+            metadata={"aggregated": True, "evidence_count": len(all_evidence)}
         )
 
     def _request_human_review(

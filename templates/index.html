@@ -53,7 +53,7 @@
 <body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 overflow-hidden h-screen flex">
 <script>
   // Load incident data from API and populate template dynamically
-  let currentIncident = 'FIN-8821' // Default incident
+  let currentIncident = null // Will be set to first incident from list
   let incidentData = null
   let incidentList = []
   let autoRefreshInterval = null
@@ -67,6 +67,12 @@
       const response = await fetch('/api/incidents')
       if (!response.ok) throw new Error(`API error: ${response.status}`)
       incidentList = await response.json()
+      
+      // Set currentIncident to first incident if list is not empty
+      if (incidentList.length > 0 && !currentIncident) {
+        currentIncident = incidentList[0].id
+      }
+      
       populateIncidentSelector()
     } catch (err) {
       console.error('Failed to load incident list:', err)
@@ -78,10 +84,13 @@
     if (!selector || !incidentList || incidentList.length === 0) return
 
     selector.innerHTML = incidentList
-      .map(inc => `<option value="${inc.decision_id}">${inc.decision_id}: ${inc.summary}</option>`)
+      .map(inc => `<option value="${inc.id}">${inc.id}: ${inc.alert_name}</option>`)
       .join('')
     
-    selector.value = currentIncident
+    if (currentIncident) {
+      selector.value = currentIncident
+    }
+    
     selector.addEventListener('change', (e) => {
       currentIncident = e.target.value
       loadIncidentData() // Reload with new incident
@@ -89,6 +98,11 @@
   }
 
   async function loadIncidentData() {
+    if (!currentIncident) {
+      console.warn('No incident selected')
+      return
+    }
+    
     try {
       const response = await fetch(getApiUrl())
       if (!response.ok) throw new Error(`API error: ${response.status}`)
@@ -100,6 +114,54 @@
     }
   }
 
+  function renderAgentsList() {
+    const container = document.getElementById('agents-container')
+    if (!container || !incidentData || !incidentData.agents) return
+
+    const agents = incidentData.agents
+    if (agents.length === 0) {
+      container.innerHTML = '<p class="text-slate-400 text-sm text-center">Nenhum agente foi executado para este incidente.</p>'
+      return
+    }
+
+    // Color mapping for agents
+    const colorClasses = {
+      'blue': 'bg-blue-500/10 border-blue-500/30 text-blue-400',
+      'cyan': 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400',
+      'red': 'bg-red-500/10 border-red-500/30 text-red-400',
+      'purple': 'bg-purple-500/10 border-purple-500/30 text-purple-400',
+      'yellow': 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400',
+      'green': 'bg-green-500/10 border-green-500/30 text-green-400',
+      'orange': 'bg-orange-500/10 border-orange-500/30 text-orange-400',
+      'amber': 'bg-amber-500/10 border-amber-500/30 text-amber-400',
+    }
+
+    const agentCards = agents.map(agent => `
+      <div class="flex flex-col items-center gap-3 p-4 rounded-lg border border-border-dark bg-surface-dark/50 hover:bg-surface-dark transition-colors group cursor-pointer">
+        <div class="flex items-center justify-center w-12 h-12 rounded-full ${colorClasses[agent.color] || colorClasses['blue']} border border-current/30">
+          <span class="material-symbols-outlined text-[24px]">${agent.icon}</span>
+        </div>
+        <div class="flex flex-col items-center gap-1">
+          <p class="text-white text-sm font-semibold text-center">${agent.name}</p>
+          <span class="text-xs text-slate-500 font-mono uppercase tracking-wider">${agent.key}</span>
+        </div>
+        <div class="flex items-center gap-1 mt-2">
+          <span class="h-2 w-2 rounded-full ${agent.status === 'completed' ? 'bg-emerald-400' : 'bg-yellow-400'}"></span>
+          <span class="text-xs text-slate-400">${agent.status === 'completed' ? 'Concluído' : 'Executando'}</span>
+        </div>
+      </div>
+    `).join('')
+
+    container.innerHTML = `
+      <div class="flex flex-col gap-3">
+        <p class="text-slate-400 text-xs uppercase font-semibold tracking-wider">Agentes Executados</p>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          ${agentCards}
+        </div>
+      </div>
+    `
+  }
+
   function populateDashboard() {
     if (!incidentData) return
 
@@ -107,26 +169,32 @@
     const el = (id) => document.getElementById(id)
 
     const swarmConfEl = el('swarm-confidence')
-    if (swarmConfEl) swarmConfEl.textContent = `${incidentData.swarm_confidence}%`
+    if (swarmConfEl) swarmConfEl.textContent = `${(incidentData.confidence * 100).toFixed(0)}%`
 
     const trendEl = el('swarm-trend')
-    if (trendEl) trendEl.textContent = incidentData.confidence_trend
+    if (trendEl) trendEl.textContent = incidentData.confidence_trend || '+0'
 
     const activeEl = el('active-agents')
-    if (activeEl) activeEl.textContent = incidentData.active_agents
+    if (activeEl) activeEl.textContent = incidentData.execution_count || '0'
 
     const totalEl = el('total-agents')
-    if (totalEl) totalEl.textContent = `/ ${incidentData.total_agents} implantados`
+    if (totalEl) totalEl.textContent = `/ 8 implantados`
 
     const timeEl = el('elapsed-time')
-    if (timeEl) timeEl.textContent = incidentData.elapsed_time_ms + 'ms'
+    if (timeEl) timeEl.textContent = incidentData.elapsed_time_ms || 'N/A'
 
     const costEl = el('estimated-cost')
-    if (costEl) costEl.textContent = incidentData.estimated_cost
+    if (costEl) costEl.textContent = incidentData.estimated_cost || 'N/A'
 
-    // Update incident title
-    const titleEl = document.querySelector('h1.text-white.text-3xl')
-    if (titleEl) titleEl.textContent = incidentData.title
+    // Update incident title and breadcrumb
+    const titleEl = document.getElementById('incident-title')
+    if (titleEl) titleEl.textContent = `Incidente #${incidentData.id}`
+
+    const breadcrumbEl = document.getElementById('breadcrumb-incident')
+    if (breadcrumbEl) breadcrumbEl.textContent = incidentData.id
+
+    // Render agents list
+    renderAgentsList()
 
     console.log('Dashboard updated with incident data:', incidentData)
   }
@@ -147,9 +215,12 @@
 
   // Load data when DOM is ready
   document.addEventListener('DOMContentLoaded', () => {
-    loadIncidentList()
-    loadIncidentData()
-    startAutoRefresh(5000) // Auto-refresh every 5 seconds
+    loadIncidentList().then(() => {
+      if (currentIncident) {
+        loadIncidentData()
+        startAutoRefresh(5000) // Auto-refresh every 5 seconds
+      }
+    })
   })
 </script>
 <aside class="w-64 flex-shrink-0 border-r border-border-dark dark:border-border-dark bg-[#111318] flex flex-col z-20">
@@ -164,7 +235,7 @@
 <div class="px-3 py-2 mb-3">
 <label class="text-xs font-semibold text-slate-400 block mb-2">Selecionar Incidente</label>
 <select id="incident-selector" class="w-full bg-surface-dark border border-border-dark rounded text-slate-100 text-sm px-3 py-2 hover:border-primary/50 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50">
-<option value="FIN-8821">FIN-8821: Carregando...</option>
+<option value="">Carregando alertas...</option>
 </select>
 </div>
 <div class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg cursor-pointer transition-colors">
@@ -223,14 +294,14 @@ JD
 <span>/</span>
 <a class="hover:text-primary transition-colors" href="#">Incidentes</a>
 <span>/</span>
-<span class="text-slate-200 font-medium">FIN-8821</span>
+<span class="text-slate-200 font-medium" id="breadcrumb-incident">Selecionando...</span>
 </div>
 </div>
 <div class="px-8 pb-6 pt-2">
 <div class="flex flex-wrap justify-between items-start gap-4">
 <div class="flex flex-col gap-2">
 <div class="flex items-center gap-3">
-<h1 class="text-white text-3xl font-bold tracking-tight">Incidente #FIN-8821</h1>
+<h1 class="text-white text-3xl font-bold tracking-tight" id="incident-title">Incidente #Selecionando...</h1>
 <span class="px-2.5 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-bold uppercase tracking-wider">
 Executando
 </span>
@@ -286,6 +357,12 @@ Encerrar Execução
 <div class="flex-1 overflow-y-auto bg-background-dark relative p-8">
 <div class="absolute left-8 top-0 bottom-0 w-px bg-border-dark z-0 md:left-1/2 md:-ml-px hidden md:block"></div>
 <div class="max-w-4xl mx-auto flex flex-col gap-10 relative z-10 pb-20">
+
+<!-- Agents Execution Section -->
+<div id="agents-container" class="w-full max-w-2xl mx-auto">
+  <!-- Agent cards will be rendered here by JavaScript -->
+</div>
+
 <div class="relative flex flex-col items-center">
 <div class="flex items-center justify-center w-10 h-10 rounded-full bg-slate-800 border-2 border-slate-600 text-slate-300 mb-4 shadow-lg shadow-black/50 z-10">
 <span class="material-symbols-outlined text-[20px]">input</span>

@@ -84,6 +84,7 @@ class Decision:
     decision_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     human_decision: Optional['HumanDecision'] = None
     context: DecisionContext = field(default_factory=DecisionContext)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass
 class Alert:

@@ -256,11 +256,11 @@ class SwarmRunCoordinator:
         # Registrar decisão final para o console
         if run_id in self._execution_history:
             self._execution_history[run_id]["status"] = "FINISHED"
-            self._execution_history[run_id]["final_decision"] = decision.recommended_action
-            self._execution_history[run_id]["final_confidence"] = decision.confidence_score
+            self._execution_history[run_id]["final_decision"] = decision.action_proposed
+            self._execution_history[run_id]["final_confidence"] = decision.confidence
             self._execution_history[run_id]["confidence_breakdown"] = {
-                "base_score": decision.confidence_score,
-                "explanation": decision.evidence_summary,
+                "base_score": decision.confidence,
+                "explanation": decision.summary,
                 "factors": decision.metadata or {}
             }
 

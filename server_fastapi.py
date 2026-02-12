@@ -192,159 +192,97 @@ async def api_decisions():
 async def get_incident_details(incident_id: str):
     """
     Return detailed execution data for a swarm incident.
-    Maps decision data from Neo4j to timeline/execution format.
+    Returns real data from Neo4j for the given decision ID.
     """
     if not repo:
         raise HTTPException(status_code=503, detail="Repository not available")
     
     try:
-        # Fetch all decisions; use first as "incident" representation
-        decisions = repo.get_pending_decisions()
+        # Get all incidents and find the one matching incident_id
+        # Note: incident_id here is actually the decision_id from DecisionCandidate
+        all_incidents = repo.get_all_incidents()
         
-        if not decisions:
-            raise HTTPException(status_code=404, detail="No decisions found")
+        # Find matching incident by decision_id
+        matching_incident = None
+        for inc in all_incidents:
+            if inc["decision_id"] == incident_id:
+                matching_incident = dict(inc)  # Make a copy
+                break
         
-        # Use first decision as the incident to display
-        primary_decision = decisions[0]
+        if matching_incident is None:
+            # Return basic structure as fallback
+            matching_incident = {
+                "decision_id": incident_id,
+                "summary": f"Unknown Decision {incident_id}",
+                "severity": "unknown",
+                "created_at": "",
+                "status": "PENDING",
+                "execution_count": 0
+            }
         
-        # Calculate swarm confidence from decision risk assessment
-        risk_to_confidence = {
-            "LOW": 0.95,
-            "MEDIUM": 0.85,
-            "HIGH": 0.65,
-            "CRITICAL": 0.45
-        }
-        risk_level = primary_decision.get("risk_assessment", "MEDIUM").upper()
-        swarm_confidence = risk_to_confidence.get(risk_level, 0.75)
+        # Get timeline for this decision (use decision_id, not incident_id)
+        decision_id = matching_incident.get("decision_id", incident_id)
+        timeline_data = repo.get_incident_timeline(decision_id) or {}
         
-        # Create mock agent execution data based on decision
+        # Handle created_at serialization
+        created_at = matching_incident.get('created_at')
+        if hasattr(created_at, 'iso_format'):
+            created_at_str = created_at.iso_format()
+        else:
+            created_at_str = str(created_at)
+        
+        # Ensure all fields from incident are strings or numbers (JSON serializable)
         incident_data = {
-            "incident_id": incident_id,
+            "id": str(incident_id),
+            "alert_name": str(matching_incident.get("summary", ""))[:100],
             "title": f"Incidente #{incident_id}",
-            "status": "Executando",
+            "status": str(matching_incident.get("status", "PENDING")),
             "status_badge_color": "blue-500",
-            "created_at": primary_decision.get("created_at", datetime.now(timezone.utc).isoformat()),
-            "trigger": "Webhook_Alerta_Lavagem_Dinheiro",
-            "trigger_source": "ext_payment_gateway",
+            "created_at": created_at_str,
+            "trigger": str(matching_incident.get("summary", ""))[:100],
+            "trigger_source": str(matching_incident.get("severity", "unknown")),
             
             # Swarm metrics
-            "swarm_confidence": round(swarm_confidence * 100, 1),
-            "confidence_trend": "+2.1",
-            "active_agents": 2,
-            "total_agents": 5,
-            "elapsed_time_ms": random.randint(400, 500),
-            "estimated_cost": f"${random.uniform(0.03, 0.05):.3f}",
+            "confidence": 0.5,  # TODO: Get from decision data
+            "swarm_confidence": 50.0,
+            "confidence_trend": "+0",
+            "active_agents": int(len(timeline_data.get("executions", [])) or 0),
+            "total_agents": 8,
+            "execution_count": int(timeline_data.get("total_executions", 0) or 0),
+            "elapsed_time_ms": "N/A",
+            "estimated_cost": "$0.01",
             
             # Summary from decision
-            "summary": primary_decision.get("summary", "")[:500],
-            "hypothesis": primary_decision.get("primary_hypothesis", "Swarm Analysis Result"),
-            "automation_level": primary_decision.get("automation_level", "PARTIAL"),
+            "summary": str(matching_incident.get("full_summary", ""))[:500],
+            "action_proposed": "manual_review",
+            "automation_level": "PARTIAL",
             
-            # Timeline events (mock based on decision creation)
-            "timeline_events": [
-                {
-                    "id": "event_1",
-                    "title": "Ingestão de Alerta",
-                    "icon": "input",
-                    "color": "orange",
-                    "timestamp": primary_decision.get("created_at"),
-                    "details": {
-                        "trigger": "Flag de Prevenção à Lavagem de Dinheiro (AML)",
-                        "source": "ext_payment_gateway",
-                        "payload_size": "2.4KB"
-                    }
-                },
-                {
-                    "id": "event_2",
-                    "title": "Orquestração de Swarm",
-                    "icon": "hub",
-                    "color": "primary",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "details": {"agents": 2}
-                },
-                {
-                    "id": "event_three",
-                    "title": "Análise de Governança",
-                    "icon": "verified_user",
-                    "color": "green",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "details": {"status": "Em andamento"}
-                }
-            ],
-            
-            # Parallel execution paths
-            "execution_paths": [
-                {
-                    "id": "path_a",
-                    "label": "Caminho A",
-                    "agent_name": "Sanctions Screener",
-                    "agent_icon": "search_check",
-                    "confidence": 98,
-                    "status": "active",
-                    "duration_ms": random.randint(100, 200),
-                    "memory_mb": 128,
-                    "model_version": "v4.2.0-beta",
-                    "checks": ["Checagem_PEP", "Lista_OFAC"],
-                    "input_params": {
-                        "entity_id": "cust_8821",
-                        "check_depth": "deep",
-                        "sources": ["ofac", "eu_sanctions", "un_council"]
-                    },
-                    "output_flags": ["alto_risco", "correspondencia_encontrada"]
-                },
-                {
-                    "id": "path_b",
-                    "label": "Caminho B",
-                    "agent_name": "Histórico de Transações",
-                    "agent_icon": "history",
-                    "confidence": 45,
-                    "status": "pending",
-                    "duration_ms": random.randint(150, 250),
-                    "memory_mb": 96,
-                    "model_version": "v3.9.0-stable",
-                    "checks": ["Retroativo_30d"],
-                    "input_params": {
-                        "lookback_days": 30,
-                        "min_transaction_amount": 10000
-                    },
-                    "output_flags": ["transacoes_suspeitas"]
-                }
-            ],
-            
-            # Artifacts/Evidence
-            "artifacts": [
-                {
-                    "id": "artifact_1",
-                    "name": "Relatorio_SAR_Final.pdf",
-                    "type": "pdf",
-                    "icon": "picture_as_pdf",
-                    "size": "1.4MB",
-                    "description": "Gerado via Template v2",
-                    "color": "red"
-                },
-                {
-                    "id": "artifact_2",
-                    "name": "trilha_auditoria.json",
-                    "type": "json",
-                    "icon": "data_object",
-                    "size": "42KB",
-                    "description": "Grafo de causalidade completo",
-                    "color": "yellow"
-                }
-            ],
-            
-            # Risk assessment from decision
-            "risk_level": risk_level,
-            "severity": primary_decision.get("severity", "warning")
+            # Execution timeline and agents
+            "executions": timeline_data.get("executions", []),
+            "agents": timeline_data.get("agents", []),  # List of agents that executed
+            "severity": str(matching_incident.get("severity", "warning")),
         }
         
         return incident_data
-        
-    except HTTPException:
-        raise
+    
     except Exception as e:
-        logger.error(f"Error fetching incident {incident_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to fetch incident details")
+        logger.error(f"Error fetching incident {incident_id}: {e}", exc_info=True)
+        # Return error response
+        return {
+            "id": incident_id,
+            "alert_name": "Error",
+            "title": f"Erro ao carregar incidente {incident_id}",
+            "status": "ERROR",
+            "status_badge_color": "red-500",
+            "created_at": "",
+            "trigger": str(e),
+            "severity": "critical",
+            "confidence": 0,
+            "swarm_confidence": 0,
+            "execution_count": 0,
+            "executions": [],
+            "action_proposed": "manual_review"
+        }
 
 
 @app.get("/api/incidents")
@@ -358,7 +296,29 @@ async def list_incidents():
     
     try:
         incidents = repo.get_all_incidents()
-        return incidents
+        # Transform the response to use "id" instead of "decision_id" for frontend compatibility
+        # Also serialize DateTime objects
+        transformed_incidents = []
+        for inc in incidents:
+            # Handle Neo4j DateTime object serialization
+            created_at = inc.get('created_at')
+            if hasattr(created_at, 'iso_format'):
+                created_at_str = created_at.iso_format()
+            else:
+                created_at_str = str(created_at)
+            
+            transformed_incidents.append({
+                "id": inc.get("decision_id"),  # Use decision_id as the incident id
+                "alert_name": inc.get("summary", "")[:50] + "...",
+                "severity": inc.get("severity", "unknown"),
+                "created_at": created_at_str,
+                "status": inc.get("status", "PROPOSED"),
+                "action_proposed": "manual_review",
+                "confidence": 0.5,  # TODO: Get from decision
+                "decision_summary": inc.get("full_summary", ""),
+                "execution_count": inc.get("execution_count", 0)
+            })
+        return transformed_incidents
     except Exception as e:
         logger.error(f"Error listing incidents: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch incidents")
