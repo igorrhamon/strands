@@ -30,6 +30,8 @@ from swarm_intelligence.policy.confidence_policy import (
     DefaultConfidencePolicy,
 )
 from src.deduplication.distributed_deduplicator import DistributedEventDeduplicator, DeduplicationAction
+from src.services.metrics_service import MetricsService
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,7 @@ class SwarmRunCoordinator:
         confidence_service: ConfidenceService,
         llm_agent_id: Optional[str] = "llm_agent",
         deduplicator: Optional[DistributedEventDeduplicator] = None,
+        metrics_service: Optional[MetricsService] = None,
     ):
         self.execution_controller = execution_controller
         self.retry_controller = retry_controller
@@ -57,6 +60,7 @@ class SwarmRunCoordinator:
         
         # Cache em memória para o Console Operacional (em produção usar Redis/DB)
         self._execution_history: Dict[str, Dict[str, Any]] = {}
+        self.metrics = metrics_service or MetricsService()
 
     async def aexecute_plan(
         self,
@@ -91,6 +95,7 @@ class SwarmRunCoordinator:
             "raw_data": alert.data
         }
 
+        start_time = time.time()
         # 0. Distributed Deduplication Check
         if not replay_mode and self.deduplicator:
             # Generate alert signature for dedup
@@ -111,7 +116,10 @@ class SwarmRunCoordinator:
                     
                     if action == DeduplicationAction.UPDATE_EXISTING:
                         # In a real scenario, we might want to attach this alert to the existing run
+                        self.metrics.record_dedup("update_existing")
                         pass 
+                    else:
+                        self.metrics.record_dedup("new_execution")
                 finally:
                     self.deduplicator.release_lock(lock_name)
 
@@ -263,6 +271,11 @@ class SwarmRunCoordinator:
                 "explanation": decision.summary,
                 "factors": decision.metadata or {}
             }
+        # Record Metrics
+        duration = time.time() - start_time
+        self.metrics.record_execution(duration, domain.name, alert.data.get("severity", "medium"))
+        if decision:
+            self.metrics.record_decision(decision.confidence, decision.decision_state.value)
 
         # Register successful execution in deduplicator
         if not replay_mode and self.deduplicator:

@@ -76,9 +76,29 @@ class RunbookEmbeddingService:
         except Exception as e:
             logger.error(f"[RUNBOOK_SERVICE] Error ensuring collection: {e}")
 
+    def _parse_sections(self, content: str) -> List[Dict[str, str]]:
+        """
+        Parses Markdown content into sections based on headers.
+        """
+        sections = []
+        current_section = {"title": "General", "content": ""}
+        
+        for line in content.split("\n"):
+            if line.startswith("#"):
+                if current_section["content"].strip():
+                    sections.append(current_section)
+                current_section = {"title": line.strip("# ").strip(), "content": ""}
+            else:
+                current_section["content"] += line + "\n"
+        
+        if current_section["content"].strip():
+            sections.append(current_section)
+            
+        return sections
+
     def index_runbooks(self) -> Dict[str, int]:
         """
-        Scan the runbooks directory and index all Markdown files.
+        Scan the runbooks directory and index all Markdown files with granular sections.
         """
         if not self._model or not self._client:
             return {"indexed": 0, "errors": 1, "message": "Model or Qdrant not available"}
@@ -97,23 +117,28 @@ class RunbookEmbeddingService:
                 content = md_file.read_text(encoding="utf-8")
                 if not content.strip():
                     continue
+                
+                sections = self._parse_sections(content)
+                
+                for i, section in enumerate(sections):
+                    # Granular context: Title + Content
+                    text_to_embed = f"Runbook: {md_file.name} | Section: {section['title']}\n{section['content']}"
                     
-                # Generate a unique ID based on file path
-                file_id = hashlib.md5(str(md_file).encode()).hexdigest()
-                
-                # Generate embedding
-                embedding = self._model.encode(content).tolist()
-                
-                points.append(PointStruct(
-                    id=file_id,
-                    vector=embedding,
-                    payload={
-                        "file_name": md_file.name,
-                        "path": str(md_file),
-                        "content": content[:1000], # Store a snippet
-                        "full_content": content
-                    }
-                ))
+                    # Unique ID for the section
+                    section_id = hashlib.md5(f"{md_file}:{i}".encode()).hexdigest()
+                    embedding = self._model.encode(text_to_embed).tolist()
+                    
+                    points.append(PointStruct(
+                        id=section_id,
+                        vector=embedding,
+                        payload={
+                            "file_name": md_file.name,
+                            "section_title": section["title"],
+                            "path": str(md_file),
+                            "content": section["content"],
+                            "full_context": text_to_embed
+                        }
+                    ))
                 indexed_count += 1
             except Exception as e:
                 logger.error(f"[RUNBOOK_SERVICE] Failed to index {md_file}: {e}")
@@ -121,7 +146,7 @@ class RunbookEmbeddingService:
         if points:
             self._client.upsert(collection_name=self.COLLECTION_NAME, points=points)
             
-        logger.info(f"[RUNBOOK_SERVICE] Indexed {indexed_count} runbooks from {self.runbooks_path}")
+        logger.info(f"[RUNBOOK_SERVICE] Indexed {indexed_count} runbooks (granularly) from {self.runbooks_path}")
         return {"indexed": indexed_count, "total_files": len(files)}
 
     def search_procedures(self, query: str, limit: int = 3) -> List[Dict[str, Any]]:

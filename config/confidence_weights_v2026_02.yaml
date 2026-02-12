@@ -1,0 +1,25 @@
+version: "2026-02"
+description: "Enterprise Standard Weight Matrix for Confidence Engine"
+
+weights:
+  agent_base: 0.4
+  evidence_quality: 0.3
+  historical_accuracy: 0.3
+
+category_multipliers:
+  security: 1.2
+  database: 1.1
+  network: 1.0
+  application: 0.9
+  infrastructure: 0.8
+
+thresholds:
+  low: 0.50
+  medium: 0.70
+  high: 0.85
+  critical: 0.95
+
+models:
+  embedding: "all-MiniLM-L6-v2@2.2.0"
+  confidence_algorithm: "weighted_risk_adjusted_v2"
+  runbook_index: "v1.0"
