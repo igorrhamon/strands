@@ -60,7 +60,7 @@ def expert_human_review(decision: Decision) -> Optional[HumanDecision]:
         # In production this should integrate with an external approval workflow.
         # To keep the coordinator API stable, return a placeholder HumanDecision
         return HumanDecision(
-            action=HumanAction.ACCEPT,
+            action=HumanAction.APPROVE,
             author="external_approver",
             override_reason="external_approval_placeholder",
             overridden_action_proposed="pending"
