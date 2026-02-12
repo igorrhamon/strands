@@ -187,3 +187,197 @@ async def api_decisions():
     except Exception as e:
         logger.error(f"Error fetching decisions for API: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch decisions")
+
+@app.get("/api/incidents/{incident_id}")
+async def get_incident_details(incident_id: str):
+    """
+    Return detailed execution data for a swarm incident.
+    Maps decision data from Neo4j to timeline/execution format.
+    """
+    if not repo:
+        raise HTTPException(status_code=503, detail="Repository not available")
+    
+    try:
+        # Fetch all decisions; use first as "incident" representation
+        decisions = repo.get_pending_decisions()
+        
+        if not decisions:
+            raise HTTPException(status_code=404, detail="No decisions found")
+        
+        # Use first decision as the incident to display
+        primary_decision = decisions[0]
+        
+        # Calculate swarm confidence from decision risk assessment
+        risk_to_confidence = {
+            "LOW": 0.95,
+            "MEDIUM": 0.85,
+            "HIGH": 0.65,
+            "CRITICAL": 0.45
+        }
+        risk_level = primary_decision.get("risk_assessment", "MEDIUM").upper()
+        swarm_confidence = risk_to_confidence.get(risk_level, 0.75)
+        
+        # Create mock agent execution data based on decision
+        incident_data = {
+            "incident_id": incident_id,
+            "title": f"Incidente #{incident_id}",
+            "status": "Executando",
+            "status_badge_color": "blue-500",
+            "created_at": primary_decision.get("created_at", datetime.now(timezone.utc).isoformat()),
+            "trigger": "Webhook_Alerta_Lavagem_Dinheiro",
+            "trigger_source": "ext_payment_gateway",
+            
+            # Swarm metrics
+            "swarm_confidence": round(swarm_confidence * 100, 1),
+            "confidence_trend": "+2.1",
+            "active_agents": 2,
+            "total_agents": 5,
+            "elapsed_time_ms": random.randint(400, 500),
+            "estimated_cost": f"${random.uniform(0.03, 0.05):.3f}",
+            
+            # Summary from decision
+            "summary": primary_decision.get("summary", "")[:500],
+            "hypothesis": primary_decision.get("primary_hypothesis", "Swarm Analysis Result"),
+            "automation_level": primary_decision.get("automation_level", "PARTIAL"),
+            
+            # Timeline events (mock based on decision creation)
+            "timeline_events": [
+                {
+                    "id": "event_1",
+                    "title": "Ingestão de Alerta",
+                    "icon": "input",
+                    "color": "orange",
+                    "timestamp": primary_decision.get("created_at"),
+                    "details": {
+                        "trigger": "Flag de Prevenção à Lavagem de Dinheiro (AML)",
+                        "source": "ext_payment_gateway",
+                        "payload_size": "2.4KB"
+                    }
+                },
+                {
+                    "id": "event_2",
+                    "title": "Orquestração de Swarm",
+                    "icon": "hub",
+                    "color": "primary",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "details": {"agents": 2}
+                },
+                {
+                    "id": "event_three",
+                    "title": "Análise de Governança",
+                    "icon": "verified_user",
+                    "color": "green",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "details": {"status": "Em andamento"}
+                }
+            ],
+            
+            # Parallel execution paths
+            "execution_paths": [
+                {
+                    "id": "path_a",
+                    "label": "Caminho A",
+                    "agent_name": "Sanctions Screener",
+                    "agent_icon": "search_check",
+                    "confidence": 98,
+                    "status": "active",
+                    "duration_ms": random.randint(100, 200),
+                    "memory_mb": 128,
+                    "model_version": "v4.2.0-beta",
+                    "checks": ["Checagem_PEP", "Lista_OFAC"],
+                    "input_params": {
+                        "entity_id": "cust_8821",
+                        "check_depth": "deep",
+                        "sources": ["ofac", "eu_sanctions", "un_council"]
+                    },
+                    "output_flags": ["alto_risco", "correspondencia_encontrada"]
+                },
+                {
+                    "id": "path_b",
+                    "label": "Caminho B",
+                    "agent_name": "Histórico de Transações",
+                    "agent_icon": "history",
+                    "confidence": 45,
+                    "status": "pending",
+                    "duration_ms": random.randint(150, 250),
+                    "memory_mb": 96,
+                    "model_version": "v3.9.0-stable",
+                    "checks": ["Retroativo_30d"],
+                    "input_params": {
+                        "lookback_days": 30,
+                        "min_transaction_amount": 10000
+                    },
+                    "output_flags": ["transacoes_suspeitas"]
+                }
+            ],
+            
+            # Artifacts/Evidence
+            "artifacts": [
+                {
+                    "id": "artifact_1",
+                    "name": "Relatorio_SAR_Final.pdf",
+                    "type": "pdf",
+                    "icon": "picture_as_pdf",
+                    "size": "1.4MB",
+                    "description": "Gerado via Template v2",
+                    "color": "red"
+                },
+                {
+                    "id": "artifact_2",
+                    "name": "trilha_auditoria.json",
+                    "type": "json",
+                    "icon": "data_object",
+                    "size": "42KB",
+                    "description": "Grafo de causalidade completo",
+                    "color": "yellow"
+                }
+            ],
+            
+            # Risk assessment from decision
+            "risk_level": risk_level,
+            "severity": primary_decision.get("severity", "warning")
+        }
+        
+        return incident_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching incident {incident_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch incident details")
+
+
+@app.get("/api/incidents")
+async def list_incidents():
+    """
+    List all incidents (DecisionCandidate nodes) with execution count.
+    Used by frontend incident selector dropdown.
+    """
+    if not repo:
+        raise HTTPException(status_code=503, detail="Repository not available")
+    
+    try:
+        incidents = repo.get_all_incidents()
+        return incidents
+    except Exception as e:
+        logger.error(f"Error listing incidents: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch incidents")
+
+
+@app.get("/api/incidents/{incident_id}/timeline")
+async def get_incident_timeline(incident_id: str):
+    """
+    Get dynamic timeline of agent executions for an incident.
+    Returns AgentExecution nodes linked to the DecisionCandidate.
+    """
+    if not repo:
+        raise HTTPException(status_code=503, detail="Repository not available")
+    
+    try:
+        timeline = repo.get_incident_timeline(incident_id)
+        if timeline["total_executions"] == 0:
+            logger.warning(f"No executions found for incident {incident_id}")
+        return timeline
+    except Exception as e:
+        logger.error(f"Error fetching timeline for incident {incident_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch timeline")

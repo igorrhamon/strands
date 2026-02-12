@@ -50,369 +50,464 @@
   </style>
 </head>
 
-<body class="overflow-hidden h-screen flex bg-background">
-  <!-- Sidebar Navigation -->
-  <aside class="w-24 lg:w-80 border-r border-border bg-surface flex flex-col shrink-0 transition-all duration-300">
-    <!-- Brand -->
-    <div class="p-6 border-b border-border">
-      <div class="flex items-center gap-4">
-        <div class="w-12 h-12 rounded-lg bg-gradient-to-br from-primary to-cyan-500 flex items-center justify-center shrink-0">
-          <span class="material-symbols-outlined text-white text-2xl">hub</span>
-        </div>
-        <div class="hidden lg:flex flex-col">
-          <h1 class="text-lg font-bold text-white tracking-tight">Swarm</h1>
-          <p class="text-xs text-muted font-medium mt-0.5">Cognitive Orchestrator</p>
-        </div>
-      </div>
-    </div>
+<body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 overflow-hidden h-screen flex">
+<script>
+  // Load incident data from API and populate template dynamically
+  let currentIncident = 'FIN-8821' // Default incident
+  let incidentData = null
+  let incidentList = []
+  let autoRefreshInterval = null
 
-    <!-- Navigation -->
-    <nav class="flex-1 flex flex-col gap-2 p-4 overflow-y-auto">
-      <a href="#" class="flex items-center gap-3 px-3 py-3 rounded-lg bg-primary/10 text-primary border border-primary/20 transition-all duration-200">
-        <span class="material-symbols-outlined text-2xl">dashboard</span>
-        <span class="text-sm font-semibold hidden lg:block">Decisions</span>
-      </a>
-      
-      <a href="#" class="flex items-center gap-3 px-3 py-3 rounded-lg text-muted hover:text-white hover:bg-surface-light transition-all duration-200">
-        <span class="material-symbols-outlined text-2xl">timeline</span>
-        <span class="text-sm font-medium hidden lg:block">Analysis</span>
-      </a>
-      
-      <a href="#" class="flex items-center gap-3 px-3 py-3 rounded-lg text-muted hover:text-white hover:bg-surface-light transition-all duration-200">
-        <span class="material-symbols-outlined text-2xl">history</span>
-        <span class="text-sm font-medium hidden lg:block">Audit Log</span>
-      </a>
-      
-      <a href="#" class="flex items-center gap-3 px-3 py-3 rounded-lg text-muted hover:text-white hover:bg-surface-light transition-all duration-200">
-        <span class="material-symbols-outlined text-2xl">settings</span>
-        <span class="text-sm font-medium hidden lg:block">Config</span>
-      </a>
-    </nav>
+  function getApiUrl() {
+    return `/api/incidents/${currentIncident}`
+  }
 
-    <!-- User Profile -->
-    <div class="p-4 border-t border-border">
-      <button class="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-surface-light transition-colors">
-        <div class="w-10 h-10 rounded-full bg-primary/30 flex items-center justify-center text-sm font-bold text-primary shrink-0">AI</div>
-        <div class="hidden lg:block text-left">
-          <p class="text-sm font-medium text-white">Analyst</p>
-          <p class="text-xs text-muted">System View</p>
-        </div>
-      </button>
-    </div>
+  async function loadIncidentList() {
+    try {
+      const response = await fetch('/api/incidents')
+      if (!response.ok) throw new Error(`API error: ${response.status}`)
+      incidentList = await response.json()
+      populateIncidentSelector()
+    } catch (err) {
+      console.error('Failed to load incident list:', err)
+    }
+  }
+
+  function populateIncidentSelector() {
+    const selector = document.getElementById('incident-selector')
+    if (!selector || !incidentList || incidentList.length === 0) return
+
+    selector.innerHTML = incidentList
+      .map(inc => `<option value="${inc.decision_id}">${inc.decision_id}: ${inc.summary}</option>`)
+      .join('')
+    
+    selector.value = currentIncident
+    selector.addEventListener('change', (e) => {
+      currentIncident = e.target.value
+      loadIncidentData() // Reload with new incident
+    })
+  }
+
+  async function loadIncidentData() {
+    try {
+      const response = await fetch(getApiUrl())
+      if (!response.ok) throw new Error(`API error: ${response.status}`)
+      incidentData = await response.json()
+      populateDashboard()
+    } catch (err) {
+      console.error('Failed to load incident data:', err)
+      // Continue with hardcoded defaults on error
+    }
+  }
+
+  function populateDashboard() {
+    if (!incidentData) return
+
+    // Update header metrics
+    const el = (id) => document.getElementById(id)
+
+    const swarmConfEl = el('swarm-confidence')
+    if (swarmConfEl) swarmConfEl.textContent = `${incidentData.swarm_confidence}%`
+
+    const trendEl = el('swarm-trend')
+    if (trendEl) trendEl.textContent = incidentData.confidence_trend
+
+    const activeEl = el('active-agents')
+    if (activeEl) activeEl.textContent = incidentData.active_agents
+
+    const totalEl = el('total-agents')
+    if (totalEl) totalEl.textContent = `/ ${incidentData.total_agents} implantados`
+
+    const timeEl = el('elapsed-time')
+    if (timeEl) timeEl.textContent = incidentData.elapsed_time_ms + 'ms'
+
+    const costEl = el('estimated-cost')
+    if (costEl) costEl.textContent = incidentData.estimated_cost
+
+    // Update incident title
+    const titleEl = document.querySelector('h1.text-white.text-3xl')
+    if (titleEl) titleEl.textContent = incidentData.title
+
+    console.log('Dashboard updated with incident data:', incidentData)
+  }
+
+  function startAutoRefresh(intervalMs = 5000) {
+    if (autoRefreshInterval) clearInterval(autoRefreshInterval)
+    autoRefreshInterval = setInterval(() => {
+      loadIncidentData()
+    }, intervalMs)
+  }
+
+  function stopAutoRefresh() {
+    if (autoRefreshInterval) {
+      clearInterval(autoRefreshInterval)
+      autoRefreshInterval = null
+    }
+  }
+
+  // Load data when DOM is ready
+  document.addEventListener('DOMContentLoaded', () => {
+    loadIncidentList()
+    loadIncidentData()
+    startAutoRefresh(5000) // Auto-refresh every 5 seconds
+  })
+</script>
+<aside class="w-64 flex-shrink-0 border-r border-border-dark dark:border-border-dark bg-[#111318] flex flex-col z-20">
+<div class="flex h-16 items-center px-6 border-b border-border-dark">
+<div class="flex flex-col">
+<h1 class="text-white text-base font-bold tracking-tight">Swarm/Gov</h1>
+<p class="text-slate-400 text-xs font-medium">Orquestrador v2.4</p>
+</div>
+</div>
+<div class="flex-1 overflow-y-auto py-4">
+<nav class="flex flex-col gap-1 px-3">
+<div class="px-3 py-2 mb-3">
+<label class="text-xs font-semibold text-slate-400 block mb-2">Selecionar Incidente</label>
+<select id="incident-selector" class="w-full bg-surface-dark border border-border-dark rounded text-slate-100 text-sm px-3 py-2 hover:border-primary/50 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50">
+<option value="FIN-8821">FIN-8821: Carregando...</option>
+</select>
+</div>
+<div class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg cursor-pointer transition-colors">
+<span class="material-symbols-outlined text-[20px]">dashboard</span>
+<span class="text-sm font-medium">Painel</span>
+</div>
+<div class="flex items-center gap-3 px-3 py-2 bg-primary/20 text-primary rounded-lg cursor-pointer">
+<span class="material-symbols-outlined text-[20px] fill-1">error</span>
+<span class="text-sm font-bold">Incidentes</span>
+</div>
+<div class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg cursor-pointer transition-colors">
+<span class="material-symbols-outlined text-[20px]">memory</span>
+<span class="text-sm font-medium">Agentes Swarm</span>
+</div>
+<div class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg cursor-pointer transition-colors">
+<span class="material-symbols-outlined text-[20px]">verified_user</span>
+<span class="text-sm font-medium">Políticas</span>
+</div>
+<div class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg cursor-pointer transition-colors">
+<span class="material-symbols-outlined text-[20px]">folder_open</span>
+<span class="text-sm font-medium">Artefatos</span>
+</div>
+</nav>
+<div class="mt-8 px-6">
+<p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Sistema</p>
+<div class="flex flex-col gap-1">
+<div class="flex items-center gap-3 px-0 py-2 text-slate-400 hover:text-white cursor-pointer">
+<span class="material-symbols-outlined text-[20px]">settings</span>
+<span class="text-sm font-medium">Configurações</span>
+</div>
+<div class="flex items-center gap-3 px-0 py-2 text-slate-400 hover:text-white cursor-pointer">
+<span class="material-symbols-outlined text-[20px]">history</span>
+<span class="text-sm font-medium">Logs de Auditoria</span>
+</div>
+</div>
+</div>
+</div>
+<div class="p-4 border-t border-border-dark">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-gradient-to-tr from-primary to-blue-400 flex items-center justify-center text-xs font-bold text-white">
+JD
+</div>
+<div class="flex flex-col">
+<p class="text-sm font-medium text-white">Jane Doe</p>
+<p class="text-xs text-slate-500">Líder de Operações</p>
+</div>
+</div>
+</div>
   </aside>
 
-  <!-- Main Content -->
-  <main class="flex-1 flex flex-col overflow-hidden">
-    <!-- Header -->
-    <header class="border-b border-border bg-surface/80 backdrop-blur-xs h-20 flex items-center px-gutter shrink-0">
-      <div class="flex items-center justify-between w-full">
-        <div>
-          <h2 class="text-2xl font-bold text-white">Pending Decisions</h2>
-          <p class="text-xs text-muted mt-1">Real-time swarm analysis queue</p>
-        </div>
-        <div class="flex items-center gap-3">
-          <button id="refresh-btn" class="px-4 py-2.5 bg-surface-light border border-border rounded-lg text-sm font-medium text-white hover:bg-surface-light hover:border-primary transition-all duration-200 flex items-center gap-2">
-            <span class="material-symbols-outlined text-lg">refresh</span>
-            <span class="hidden sm:inline">Refresh</span>
-          </button>
-          <button class="px-4 py-2.5 bg-primary text-white rounded-lg text-sm font-semibold shadow-lg shadow-primary/25 hover:bg-primary-dark transition-all duration-200 flex items-center gap-2">
-            <span class="material-symbols-outlined text-lg">settings</span>
-            <span class="hidden sm:inline">Export</span>
-          </button>
-        </div>
-      </div>
-    </header>
+<main class="flex-1 flex flex-col h-full overflow-hidden relative">
+<header class="bg-[#111318] border-b border-border-dark flex-shrink-0 z-10">
+<div class="px-8 pt-6 pb-2">
+<div class="flex items-center gap-2 text-sm text-slate-500">
+<a class="hover:text-primary transition-colors" href="#">Operações</a>
+<span>/</span>
+<a class="hover:text-primary transition-colors" href="#">Incidentes</a>
+<span>/</span>
+<span class="text-slate-200 font-medium">FIN-8821</span>
+</div>
+</div>
+<div class="px-8 pb-6 pt-2">
+<div class="flex flex-wrap justify-between items-start gap-4">
+<div class="flex flex-col gap-2">
+<div class="flex items-center gap-3">
+<h1 class="text-white text-3xl font-bold tracking-tight">Incidente #FIN-8821</h1>
+<span class="px-2.5 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-bold uppercase tracking-wider">
+Executando
+</span>
+</div>
+<p class="text-slate-400 text-sm font-mono">
+Início: <span class="text-slate-300">2023-10-27 14:02:15 UTC</span> • Gatilho: <span class="text-slate-300">Webhook_Alerta_Lavagem_Dinheiro</span>
+</p>
+</div>
+<div class="flex items-center gap-3">
+<button class="flex items-center justify-center h-9 px-4 rounded bg-surface-dark border border-border-dark text-slate-300 text-sm font-medium hover:bg-border-dark transition-colors">
+<span class="material-symbols-outlined text-[18px] mr-2">bug_report</span>
+Contexto de Debug
+</button>
+<button class="flex items-center justify-center h-9 px-4 rounded bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 text-sm font-bold transition-colors">
+<span class="material-symbols-outlined text-[18px] mr-2">stop_circle</span>
+Encerrar Execução
+</button>
+</div>
+</div>
+</div>
+<div class="px-8 pb-6">
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+<div class="flex flex-col gap-1 p-4 rounded-lg border border-border-dark bg-surface-dark/50">
+<p class="text-slate-400 text-xs uppercase font-semibold tracking-wider">Confiança do Swarm</p>
+<div class="flex items-end gap-2">
+<span id="swarm-confidence" class="text-white text-2xl font-bold font-mono">92.4%</span>
+<span id="swarm-trend" class="text-emerald-400 text-sm font-medium mb-1">+2.1%</span>
+</div>
+</div>
+<div class="flex flex-col gap-1 p-4 rounded-lg border border-border-dark bg-surface-dark/50">
+<p class="text-slate-400 text-xs uppercase font-semibold tracking-wider">Agentes Ativos</p>
+<div class="flex items-end gap-2">
+<span id="active-agents" class="text-white text-2xl font-bold font-mono">2</span>
+<span id="total-agents" class="text-slate-400 text-sm mb-1">/ 5 implantados</span>
+</div>
+</div>
+<div class="flex flex-col gap-1 p-4 rounded-lg border border-border-dark bg-surface-dark/50">
+<p class="text-slate-400 text-xs uppercase font-semibold tracking-wider">Tempo Decorrido</p>
+<div class="flex items-end gap-2">
+<span id="elapsed-time" class="text-white text-2xl font-bold font-mono">450ms</span>
+</div>
+</div>
+<div class="flex flex-col gap-1 p-4 rounded-lg border border-border-dark bg-surface-dark/50">
+<p class="text-slate-400 text-xs uppercase font-semibold tracking-wider">Custo Estimado</p>
+<div class="flex items-end gap-2">
+<span id="estimated-cost" class="text-white text-2xl font-bold font-mono">$0.042</span>
+</div>
+</div>
+</div>
+</div>
+</header>
 
-    <!-- Content Area -->
-    <div class="flex-1 overflow-y-auto p-gutter">
-      <!-- Search/Filter Bar -->
-      <div class="mb-8 max-w-7xl">
-        <div class="relative">
-          <span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-muted text-xl">search</span>
-          <input 
-            id="search-input"
-            type="text" 
-            placeholder="Search decisions by ID, domain, or status..." 
-            class="w-full bg-surface-light border border-border rounded-lg pl-12 pr-4 py-3 text-sm text-white placeholder-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-all"
-          />
-        </div>
-      </div>
+<div class="flex-1 overflow-y-auto bg-background-dark relative p-8">
+<div class="absolute left-8 top-0 bottom-0 w-px bg-border-dark z-0 md:left-1/2 md:-ml-px hidden md:block"></div>
+<div class="max-w-4xl mx-auto flex flex-col gap-10 relative z-10 pb-20">
+<div class="relative flex flex-col items-center">
+<div class="flex items-center justify-center w-10 h-10 rounded-full bg-slate-800 border-2 border-slate-600 text-slate-300 mb-4 shadow-lg shadow-black/50 z-10">
+<span class="material-symbols-outlined text-[20px]">input</span>
+</div>
+<div class="w-full max-w-2xl bg-surface-dark border border-border-dark rounded-lg p-5 shadow-sm hover:border-slate-500 transition-colors group cursor-pointer relative overflow-hidden">
+<div class="absolute top-0 left-0 w-1 h-full bg-orange-500"></div>
+<div class="flex justify-between items-start">
+<div>
+<h3 class="text-white font-semibold text-lg">Ingestão de Alerta</h3>
+<p class="text-slate-400 text-sm mt-1">Gatilho Webhook: <span class="text-orange-400 font-mono">Flag de Prevenção à Lavagem de Dinheiro (AML)</span></p>
+</div>
+<span class="text-xs text-slate-500 font-mono">14:02:15.002</span>
+</div>
+<div class="mt-4 pt-4 border-t border-border-dark flex gap-4 text-xs font-mono text-slate-500">
+<span>Origem: ext_payment_gateway</span>
+<span>ID: <span class="text-slate-300">req_9928a</span></span>
+<span>Payload: 2.4KB</span>
+</div>
+</div>
+</div>
 
-      <!-- Decisions Grid/List -->
-      <div class="max-w-7xl">
-        <!-- Cards Grid -->
-        <div id="decisions-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pb-12">
-          <!-- Loader -->
-          <div class="col-span-3 text-center py-12">
-            <div class="inline-block">
-              <div class="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div>
-            </div>
-            <p class="text-muted text-sm mt-3">Loading decisions from Neo4j...</p>
-          </div>
-        </div>
+<div class="relative flex flex-col items-center">
+<div class="flex items-center justify-center w-10 h-10 rounded-full bg-primary/20 border-2 border-primary text-primary mb-6 shadow-lg shadow-primary/20 z-10">
+<span class="material-symbols-outlined text-[20px]">hub</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 w-full">
+<div class="flex flex-col gap-2 group">
+<div class="flex items-center gap-2 mb-2 px-2">
+<div class="h-px bg-border-dark flex-1"></div>
+<span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Caminho A</span>
+<div class="h-px bg-border-dark flex-1"></div>
+</div>
+<div class="bg-surface-dark border border-primary/40 rounded-lg p-5 shadow-lg relative cursor-pointer hover:bg-slate-800 transition-all">
+<div class="absolute -top-1.5 -right-1.5 flex h-3 w-3">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+<span class="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
+</div>
+<div class="flex justify-between items-start mb-3">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[20px]">search_check</span>
+<h4 class="text-white font-medium">Sanctions Screener</h4>
+</div>
+<span class="text-xs font-mono px-2 py-1 rounded bg-black/40 text-slate-300 border border-border-dark">v.Hash: a1b2...</span>
+</div>
+<div class="space-y-3">
+<div>
+<div class="flex justify-between text-xs mb-1">
+<span class="text-slate-400">Contribuição de Confiança</span>
+<span class="text-primary font-bold">98%</span>
+</div>
+<div class="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+<div class="h-full bg-primary w-[98%] rounded-full"></div>
+</div>
+</div>
+<div class="flex gap-2 text-xs text-slate-400 font-mono">
+<span class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700">Checagem_PEP</span>
+<span class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700">Lista_OFAC</span>
+</div>
+</div>
+</div>
+</div>
+<div class="flex flex-col gap-2 group">
+<div class="flex items-center gap-2 mb-2 px-2">
+<div class="h-px bg-border-dark flex-1"></div>
+<span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Caminho B</span>
+<div class="h-px bg-border-dark flex-1"></div>
+</div>
+<div class="bg-surface-dark border border-border-dark rounded-lg p-5 shadow-sm relative cursor-pointer hover:border-slate-500 transition-colors opacity-90">
+<div class="flex justify-between items-start mb-3">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-amber-500 text-[20px]">history</span>
+<h4 class="text-white font-medium">Histórico de Transações</h4>
+</div>
+<span class="text-xs font-mono px-2 py-1 rounded bg-black/40 text-slate-300 border border-border-dark">v.Hash: c3d4...</span>
+</div>
+<div class="space-y-3">
+<div>
+<div class="flex justify-between text-xs mb-1">
+<span class="text-slate-400">Contribuição de Confiança</span>
+<span class="text-amber-500 font-bold">45%</span>
+</div>
+<div class="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+<div class="h-full bg-amber-500 w-[45%] rounded-full"></div>
+</div>
+</div>
+<div class="flex gap-2 text-xs text-slate-400 font-mono">
+<span class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700">Retroativo_30d</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
 
-        <!-- Empty State -->
-        <div id="empty-state" class="col-span-3 text-center py-16 hidden">
-          <span class="material-symbols-outlined text-5xl text-muted/30 mx-auto block mb-4">inbox</span>
-          <h3 class="text-lg font-semibold text-muted mb-1">No decisions found</h3>
-          <p class="text-sm text-muted/60">Check back soon for new pending decisions</p>
-        </div>
-      </div>
-    </div>
-  </main>
-  <!-- Detail Modal -->
-  <div id="detail-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-    <div class="bg-surface rounded-xl border border-border w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl">
-      <!-- Modal Header -->
-      <div class="sticky top-0 border-b border-border bg-surface/95 backdrop-blur px-8 py-6 flex items-start justify-between">
-        <div>
-          <h3 id="modal-title" class="text-2xl font-bold text-white">Decision Details</h3>
-          <p id="modal-id" class="text-sm text-muted font-mono mt-2"></p>
-        </div>
-        <button onclick="closeModal()" class="text-muted hover:text-white transition-colors p-1">
-          <span class="material-symbols-outlined">close</span>
-        </button>
-      </div>
+<div class="relative flex flex-col items-center">
+<div class="flex items-center justify-center w-8 h-8 rounded-full bg-slate-800 border-2 border-slate-700 text-slate-500 mb-4 z-10">
+<span class="material-symbols-outlined text-[18px]">sync_problem</span>
+</div>
+<div class="w-full max-w-xl bg-[#1a1f2e] border border-dashed border-amber-500/30 rounded-lg p-4 flex gap-4 items-center">
+<div class="flex-shrink-0 w-10 h-10 rounded bg-amber-500/10 flex items-center justify-center text-amber-500">
+<span class="material-symbols-outlined">replay</span>
+</div>
+<div class="flex-1">
+<h4 class="text-slate-200 text-sm font-semibold">Loop de Tentativas de Governança</h4>
+<p class="text-slate-500 text-xs mt-0.5">Agente de Histórico expirou. Tentando novamente com backoff exponencial.</p>
+</div>
+<div class="flex flex-col items-end gap-1">
+<span class="text-[10px] font-bold uppercase tracking-wider text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">Política: Timeout-Backoff</span>
+<span class="text-[10px] text-slate-500 font-mono">Tentativa 1/3</span>
+</div>
+</div>
+</div>
 
-      <!-- Modal Content -->
-      <div class="p-8 space-y-6">
-        <!-- Status & Metadata -->
-        <div class="grid grid-cols-2 gap-4">
-          <div>
-            <p class="text-xs text-muted uppercase tracking-wide font-semibold mb-2">Status</p>
-            <p id="modal-status" class="text-white font-semibold">—</p>
-          </div>
-          <div>
-            <p class="text-xs text-muted uppercase tracking-wide font-semibold mb-2">Severity</p>
-            <p id="modal-severity" class="text-white font-semibold">—</p>
-          </div>
-          <div>
-            <p class="text-xs text-muted uppercase tracking-wide font-semibold mb-2">Risk Level</p>
-            <p id="modal-risk" class="text-white font-semibold">—</p>
-          </div>
-          <div>
-            <p class="text-xs text-muted uppercase tracking-wide font-semibold mb-2">Created</p>
-            <p id="modal-created" class="text-white font-semibold text-sm font-mono">—</p>
-          </div>
-        </div>
-
-        <!-- Evidence / Summary -->
-        <div>
-          <p class="text-xs text-muted uppercase tracking-wide font-semibold mb-3">Analysis Evidence</p>
-          <div class="bg-surface-light rounded-lg p-4 border border-border">
-            <p id="modal-summary" class="text-sm text-white/80 leading-relaxed font-mono text-xs max-h-48 overflow-y-auto">—</p>
-          </div>
-        </div>
-
-        <!-- Actions -->
-        <div class="flex gap-3 pt-4 border-t border-border">
-          <button onclick="closeModal()" class="flex-1 px-4 py-2.5 border border-border rounded-lg text-sm font-medium text-muted hover:text-white hover:bg-surface-light transition-colors">
-            Close
-          </button>
-          <button class="flex-1 px-4 py-2.5 bg-primary text-white rounded-lg text-sm font-semibold hover:bg-primary-dark transition-colors">
-            Approve
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    const API_URL = '/api/decisions'
-    let allDecisions = []
-    let filteredDecisions = []
-
-    function getRiskColor(risk) {
-      const r = String(risk || 'MEDIUM').toUpperCase()
-      if (r.includes('CRITICAL') || r.includes('HIGH')) return 'danger'
-      if (r.includes('MEDIUM')) return 'warning'
-      return 'success'
-    }
-
-    function getRiskBg(risk) {
-      const color = getRiskColor(risk)
-      if (color === 'danger') return 'bg-red-500/10 border-red-500/30'
-      if (color === 'warning') return 'bg-amber-500/10 border-amber-500/30'
-      return 'bg-green-500/10 border-green-500/30'
-    }
-
-    function getRiskText(risk) {
-      const color = getRiskColor(risk)
-      if (color === 'danger') return 'text-red-400'
-      if (color === 'warning') return 'text-amber-400'
-      return 'text-green-400'
-    }
-
-    function formatDate(iso) {
-      try {
-        const d = new Date(iso)
-        return d.toLocaleString('en-US', { 
-          month: 'short', 
-          day: 'numeric', 
-          hour: '2-digit', 
-          minute: '2-digit', 
-          second: '2-digit'
-        })
-      } catch {
-        return iso
-      }
-    }
-
-    function truncate(text, len = 80) {
-      if (!text) return '—'
-      const s = String(text)
-      return s.length > len ? s.substring(0, len) + '…' : s
-    }
-
-    function escapeHtml(str) {
-      return str.replace(/[&<>"']/g, s => ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#39;'
-      })[s])
-    }
-
-    function renderCard(d, index) {
-      const card = document.createElement('div')
-      card.className = 'bg-surface border border-border rounded-lg p-6 hover-lift transition-all-soft row-fade'
-      card.style.animationDelay = `${index * 50}ms`
-      
-      const summary = truncate(d.summary, 100)
-      
-      card.innerHTML = `
-        <div class="flex items-start justify-between mb-4">
-          <div class="flex-1">
-            <h3 class="text-sm font-mono text-primary font-semibold">${d.decision_id}</h3>
-            <p class="text-xs text-muted mt-1">${d.service || 'Unknown'}</p>
-          </div>
-          <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
-            d.status === 'APPROVED' ? 'bg-green-500/10 text-green-400' :
-            d.status === 'PROPOSED' ? 'bg-blue-500/10 text-blue-400' :
-            'bg-amber-500/10 text-amber-400'
-          }">
-            ${d.status || 'PENDING'}
-          </span>
-        </div>
-        
-        <p class="text-xs text-white/70 mb-4 line-clamp-2">${escapeHtml(summary)}</p>
-        
-        <div class="flex items-center justify-between pt-4 border-t border-border/30">
-          <div class="flex gap-2">
-            <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-surface-light border border-border text-muted font-mono">
-              ${d.severity || 'LOW'}
-            </span>
-            <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-surface-light border border-border text-muted font-mono">
-              ${d.risk_assessment || 'MEDIUM'}
-            </span>
-          </div>
-          <button onclick="showDetail(${index})" class="text-primary hover:text-cyan-400 text-xs font-semibold transition-colors">
-            VIEW →
-          </button>
-        </div>
-      `
-      
-      return card
-    }
-
-    function renderDecisions(decisions) {
-      const grid = document.getElementById('decisions-grid')
-      const empty = document.getElementById('empty-state')
-      
-      if (!decisions || decisions.length === 0) {
-        grid.innerHTML = ''
-        empty.classList.remove('hidden')
-        return
-      }
-
-      empty.classList.add('hidden')
-      grid.innerHTML = ''
-      
-      decisions.forEach((d, i) => {
-        grid.appendChild(renderCard(d, i))
-      })
-    }
-
-    function showDetail(index) {
-      const d = filteredDecisions[index]
-      if (!d) return
-
-      document.getElementById('modal-title').textContent = 'Decision Analysis'
-      document.getElementById('modal-id').textContent = d.decision_id
-      document.getElementById('modal-status').textContent = d.status || '—'
-      document.getElementById('modal-severity').textContent = d.severity || '—'
-      document.getElementById('modal-risk').textContent = d.risk_assessment || 'MEDIUM'
-      document.getElementById('modal-created').textContent = formatDate(d.created_at)
-      document.getElementById('modal-summary').textContent = escapeHtml(String(d.summary || '—'))
-
-      document.getElementById('detail-modal').classList.remove('hidden')
-    }
-
-    function closeModal() {
-      document.getElementById('detail-modal').classList.add('hidden')
-    }
-
-    function filterDecisions(query) {
-      if (!query.trim()) {
-        filteredDecisions = allDecisions
-      } else {
-        const q = query.toLowerCase()
-        filteredDecisions = allDecisions.filter(d =>
-          (d.decision_id || '').toLowerCase().includes(q) ||
-          (d.service || '').toLowerCase().includes(q) ||
-          (d.status || '').toLowerCase().includes(q)
-        )
-      }
-      renderDecisions(filteredDecisions)
-    }
-
-    async function fetchDecisions() {
-      try {
-        const res = await fetch(API_URL)
-        if (!res.ok) throw new Error('API failed')
-        
-        const data = await res.json()
-        allDecisions = Array.isArray(data) ? data : []
-        filteredDecisions = allDecisions
-        
-        renderDecisions(filteredDecisions)
-      } catch (err) {
-        console.error('Error fetching decisions:', err)
-        const grid = document.getElementById('decisions-grid')
-        grid.innerHTML = `
-          <div class="col-span-3 text-center py-12">
-            <span class="material-symbols-outlined text-5xl text-danger/30 mx-auto block mb-4">error</span>
-            <p class="text-muted text-sm">Failed to load decisions. Check console.</p>
-          </div>
-        `
-      }
-    }
-
-    document.addEventListener('DOMContentLoaded', () => {
-      // Initial fetch
-      fetchDecisions()
-
-      // Search
-      const searchInput = document.getElementById('search-input')
-      searchInput.addEventListener('input', (e) => filterDecisions(e.target.value))
-
-      // Refresh button
-      document.getElementById('refresh-btn').addEventListener('click', fetchDecisions)
-
-      // Auto-refresh every 30s
-      setInterval(fetchDecisions, 30000)
-
-      // Close modal on escape
-      document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') closeModal()
-      })
-
-      // Close modal on outside click
-      document.getElementById('detail-modal').addEventListener('click', (e) => {
-        if (e.target === e.currentTarget) closeModal()
-      })
-    })
-  </script>
+<div class="relative flex flex-col items-center">
+<div class="flex items-center justify-center w-10 h-10 rounded-full bg-emerald-500/20 border-2 border-emerald-500 text-emerald-500 mb-4 z-10">
+<span class="material-symbols-outlined text-[20px]">description</span>
+</div>
+<div class="w-full max-w-2xl bg-surface-dark border border-emerald-500/30 rounded-lg overflow-hidden">
+<div class="bg-black/30 px-4 py-2 border-b border-border-dark flex justify-between items-center">
+<span class="text-xs font-semibold text-emerald-400 uppercase tracking-wider">Produção de Evidências</span>
+<span class="material-symbols-outlined text-slate-500 text-sm">terminal</span>
+</div>
+<div class="p-4 flex flex-col gap-2">
+<div class="flex items-center gap-3 p-3 rounded bg-[#0f1219] border border-border-dark hover:border-slate-600 transition-colors group cursor-pointer">
+<span class="material-symbols-outlined text-red-400 text-[24px]">picture_as_pdf</span>
+<div class="flex-1">
+<p class="text-sm text-slate-200 font-medium group-hover:text-primary transition-colors">Relatorio_SAR_Final.pdf</p>
+<p class="text-xs text-slate-500 font-mono">1.4MB • Gerado via Template v2</p>
+</div>
+<span class="material-symbols-outlined text-slate-600 group-hover:text-white transition-colors">download</span>
+</div>
+<div class="flex items-center gap-3 p-3 rounded bg-[#0f1219] border border-border-dark hover:border-slate-600 transition-colors group cursor-pointer">
+<span class="material-symbols-outlined text-yellow-400 text-[24px]">data_object</span>
+<div class="flex-1">
+<p class="text-sm text-slate-200 font-medium group-hover:text-primary transition-colors">trilha_auditoria.json</p>
+<p class="text-xs text-slate-500 font-mono">42KB • Grafo de causalidade completo</p>
+</div>
+<span class="material-symbols-outlined text-slate-600 group-hover:text-white transition-colors">download</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<aside class="w-80 border-l border-border-dark bg-[#111318] flex flex-col overflow-hidden z-20">
+<div class="px-5 py-4 border-b border-border-dark flex justify-between items-center bg-surface-dark">
+<h2 class="text-sm font-bold text-white uppercase tracking-wide">Inspecionar</h2>
+<div class="flex gap-2">
+<button class="text-slate-500 hover:text-white"><span class="material-symbols-outlined text-[18px]">open_in_full</span></button>
+<button class="text-slate-500 hover:text-white"><span class="material-symbols-outlined text-[18px]">close</span></button>
+</div>
+</div>
+<div class="flex-1 overflow-y-auto">
+<div class="p-5 border-b border-border-dark">
+<div class="flex items-center gap-3 mb-4">
+<span class="material-symbols-outlined text-primary text-[24px]">search_check</span>
+<div>
+<h3 class="text-white font-semibold">Sanctions Screener</h3>
+<p class="text-xs text-slate-400">Agente | <span class="text-primary">Executando</span></p>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-2 text-xs">
+<div class="bg-surface-dark p-2 rounded border border-border-dark">
+<p class="text-slate-500 mb-1">Duração</p>
+<p class="text-white font-mono">142ms</p>
+</div>
+<div class="bg-surface-dark p-2 rounded border border-border-dark">
+<p class="text-slate-500 mb-1">Memória</p>
+<p class="text-white font-mono">128MB</p>
+</div>
+</div>
+</div>
+<div class="flex border-b border-border-dark">
+<button class="flex-1 py-3 text-xs font-semibold text-primary border-b-2 border-primary bg-primary/5">Propriedades</button>
+<button class="flex-1 py-3 text-xs font-semibold text-slate-500 hover:text-slate-300">JSON Bruto</button>
+<button class="flex-1 py-3 text-xs font-semibold text-slate-500 hover:text-slate-300">Logs</button>
+</div>
+<div class="p-5 flex flex-col gap-4">
+<div class="flex flex-col gap-2">
+<p class="text-xs font-bold text-slate-500 uppercase">Configuração</p>
+<div class="text-xs flex flex-col gap-2">
+<div class="flex justify-between py-1 border-b border-border-dark border-dashed">
+<span class="text-slate-400">Versão do Modelo</span>
+<span class="text-slate-200 font-mono">v4.2.0-beta</span>
+</div>
+<div class="flex justify-between py-1 border-b border-border-dark border-dashed">
+<span class="text-slate-400">Limiar (Threshold)</span>
+<span class="text-slate-200 font-mono">0.85</span>
+</div>
+<div class="flex justify-between py-1 border-b border-border-dark border-dashed">
+<span class="text-slate-400">Região</span>
+<span class="text-slate-200 font-mono">us-east-1</span>
+</div>
+</div>
+</div>
+<div class="flex flex-col gap-2">
+<p class="text-xs font-bold text-slate-500 uppercase">Parâmetros de Entrada</p>
+<div class="bg-[#0b0e14] p-3 rounded border border-border-dark overflow-x-auto">
+<pre class="text-[10px] text-slate-300 font-mono leading-relaxed">{
+  "entity_id": "cust_8821",
+  "check_depth": "deep",
+  "sources": [
+    "ofac",
+    "eu_sanctions",
+    "un_council"
+  ]
+}</pre>
+</div>
+</div>
+<div class="flex flex-col gap-2">
+<p class="text-xs font-bold text-slate-500 uppercase">Flags de Saída</p>
+<div class="flex flex-wrap gap-2">
+<span class="px-2 py-1 rounded-full bg-red-500/10 text-red-400 text-[10px] font-mono border border-red-500/20">alto_risco</span>
+<span class="px-2 py-1 rounded-full bg-slate-700 text-slate-300 text-[10px] font-mono border border-slate-600">correspondencia_encontrada</span>
+</div>
+</div>
+</div>
+</div>
+<div class="p-3 border-t border-border-dark bg-[#0b0e14]">
+<p class="text-[10px] text-slate-500 text-center font-mono">ID: node_1992-88x-221</p>
+</div>
+</aside>
 </body>
 </html>

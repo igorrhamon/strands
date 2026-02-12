@@ -1,6 +1,5 @@
 global:
   resolve_timeout: 5m
-  slack_api_url: ''
 
 # The root route with all parameters, which are inherited by the child
 # routes if they are not overwritten.
@@ -33,7 +32,7 @@ route:
 receivers:
   - name: 'strands-webhook'
     webhook_configs:
-      - url: '${STRANDS_WEBHOOK_URL}'
+      - url: 'http://strands-agent-orchestrator:8080/api/v1/alerts'
         send_resolved: true
 
 inhibit_rules:
