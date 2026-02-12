@@ -21,6 +21,21 @@ class SwarmExecutionController:
         if replay_mode:
             if replay_results is None:
                 replay_results = {}
-            return [replay_results.get(s.step_id) for s in steps]
+            # Ensure a concrete AgentExecution is returned for each step.
+            results: List[AgentExecution] = []
+            for s in steps:
+                ex = replay_results.get(s.step_id)
+                if ex is None:
+                    # Create a placeholder indicating missing replay data.
+                    ex = AgentExecution(
+                        agent_id=s.agent_id,
+                        agent_version="replay",
+                        logic_hash="replay",
+                        step_id=s.step_id,
+                        input_parameters={},
+                        error="Missing replay result"
+                    )
+                results.append(ex)
+            return results
         else:
             return await self.orchestrator.execute_swarm(steps)

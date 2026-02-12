@@ -1,16 +1,14 @@
 from typing import List, Dict, Any, Optional, Set
+from swarm_intelligence.core.monitor_policy import MonitorPolicy
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from swarm_intelligence.policy.retry_policy import RetryPolicy
 from .enums import EvidenceType, HumanAction, RiskLevel
 
-# Forward declaration for type hinting
-class DecisionContext(BaseModel): pass
-class ConfidenceSnapshot(BaseModel): pass
-class RetryAttempt(BaseModel): pass
-class AgentExecution(BaseModel): pass
-class Evidence(BaseModel): pass
+from pydantic import BaseModel, Field
+from swarm_intelligence.policy.retry_policy import RetryPolicy
+from .enums import EvidenceType, HumanAction, RiskLevel
 
 class RetryDecision(BaseModel):
     """Represents a decision made by the RetryController about a failed execution."""
@@ -48,6 +46,8 @@ class AgentExecution(BaseModel):
 
 class SwarmStep(BaseModel):
     """Defines a single step in a SwarmPlan."""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    
     agent_id: str
     step_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     mandatory: bool = True
@@ -77,7 +77,24 @@ class Decision(BaseModel):
     decision_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     human_decision: Optional["HumanDecision"] = None
     context: DecisionContext = Field(default_factory=DecisionContext)
+    monitor_policy: Optional[MonitorPolicy] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    # Backward compatibility properties for legacy code
+    @property
+    def evidence_summary(self) -> str:
+        """Backward compatibility: maps to summary."""
+        return self.summary
+    
+    @property
+    def recommended_action(self) -> str:
+        """Backward compatibility: maps to action_proposed."""
+        return self.action_proposed
+    
+    @property
+    def confidence_score(self) -> float:
+        """Backward compatibility: maps to confidence."""
+        return self.confidence
 
 class Alert(BaseModel):
     """Represents an incoming event that may trigger a swarm run."""

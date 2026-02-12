@@ -323,13 +323,15 @@ class Neo4jAdapter:
             "step_id": s.step_id,
             "agent_id": s.agent_id,
             "params": json.dumps(s.parameters),
-            "executions": [{
+                "executions": [{
                 "execution_id": ex.execution_id,
                 "agent_version": ex.agent_version,
                 "logic_hash": ex.logic_hash,
                 "error": ex.error,
                 "evidence": [{
                     "evidence_id": e.evidence_id,
+                    "source_agent_execution_id": getattr(e, 'source_agent_execution_id', None),
+                    "agent_id": getattr(e, 'agent_id', None),
                     "content": json.dumps(_convert_enums_to_values(e.content)) if isinstance(e.content, dict) else str(e.content),
                     "confidence": e.confidence,
                     "evidence_type": e.evidence_type.value if isinstance(e.evidence_type, Enum) else e.evidence_type
