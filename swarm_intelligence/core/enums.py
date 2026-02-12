@@ -1,23 +1,17 @@
 from enum import Enum
 
-class RiskLevel(Enum):
-    """Enumeration for risk levels."""
+class EvidenceType(str, Enum):
+    LOG = "log"
+    METRIC = "metric"
+    TRACE = "trace"
+
+class HumanAction(str, Enum):
+    APPROVE = "approve"
+    REJECT = "reject"
+    OVERRIDE = "override"
+
+class RiskLevel(str, Enum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
-
-class EvidenceType(Enum):
-    """Enumeration for the types of evidence that can be produced."""
-    RAW_DATA = "raw_data"
-    METRICS = "metrics"
-    SEMANTIC = "semantic"
-    RULES = "rules"
-    HYPOTHESIS = "hypothesis"
-    HUMAN_VALIDATED = "human_validated"
-
-class HumanAction(Enum):
-    """Enumeration for the actions a human can take on a swarm's decision."""
-    ACCEPT = "accept"
-    REJECT = "reject"
-    OVERRIDE = "override"

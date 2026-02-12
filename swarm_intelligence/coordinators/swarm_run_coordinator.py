@@ -3,7 +3,8 @@ import random
 import logging
 import uuid
 from typing import List, Dict, Optional, Callable, Any
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from swarm_intelligence.core.models import (
     SwarmPlan,
@@ -17,6 +18,7 @@ from swarm_intelligence.core.models import (
     Domain,
     SwarmRun
 )
+from swarm_intelligence.core.monitor_policy import MonitorPolicy, MonitorState, EscalationAction
 from swarm_intelligence.controllers.swarm_execution_controller import (
     SwarmExecutionController,
 )
@@ -30,8 +32,6 @@ from swarm_intelligence.policy.confidence_policy import (
     DefaultConfidencePolicy,
 )
 from src.deduplication.distributed_deduplicator import DistributedEventDeduplicator, DeduplicationAction
-from src.services.metrics_service import MetricsService
-import time
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,6 @@ class SwarmRunCoordinator:
         confidence_service: ConfidenceService,
         llm_agent_id: Optional[str] = "llm_agent",
         deduplicator: Optional[DistributedEventDeduplicator] = None,
-        metrics_service: Optional[MetricsService] = None,
     ):
         self.execution_controller = execution_controller
         self.retry_controller = retry_controller
@@ -58,9 +57,13 @@ class SwarmRunCoordinator:
         self.llm_agent_id = llm_agent_id
         self.deduplicator = deduplicator or DistributedEventDeduplicator()
         
+        # Scheduler para decisões MONITOR
+        self.scheduler = AsyncIOScheduler()
+        self.scheduler.start()
+        self.monitor_states: Dict[str, MonitorState] = {}
+        
         # Cache em memória para o Console Operacional (em produção usar Redis/DB)
         self._execution_history: Dict[str, Dict[str, Any]] = {}
-        self.metrics = metrics_service or MetricsService()
 
     async def aexecute_plan(
         self,
@@ -95,7 +98,6 @@ class SwarmRunCoordinator:
             "raw_data": alert.data
         }
 
-        start_time = time.time()
         # 0. Distributed Deduplication Check
         if not replay_mode and self.deduplicator:
             # Generate alert signature for dedup
@@ -116,10 +118,7 @@ class SwarmRunCoordinator:
                     
                     if action == DeduplicationAction.UPDATE_EXISTING:
                         # In a real scenario, we might want to attach this alert to the existing run
-                        self.metrics.record_dedup("update_existing")
                         pass 
-                    else:
-                        self.metrics.record_dedup("new_execution")
                 finally:
                     self.deduplicator.release_lock(lock_name)
 
@@ -261,21 +260,20 @@ class SwarmRunCoordinator:
         swarm_run.executions = all_executions
         swarm_run.final_decision = decision
 
+        # --- Lógica de MONITOR Proativo ---
+        if decision.action_proposed.upper() == "MONITOR" and not replay_mode:
+            await self._handle_monitor_decision(domain, plan, alert, run_id, decision)
+
         # Registrar decisão final para o console
         if run_id in self._execution_history:
             self._execution_history[run_id]["status"] = "FINISHED"
-            self._execution_history[run_id]["final_decision"] = decision.action_proposed
-            self._execution_history[run_id]["final_confidence"] = decision.confidence
+            self._execution_history[run_id]["final_decision"] = decision.recommended_action
+            self._execution_history[run_id]["final_confidence"] = decision.confidence_score
             self._execution_history[run_id]["confidence_breakdown"] = {
-                "base_score": decision.confidence,
-                "explanation": decision.summary,
+                "base_score": decision.confidence_score,
+                "explanation": decision.evidence_summary,
                 "factors": decision.metadata or {}
             }
-        # Record Metrics
-        duration = time.time() - start_time
-        self.metrics.record_execution(duration, domain.name, alert.data.get("severity", "medium"))
-        if decision:
-            self.metrics.record_decision(decision.confidence, decision.decision_state.value)
 
         # Register successful execution in deduplicator
         if not replay_mode and self.deduplicator:
@@ -330,3 +328,42 @@ class SwarmRunCoordinator:
     def get_all_runs(self) -> List[Dict]:
         """Retorna lista de todas as execuções recentes."""
         return list(self._execution_history.values())
+
+    async def _handle_monitor_decision(self, domain: Domain, plan: SwarmPlan, alert: Alert, run_id: str, decision: Decision):
+        """Agenda a reexecução para decisões MONITOR."""
+        policy = decision.monitor_policy or MonitorPolicy()
+        
+        state = self.monitor_states.get(run_id)
+        if not state:
+            state = MonitorState(run_id=run_id, original_alert_id=alert.alert_id)
+            self.monitor_states[run_id] = state
+
+        if state.recheck_count < policy.max_rechecks:
+            state.recheck_count += 1
+            state.last_recheck_timestamp = datetime.now(timezone.utc).timestamp()
+            
+            delay = policy.recheck_after_minutes
+            next_run_time = datetime.now(timezone.utc) + timedelta(minutes=delay)
+            
+            logger.info(f"Decision is MONITOR. Scheduling re-check #{state.recheck_count} for run {run_id} in {delay} minutes.")
+            
+            self.scheduler.add_job(
+                self.aexecute_plan,
+                'date',
+                run_date=next_run_time,
+                args=[domain, plan, alert, f"{run_id}_recheck_{state.recheck_count}"],
+                kwargs={"master_seed": random.randint(0, 1000000)}
+            )
+        else:
+            logger.warning(f"Max re-checks reached for run {run_id}. Triggering escalation: {policy.escalation_action}")
+            await self._trigger_escalation(run_id, policy.escalation_action)
+
+    async def _trigger_escalation(self, run_id: str, action: EscalationAction):
+        """Executa a ação de escalonamento quando o limite de MONITOR é atingido."""
+        if run_id in self._execution_history:
+            self._execution_history[run_id]["status"] = "ESCALATED"
+            self._execution_history[run_id]["metadata"]["escalation_action"] = action
+        
+        # Aqui poderíamos disparar um alerta real, abrir um ticket ou forçar uma ação humana
+        logger.error(f"ESCALATION TRIGGERED for {run_id}: {action}")
+

@@ -1,4 +1,5 @@
 from typing import List, Dict, Any, Optional, Set
+from .monitor_policy import MonitorPolicy
 import uuid
 from datetime import datetime
 from pydantic import BaseModel, Field
@@ -77,6 +78,7 @@ class Decision(BaseModel):
     decision_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     human_decision: Optional["HumanDecision"] = None
     context: DecisionContext = Field(default_factory=DecisionContext)
+    monitor_policy: Optional[MonitorPolicy] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 class Alert(BaseModel):
