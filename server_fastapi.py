@@ -250,7 +250,7 @@ async def get_incident_details(incident_id: str):
             "total_agents": 8,
             "execution_count": int(timeline_data.get("total_executions", 0) or 0),
             "elapsed_time_ms": "N/A",
-            "estimated_cost": "$0.01",
+            "estimated_cost": "N/A",
             
             # Summary from decision
             "summary": str(matching_incident.get("full_summary", ""))[:500],
@@ -341,3 +341,68 @@ async def get_incident_timeline(incident_id: str):
     except Exception as e:
         logger.error(f"Error fetching timeline for incident {incident_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch timeline")
+
+
+@app.get("/api/incidents/{incident_id}/agents/{agent_key}")
+async def get_agent_details(incident_id: str, agent_key: str):
+    """
+    Get detailed execution data for a specific agent in an incident.
+    Returns the latest AgentExecution node for the agent.
+    """
+    if not repo:
+        raise HTTPException(status_code=503, detail="Repository not available")
+    
+    try:
+        # Get the latest execution for this agent in the incident
+        query = """
+        MATCH (d:DecisionCandidate {decision_id: $decision_id})
+        MATCH (d)-[:EXECUTED_BY]->(e:AgentExecution)
+        WHERE e.agent_name CONTAINS $agent_key OR e.execution_id STARTS WITH $agent_key
+        RETURN e
+        ORDER BY e.timestamp DESC
+        LIMIT 1
+        """
+        
+        with repo._driver.session() as session:
+            result = session.run(query, {"decision_id": incident_id, "agent_key": agent_key})
+            record = result.single()
+            
+            if record and record['e']:
+                execution = dict(record['e'])
+                
+                # Transform to the format expected by the frontend
+                agent_details = {
+                    "name": execution.get('agent_name', agent_key),
+                    "key": agent_key,
+                    "icon": "search_check",  # Default, can be enhanced
+                    "status": execution.get('status', 'completed'),
+                    "duration": f"{execution.get('duration_ms', 0)}ms",
+                    "memory": f"{execution.get('memory_mb', 0)}MB",
+                    "version": execution.get('model_version', 'v1.0.0'),
+                    "threshold": "0.85",  # Default
+                    "region": "us-east-1",  # Default
+                    "input_params": execution.get('input_params', {}),
+                    "output_flags": execution.get('output_flags', []),
+                    "id": execution.get('execution_id', f"exec_{agent_key}")
+                }
+                return agent_details
+            else:
+                # Return mock data if no execution found
+                return {
+                    "name": agent_key.replace('_', ' ').title(),
+                    "key": agent_key,
+                    "icon": "android",
+                    "status": "completed",
+                    "duration": "0ms",
+                    "memory": "0MB",
+                    "version": "v1.0.0",
+                    "threshold": "0.85",
+                    "region": "us-east-1",
+                    "input_params": {},
+                    "output_flags": [],
+                    "id": f"exec_{agent_key}"
+                }
+    
+    except Exception as e:
+        logger.error(f"Error fetching agent details for {agent_key} in incident {incident_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch agent details")
