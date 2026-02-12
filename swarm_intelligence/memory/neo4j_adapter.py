@@ -253,7 +253,7 @@ class Neo4jAdapter:
         MERGE (dc)-[:SUGGESTS_PROCEDURE]->(proc)
         MERGE (ap)-[:HAS_PROCEDURE]->(proc)
 
-        WITH run, dec
+        WITH run, dec, dc
         UNWIND $steps as step_param
         MERGE (step:SwarmStep {id: step_param.step_id})
         ON CREATE SET step.parameters = step_param.params
@@ -261,10 +261,12 @@ class Neo4jAdapter:
 
         MERGE (agent:Agent {id: step_param.agent_id})
 
-        WITH run, dec, step, agent, step_param.executions as executions_param
+        WITH run, dec, dc, step, agent, step_param.agent_id as agent_id, step_param.executions as executions_param
         UNWIND executions_param as exec_param
         CREATE (exec:AgentExecution {
             id: exec_param.execution_id,
+            agent_id: agent_id,
+            agent_name: agent_id,
             agent_version: exec_param.agent_version,
             logic_hash: exec_param.logic_hash,
             error: exec_param.error,
@@ -272,6 +274,7 @@ class Neo4jAdapter:
         })
         MERGE (step)-[:HAD_EXECUTION]->(exec)
         MERGE (agent)-[:EXECUTED]->(exec)
+        MERGE (dc)-[:EXECUTED_BY]->(exec)
 
         WITH run, dec, exec, exec_param.evidence as evidences_param
         UNWIND evidences_param as ev_param

@@ -54,7 +54,7 @@ def test_get_pod_logs_success(mock_k8s_client):
     assert result['hypothesis'] == "Errors detected in 1 of 2 pods for the service 'payment-service'."
     assert len(result['evidence']) == 1
     assert result['evidence'][0]['pod_name'] == pod1_name
-    assert "ERROR: Database connection failed" in result['evidence'][0]['log_snippets'][0]
+    assert "ERROR: Database connection failed" in result['evidence'][0]['errors'][0]
     assert pod1_name in result['suggested_action']
 
 def test_get_pod_logs_no_pods_found(mock_k8s_client):
@@ -102,7 +102,7 @@ def test_get_pod_logs_api_exception_on_log_read(mock_k8s_client):
     assert "Errors detected in 1 of 1 pods" in result['hypothesis']
     assert len(result['evidence']) == 1
     assert result['evidence'][0]['pod_name'] == pod1_name
-    assert "Could not retrieve logs" in result['evidence'][0]['log_snippets'][0]
+    assert "Could not retrieve logs" in result['evidence'][0]['errors'][0]
 
 @patch('src.agents.analysis.log_inspector.LogInspectorAgent._find_pods_by_service')
 def test_retry_logic_on_api_failure(mock_find_pods, mock_k8s_client):
