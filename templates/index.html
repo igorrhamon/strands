@@ -32,6 +32,43 @@
         },
       },
     }
+
+    function renderLLMPanel() {
+      const panel = document.getElementById('llm-execution-panel')
+      if (!panel || !incidentData) return
+
+      const executions = incidentData.executions || []
+      // try common properties: agent_name, agent_id, key
+      const llmExec = executions.find(e => (e.agent_name === 'llm_agent' || e.agent_id === 'llm_agent' || (e.agent && (e.agent.key === 'llm_agent' || e.agent.id === 'llm_agent'))))
+      const statusEl = document.getElementById('llm-status')
+      const resultEl = document.getElementById('llm-result')
+      const atEl = document.getElementById('llm-executed-at')
+      const nameEl = document.getElementById('llm-agent-name')
+      const verEl = document.getElementById('llm-agent-version')
+
+      if (!llmExec) {
+        panel.classList.add('hidden')
+        if (statusEl) statusEl.textContent = 'Não executado'
+        if (resultEl) resultEl.textContent = '—'
+        return
+      }
+
+      panel.classList.remove('hidden')
+      if (statusEl) statusEl.textContent = llmExec.status || llmExec.state || '—'
+      if (atEl) atEl.textContent = llmExec.completed_at || llmExec.timestamp || ''
+      if (nameEl) nameEl.textContent = llmExec.agent_name || llmExec.agent_id || (llmExec.agent && llmExec.agent.key) || 'llm_agent'
+      if (verEl) verEl.textContent = llmExec.model_version || llmExec.version || ''
+
+      let out = llmExec.output || llmExec.result || llmExec.outputs || llmExec.response || llmExec.body || null
+      if (out == null) {
+        // try nested evidence
+        out = llmExec.evidence || llmExec.output_evidence || llmExec.evidences || null
+      }
+      if (typeof out === 'object') {
+        try { out = JSON.stringify(out, null, 2) } catch (e) { out = String(out) }
+      }
+      if (resultEl) resultEl.textContent = out || '—'
+    }
   </script>
   <style type="text/tailwindcss">
     body {
@@ -237,53 +274,93 @@
     }
 
     function updateSidebar(agent) {
-      // Update agent name
-      const nameEl = document.querySelector('aside h3')
-      if (nameEl) nameEl.textContent = agent.name
-
-      // Update status
-      const statusEl = document.querySelector('aside p span')
-      if (statusEl) statusEl.textContent = agent.status === 'completed' ? 'Concluído' : 'Executando'
-
-      // Update icon
-      const iconEl = document.querySelector('aside .flex.items-center.gap-3.mb-4 .material-symbols-outlined')
-      if (iconEl) iconEl.textContent = agent.icon
-
-      // Update duration
-      const durationEl = document.querySelector('aside .grid .bg-surface-dark:nth-child(1) p:nth-child(2)')
-      if (durationEl) durationEl.textContent = agent.duration || '142ms'
-
-      // Update memory
-      const memoryEl = document.querySelector('aside .grid .bg-surface-dark:nth-child(2) p:nth-child(2)')
-      if (memoryEl) memoryEl.textContent = agent.memory || '128MB'
-
-      // Update version
-      const versionEl = document.querySelector('aside .flex-col.gap-2 .flex.justify-between:nth-child(1) span:nth-child(2)')
-      if (versionEl) versionEl.textContent = agent.version || 'v4.2.0-beta'
-
-      // Update threshold
-      const thresholdEl = document.querySelector('aside .flex-col.gap-2 .flex.justify-between:nth-child(2) span:nth-child(2)')
-      if (thresholdEl) thresholdEl.textContent = agent.threshold || '0.85'
-
-      // Update region
-      const regionEl = document.querySelector('aside .flex-col.gap-2 .flex.justify-between:nth-child(3) span:nth-child(2)')
-      if (regionEl) regionEl.textContent = agent.region || 'us-east-1'
-
-      // Update input params
-      const inputEl = document.querySelector('aside pre')
-      if (inputEl) inputEl.textContent = JSON.stringify(agent.input_params || { "entity_id": "cust_8821", "check_depth": "deep" }, null, 2)
-
-      // Update output flags
-      const flagsEl = document.querySelector('aside .flex-wrap')
-      if (flagsEl) {
-        flagsEl.innerHTML = (agent.output_flags || ['alto_risco', 'correspondencia_encontrada']).map(flag =>
-          `<span class="px-2 py-1 rounded-full bg-red-500/10 text-red-400 text-[10px] font-mono border border-red-500/20">${flag}</span>`
-        ).join('')
+      // Helper to set text safely
+      const set = (id, text) => {
+        const el = document.getElementById(id)
+        if (el) el.textContent = text == null ? '—' : String(text)
       }
 
-      // Update ID
-      const idEl = document.querySelector('aside .border-t p')
-      if (idEl) idEl.textContent = `ID: ${agent.id || 'node_1992-88x-221'}`
+      set('agent-name', agent.name || '-')
+      set('agent-status', agent.status === 'completed' ? 'Concluído' : (agent.status || '—'))
+      // icon
+      const iconEl = document.getElementById('agent-icon')
+      if (iconEl) iconEl.textContent = agent.icon || 'android'
+
+      // duration: accept either 'duration' string or 'duration_ms' number
+      let durationText = '—'
+      if (agent.duration) durationText = agent.duration
+      else if (agent.duration_ms != null) durationText = `${agent.duration_ms}ms`
+      set('agent-duration', durationText)
+
+      // memory
+      let memoryText = agent.memory || (agent.memory_mb ? `${agent.memory_mb}MB` : '—')
+      set('agent-memory', memoryText)
+
+      // confidence (if available)
+      let confText = '—'
+      if (typeof agent.confidence === 'number') confText = `${(agent.confidence * 100).toFixed(1)}%`
+      else if (typeof agent.confidence_percent === 'number') confText = `${agent.confidence_percent}%`
+      set('agent-confidence', confText)
+
+      // timestamps
+      const fmt = (v) => {
+        try { const d = new Date(v); return isNaN(d.getTime()) ? '—' : d.toLocaleString('pt-BR') } catch (e) { return '—' }
+      }
+      set('agent-started', agent.started_at ? fmt(agent.started_at) : (agent.started ? fmt(agent.started) : '—'))
+      set('agent-completed', agent.completed_at ? fmt(agent.completed_at) : (agent.completed ? fmt(agent.completed) : '—'))
+
+      // version, threshold, region
+      set('agent-version', agent.version || agent.model_version || '—')
+      const versionConfigEl = document.getElementById('agent-version-config')
+      if (versionConfigEl) versionConfigEl.textContent = agent.version || agent.model_version || '—'
+      set('agent-threshold', agent.threshold || '—')
+      set('agent-region', agent.region || '—')
+
+      // input params
+      const inputEl = document.getElementById('agent-input')
+      if (inputEl) inputEl.textContent = JSON.stringify(agent.input_params || agent.input || {}, null, 2)
+
+      // output flags
+      const flagsEl = document.getElementById('agent-flags')
+      if (flagsEl) {
+        const flags = agent.output_flags || agent.output || agent.flags || []
+        flagsEl.innerHTML = flags.length ? flags.map(f => `<span class="px-2 py-1 rounded-full bg-red-500/10 text-red-400 text-[10px] font-mono border border-red-500/20">${f}</span>`).join('') : '<span class="text-slate-500 text-[11px]">—</span>'
+      }
+
+      // evidence
+      const evidenceEl = document.getElementById('agent-evidence')
+      if (evidenceEl) {
+        const evidences = agent.evidence || agent.output_evidence || agent.outputs || []
+        if (!evidences || evidences.length === 0) {
+          evidenceEl.textContent = '—'
+        } else {
+          evidenceEl.innerHTML = evidences.map(ev => {
+            if (typeof ev === 'string') return `<div class="mb-2">${ev}</div>`
+            try { return `<div class="mb-2">${JSON.stringify(ev, null, 2)}</div>` } catch (e) { return `<div class="mb-2">${String(ev)}</div>` }
+          }).join('')
+        }
+      }
+
+      // logs / copy JSON
+      const logsLink = document.getElementById('agent-logs')
+      const copyBtn = document.getElementById('agent-copy-json')
+      const payload = agent || {}
+      const jsonStr = JSON.stringify(payload, null, 2)
+      if (logsLink) {
+        // create a data URL to open raw JSON in a new tab
+        const blob = new Blob([jsonStr], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        logsLink.setAttribute('href', url)
+        logsLink.setAttribute('target', '_blank')
+        logsLink.textContent = 'Ver JSON'
+      }
+      if (copyBtn) {
+        copyBtn.onclick = () => { navigator.clipboard.writeText(jsonStr).then(()=>{ copyBtn.textContent='Copiado' ; setTimeout(()=>copyBtn.textContent='Copiar JSON',1200) }) }
+      }
+
+      // agent id
+      const idEl = document.getElementById('agent-id')
+      if (idEl) idEl.textContent = `ID: ${agent.id || agent.execution_id || agent.key || '-'}`
     }
 
     async function populateDashboard() {
@@ -331,6 +408,8 @@
       if (incidentData.agents && incidentData.agents.length > 0) {
         await selectAgent(incidentData.agents[0].key)
       }
+      // Render LLM execution panel if present in timeline
+      try { renderLLMPanel() } catch (e) { console.warn('LLM panel render failed', e) }
 
       console.log('Dashboard updated with incident data:', incidentData)
     }
@@ -544,6 +623,26 @@
             <p class="text-slate-400 text-xs uppercase font-semibold tracking-wider">Custo Estimado</p>
             <div class="flex items-end gap-2">
               <span id="estimated-cost" class="text-white text-2xl font-bold font-mono">$0.042</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="px-8 pb-4">
+        <div id="llm-execution-panel" class="w-full max-w-4xl mx-auto hidden">
+          <div class="flex items-center gap-4 p-4 rounded-lg border border-border-dark bg-surface-dark/60">
+            <div class="flex-1">
+              <p class="text-slate-400 text-xs uppercase font-semibold tracking-wider">LLM Execution</p>
+              <div class="mt-2">
+                <div class="flex items-center justify-between">
+                  <div class="text-sm text-slate-200 font-medium" id="llm-status">—</div>
+                  <div class="text-xs text-slate-500 font-mono" id="llm-executed-at">—</div>
+                </div>
+                <pre id="llm-result" class="mt-3 text-[12px] text-slate-300 font-mono bg-[#0b0e14] p-3 rounded border border-border-dark overflow-x-auto">—</pre>
+              </div>
+            </div>
+            <div class="w-48 text-right text-xs text-slate-500">
+              <div id="llm-agent-name">—</div>
+              <div id="llm-agent-version">—</div>
             </div>
           </div>
         </div>

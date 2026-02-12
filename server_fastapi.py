@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import random
 import time
+import json
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -354,39 +355,46 @@ async def get_agent_details(incident_id: str, agent_key: str):
     
     try:
         # Get the latest execution for this agent in the incident
+        # Fetch all executions for this decision and filter in Python to avoid
+        # referencing possibly-missing properties directly in Cypher (which causes DB warnings).
         query = """
         MATCH (d:DecisionCandidate {decision_id: $decision_id})
         MATCH (d)-[:EXECUTED_BY]->(e:AgentExecution)
-        WHERE e.agent_name CONTAINS $agent_key OR e.execution_id STARTS WITH $agent_key
         RETURN e
-        ORDER BY e.timestamp DESC
-        LIMIT 1
         """
-        
+
         with repo._driver.session() as session:
-            result = session.run(query, {"decision_id": incident_id, "agent_key": agent_key})
-            record = result.single()
-            
-            if record and record['e']:
+            result = session.run(query, {"decision_id": incident_id})
+            candidates = []
+            for record in result:
+                if not record or record.get('e') is None:
+                    continue
                 execution = dict(record['e'])
-                
-                # Transform to the format expected by the frontend
-                agent_details = {
-                    "name": execution.get('agent_name', agent_key),
-                    "key": agent_key,
-                    "icon": "search_check",  # Default, can be enhanced
-                    "status": execution.get('status', 'completed'),
-                    "duration": f"{execution.get('duration_ms', 0)}ms",
-                    "memory": f"{execution.get('memory_mb', 0)}MB",
-                    "version": execution.get('model_version', 'v1.0.0'),
-                    "threshold": "0.85",  # Default
-                    "region": "us-east-1",  # Default
-                    "input_params": execution.get('input_params', {}),
-                    "output_flags": execution.get('output_flags', []),
-                    "id": execution.get('execution_id', f"exec_{agent_key}")
-                }
-                return agent_details
-            else:
+
+                # normalize fields for matching
+                agent_name_raw = str(execution.get('agent_name') or '')
+                agent_id_raw = str(execution.get('agent_id') or '')
+                execution_id_raw = str(execution.get('execution_id') or '')
+
+                norm_key = agent_key.replace('_', ' ').lower()
+                matches = (
+                    norm_key in agent_name_raw.lower()
+                    or execution_id_raw.startswith(agent_key)
+                    or agent_id_raw == agent_key
+                )
+                if not matches:
+                    continue
+
+                # Keep candidate
+                candidates.append(execution)
+
+            # If multiple candidates, sort by available timestamp fields (latest first)
+            def ts_val(ex):
+                return ex.get('timestamp') or ex.get('completed_at') or ex.get('started_at') or ''
+
+            candidates.sort(key=ts_val, reverse=True)
+
+            if len(candidates) == 0:
                 # Return mock data if no execution found
                 return {
                     "name": agent_key.replace('_', ' ').title(),
@@ -400,8 +408,68 @@ async def get_agent_details(incident_id: str, agent_key: str):
                     "region": "us-east-1",
                     "input_params": {},
                     "output_flags": [],
+                    "confidence": 0.5,
+                    "confidence_percent": 50.0,
                     "id": f"exec_{agent_key}"
                 }
+
+            execution = candidates[0]
+
+            # Transform to the format expected by the frontend
+            raw_flags = execution.get('output_flags')
+            if isinstance(raw_flags, str):
+                flags = [f for f in raw_flags.split('|') if f]
+            elif isinstance(raw_flags, list):
+                flags = raw_flags
+            else:
+                flags = []
+
+            raw_input = execution.get('input_params')
+            input_params = {}
+            if isinstance(raw_input, str):
+                try:
+                    input_params = json.loads(raw_input)
+                except Exception:
+                    input_params = {"raw": raw_input}
+            elif isinstance(raw_input, dict):
+                input_params = raw_input
+            else:
+                input_params = {}
+
+            # Calculate confidence from available data
+            confidence = 0.5  # default
+            if isinstance(execution.get('confidence'), (int, float)):
+                confidence = float(execution.get('confidence'))
+            elif isinstance(execution.get('agent_confidence'), (int, float)):
+                confidence = float(execution.get('agent_confidence'))
+            else:
+                # Try to get confidence from evidence if available
+                try:
+                    evidence = execution.get('output_evidence')
+                    if isinstance(evidence, list) and evidence:
+                        confidences = [e.get('confidence', 0.5) for e in evidence if isinstance(e, dict)]
+                        if confidences:
+                            confidence = sum(confidences) / len(confidences)
+                except Exception:
+                    pass
+
+            agent_details = {
+                "name": execution.get('agent_name', agent_key),
+                "key": agent_key,
+                "icon": "search_check",
+                "status": execution.get('status', 'completed'),
+                "duration": f"{execution.get('duration_ms', 0)}ms",
+                "memory": f"{execution.get('memory_mb', 0)}MB",
+                "version": execution.get('model_version', execution.get('agent_version', 'v1.0.0')),
+                "threshold": "0.85",
+                "region": "us-east-1",
+                "input_params": input_params,
+                "output_flags": flags,
+                "confidence": confidence,
+                "confidence_percent": round(confidence * 100, 1),
+                "id": execution.get('execution_id', f"exec_{agent_key}")
+            }
+            return agent_details
     
     except Exception as e:
         logger.error(f"Error fetching agent details for {agent_key} in incident {incident_id}: {e}")
