@@ -743,21 +743,41 @@
     </div>
     <div class="flex-1 overflow-y-auto">
       <div class="p-5 border-b border-border-dark">
-        <div class="flex items-center gap-3 mb-4">
-          <span class="material-symbols-outlined text-primary text-[24px]">search_check</span>
+        <div class="flex items-center gap-3 mb-3">
+          <span id="agent-icon" class="material-symbols-outlined text-primary text-[24px]">search_check</span>
           <div>
-            <h3 class="text-white font-semibold">Sanctions Screener</h3>
-            <p class="text-xs text-slate-400">Agente | <span class="text-primary">Executando</span></p>
+            <h3 id="agent-name" class="text-white font-semibold">Sanctions Screener</h3>
+            <p class="text-xs text-slate-400">Agente | <span id="agent-status" class="text-primary">Executando</span></p>
           </div>
         </div>
-        <div class="grid grid-cols-2 gap-2 text-xs">
+
+        <div class="grid grid-cols-2 gap-2 text-xs mb-3">
           <div class="bg-surface-dark p-2 rounded border border-border-dark">
             <p class="text-slate-500 mb-1">Duração</p>
-            <p class="text-white font-mono">142ms</p>
+            <p id="agent-duration" class="text-white font-mono">—</p>
           </div>
           <div class="bg-surface-dark p-2 rounded border border-border-dark">
             <p class="text-slate-500 mb-1">Memória</p>
-            <p class="text-white font-mono">128MB</p>
+            <p id="agent-memory" class="text-white font-mono">—</p>
+          </div>
+          <div class="bg-surface-dark p-2 rounded border border-border-dark">
+            <p class="text-slate-500 mb-1">Confiança</p>
+            <p id="agent-confidence" class="text-white font-mono">—</p>
+          </div>
+          <div class="bg-surface-dark p-2 rounded border border-border-dark">
+            <p class="text-slate-500 mb-1">Executado</p>
+            <p id="agent-started" class="text-white font-mono">—</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <div class="bg-surface-dark p-2 rounded border border-border-dark">
+            <p class="text-slate-500 mb-1">Concluído</p>
+            <p id="agent-completed" class="text-white font-mono">—</p>
+          </div>
+          <div class="bg-surface-dark p-2 rounded border border-border-dark">
+            <p class="text-slate-500 mb-1">Versão</p>
+            <p id="agent-version" class="text-white font-mono">—</p>
           </div>
         </div>
       </div>
@@ -773,45 +793,46 @@
           <div class="text-xs flex flex-col gap-2">
             <div class="flex justify-between py-1 border-b border-border-dark border-dashed">
               <span class="text-slate-400">Versão do Modelo</span>
-              <span class="text-slate-200 font-mono">v4.2.0-beta</span>
+              <span id="agent-version-config" class="text-slate-200 font-mono">—</span>
             </div>
             <div class="flex justify-between py-1 border-b border-border-dark border-dashed">
               <span class="text-slate-400">Limiar (Threshold)</span>
-              <span class="text-slate-200 font-mono">0.85</span>
+              <span id="agent-threshold" class="text-slate-200 font-mono">—</span>
             </div>
             <div class="flex justify-between py-1 border-b border-border-dark border-dashed">
               <span class="text-slate-400">Região</span>
-              <span class="text-slate-200 font-mono">us-east-1</span>
+              <span id="agent-region" class="text-slate-200 font-mono">—</span>
             </div>
           </div>
         </div>
         <div class="flex flex-col gap-2">
           <p class="text-xs font-bold text-slate-500 uppercase">Parâmetros de Entrada</p>
           <div class="bg-[#0b0e14] p-3 rounded border border-border-dark overflow-x-auto">
-            <pre class="text-[10px] text-slate-300 font-mono leading-relaxed">{
-  "entity_id": "cust_8821",
-  "check_depth": "deep",
-  "sources": [
-    "ofac",
-    "eu_sanctions",
-    "un_council"
-  ]
-}</pre>
+            <pre id="agent-input" class="text-[10px] text-slate-300 font-mono leading-relaxed">{}</pre>
           </div>
         </div>
         <div class="flex flex-col gap-2">
           <p class="text-xs font-bold text-slate-500 uppercase">Flags de Saída</p>
-          <div class="flex flex-wrap gap-2">
-            <span
-              class="px-2 py-1 rounded-full bg-red-500/10 text-red-400 text-[10px] font-mono border border-red-500/20">alto_risco</span>
-            <span
-              class="px-2 py-1 rounded-full bg-slate-700 text-slate-300 text-[10px] font-mono border border-slate-600">correspondencia_encontrada</span>
+          <div id="agent-flags" class="flex flex-wrap gap-2">
+            <!-- flags populated dynamically -->
           </div>
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <p class="text-xs font-bold text-slate-500 uppercase">Evidências / Saída</p>
+          <div id="agent-evidence" class="bg-[#0b0e14] p-3 rounded border border-border-dark text-[11px] text-slate-300 font-mono leading-relaxed">
+            <!-- evidence items populated dynamically -->
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between">
+          <a id="agent-logs" class="text-xs text-slate-400 hover:text-white">Ver logs</a>
+          <button id="agent-copy-json" class="text-xs text-slate-400 hover:text-white">Copiar JSON</button>
         </div>
       </div>
     </div>
     <div class="p-3 border-t border-border-dark bg-[#0b0e14]">
-      <p class="text-[10px] text-slate-500 text-center font-mono">ID: node_1992-88x-221</p>
+      <p id="agent-id" class="text-[10px] text-slate-500 text-center font-mono">ID: -</p>
     </div>
   </aside>
 </body>
