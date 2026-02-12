@@ -1,7 +1,12 @@
 from typing import List, Dict, Any, Optional, Set
+from swarm_intelligence.core.monitor_policy import MonitorPolicy
 import uuid
 from datetime import datetime
 from pydantic import BaseModel, Field, ConfigDict
+from swarm_intelligence.policy.retry_policy import RetryPolicy
+from .enums import EvidenceType, HumanAction, RiskLevel
+
+from pydantic import BaseModel, Field
 from swarm_intelligence.policy.retry_policy import RetryPolicy
 from .enums import EvidenceType, HumanAction, RiskLevel
 
@@ -72,6 +77,7 @@ class Decision(BaseModel):
     decision_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     human_decision: Optional["HumanDecision"] = None
     context: DecisionContext = Field(default_factory=DecisionContext)
+    monitor_policy: Optional[MonitorPolicy] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 class Alert(BaseModel):
