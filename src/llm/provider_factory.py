@@ -209,7 +209,7 @@ class AnthropicProvider(BaseLLMProvider):
                 model=self.config.model,
                 max_tokens=self.config.max_tokens,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=self.config.temperature,
+                #temperature=self.config.temperature,
                 timeout=self.config.timeout,
                 **kwargs
             )
@@ -376,16 +376,29 @@ class GitHubModelsProvider(BaseLLMProvider):
             Resposta
         """
         try:
-            response = await self.client.complete(
-                messages=[{"role": "user", "content": prompt}],
-                model=self.config.model,
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens,
-                **kwargs
-            )
-            
+            params = {
+                "messages": [{"role": "user", "content": prompt}],
+                "model": self.config.model,
+                #"max_completion_tokens": self.config.max_tokens,
+            }
+
+            # Prefer explicit kwargs over defaults; only set temperature if caller didn't provide it
+            if "temperature" not in kwargs and self.config.temperature is not None:
+                params["temperature"] = self.config.temperature
+
+
+            params.update(kwargs)
+
+            # Some GitHub/Azure inference models do not accept a custom `temperature` value
+            # (they only support the default). Remove it to avoid UnsupportedValue errors.
+            if "temperature" in params:
+                self.logger.debug("GitHubModelsProvider: removing 'temperature' param for compatibility")
+                params.pop("temperature", None)
+
+            response = await self.client.complete(**params)
+
             return response.choices[0].message.content
-        
+
         except Exception as e:
             self.logger.error(f"Erro ao gerar com GitHub Models: {e}")
             raise

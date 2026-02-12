@@ -22,7 +22,7 @@ class SwarmOrchestrator:
     The pure execution engine for the swarm. It executes a list of agents
     for given steps and returns the resulting AgentExecution events.
     """
-    def __init__(self, agents: Sequence[Agent], max_concurrency: int = 10, step_timeout: float = 60.0):
+    def __init__(self, agents: Sequence[Agent], max_concurrency: int = 10, step_timeout: float = 6000.0):
         self._agents = {agent.agent_id: agent for agent in agents}
         self.max_concurrency = max_concurrency
         self.step_timeout = step_timeout

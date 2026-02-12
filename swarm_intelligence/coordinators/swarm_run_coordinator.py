@@ -1,6 +1,7 @@
 import asyncio
 import random
 import logging
+import time
 import uuid
 import logging
 import uuid
@@ -81,7 +82,7 @@ class SwarmRunCoordinator:
         replay_results: Optional[Dict[str, AgentExecution]] = None,
         master_seed: Optional[int] = None,
         max_retry_rounds: int = 10,
-        max_runtime_seconds: float = 3000.0,
+        max_runtime_seconds: float = 300000.0,
         max_total_attempts: int = 50,
         use_llm_fallback: bool = True,
         llm_fallback_threshold: float = 0.5,
@@ -137,7 +138,12 @@ class SwarmRunCoordinator:
         all_retry_attempts = []
         all_retry_decisions = []
         all_executions: List[AgentExecution] = []
+        # Start with an empty set; computing here would always be empty because
+        # `all_executions` is still empty at this point. It is recomputed later
+        # after executions are appended.
         successful_step_ids = set()
+        
+        
 
         round_counter = 0
         total_attempts_counter = 0
@@ -168,32 +174,22 @@ class SwarmRunCoordinator:
                     self._record_agent_step(run_id, ex)
                 
                 all_executions.extend(new_executions)
-
-                retry_eval = await self.retry_controller.evaluate(
-                    plan,
-                    all_executions,
-                    all_retry_attempts,
-                    self.confidence_service,
-                    run_id,
-                    master_seed,
-                    successful_step_ids,
+                # evaluate(self, run_id: str, step_id: str, error: Exception) -> RetryDecision:
+                retry_decision = self.retry_controller.evaluate(
+                    run_id, steps_to_process[0].step_id if steps_to_process else "", Exception("Simulated error for retry evaluation")
                 )
-
-                all_retry_attempts.extend(retry_eval.retry_attempts)
-                all_retry_decisions.extend(retry_eval.retry_decisions)
-                successful_step_ids.update(retry_eval.newly_successful_step_ids)
-                steps_to_process = retry_eval.steps_to_retry
-
-                if steps_to_process and retry_eval.max_delay_seconds > 0:
-                    # Use local RNG for jitter
-                    jitter = local_rng.uniform(-0.1, 0.1)
-                    await asyncio.sleep(retry_eval.max_delay_seconds * (1 + jitter))
+                
+                reply_decision = self.retry_controller.evaluate(run_id, "", Exception("Simulated error for retry evaluation"))
+                all_retry_decisions.append(retry_decision)
+                
 
         try:
-            await asyncio.wait_for(_internal_run(), timeout=max_runtime_seconds)
+            #await asyncio.wait_for(_internal_run(), timeout=max_runtime_seconds)
+            await asyncio.wait_for(_internal_run(), timeout=300000.0)
         except asyncio.TimeoutError:
             aborted_by_limit = True
 
+        successful_step_ids = {ex.step_id for ex in all_executions if ex.is_successful() and ex.step_id}
         final_successful_executions = [
             ex for ex in all_executions if ex.step_id in successful_step_ids
         ]
@@ -229,6 +225,9 @@ class SwarmRunCoordinator:
                 or (current_avg_confidence <= llm_fallback_threshold)
             )
         )
+        
+        should_trigger_llm = True
+        
         if should_trigger_llm:
             llm_input = {
                 "alert": alert.data,
@@ -305,48 +304,7 @@ class SwarmRunCoordinator:
                 "name": execution.agent_id,
                 "status": status,
                 "latency": latency_str,
-                "details": f"Agent {execution.agent_id} finished with status {status}"
-            }
-            self._execution_history[run_id]["agents"].append(step)
-
-    # --- API Endpoints para o Console Operacional ---
-
-    def get_run_details(self, run_id: str) -> Optional[Dict]:
-        """Retorna detalhes de uma execução específica."""
-        return self._execution_history.get(run_id)
-
-    def get_run_agents(self, run_id: str) -> List[Dict]:
-        """Retorna a timeline de agentes de uma execução."""
-        run = self._execution_history.get(run_id)
-        return run.get("agents", []) if run else []
-
-    def get_run_confidence(self, run_id: str) -> Dict:
-        """Retorna o breakdown de confiança de uma execução."""
-        run = self._execution_history.get(run_id)
-        return run.get("confidence_breakdown", {}) if run else {}
-
-    def get_run_rag_evidence(self, run_id: str) -> List[Dict]:
-        """Retorna as evidências de RAG de uma execução."""
-        run = self._execution_history.get(run_id)
-        return run.get("rag_evidence", []) if run else []
-
-    def get_run_retries(self, run_id: str) -> List[Dict]:
-        """Retorna o histórico de retries de uma execução."""
-        run = self._execution_history.get(run_id)
-        return run.get("retries", []) if run else []
-
-    def get_all_runs(self) -> List[Dict]:
-        """Retorna lista de todas as execuções recentes."""
-        return list(self._execution_history.values())
-
-    def _record_agent_step(self, run_id: str, execution: AgentExecution):
-        """Registra um passo de agente no histórico para o console."""
-        if run_id in self._execution_history:
-            status = "SUCCESS" if execution.is_successful() else "FAILED"
-            step = {
-                "name": execution.agent_id,
-                "status": status,
-                "latency": f"{execution.duration_seconds:.2f}s" if hasattr(execution, 'duration_seconds') else "0.0s",
+                #"latency": f"{execution.duration_seconds:.2f}s" if hasattr(execution, 'duration_seconds') else "0.0s",
                 "details": f"Agent {execution.agent_id} finished with status {status}"
             }
             self._execution_history[run_id]["agents"].append(step)
