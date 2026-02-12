@@ -18,10 +18,15 @@ def send_alert_to_alertmanager(alerts):
     headers = {'Content-Type': 'application/json'}
     try:
         response = requests.post(ALERTMANAGER_URL, json=alerts, headers=headers, timeout=5)
-        print(f"✓ Alert sent to Alertmanager: {response.status_code}")
-        return response.status_code == 200
-    except Exception as e:
-        print(f"✗ Failed to send alert: {e}")
+        print(f"✓ Alertmanager response: {response.status_code}")
+        if response.ok:
+            return True
+        else:
+            # Log response body to help debug (Alertmanager can return 400/500 etc.)
+            print(f"✗ Alertmanager error: {response.status_code} - {response.text}")
+            return False
+    except requests.exceptions.RequestException as e:
+        print(f"✗ Failed to send alert to Alertmanager: {e}")
         return False
 
 def create_alert(alertname, severity="critical", instance="payment-service:9090"):

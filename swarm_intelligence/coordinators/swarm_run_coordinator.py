@@ -68,17 +68,17 @@ class SwarmRunCoordinator:
         plan: SwarmPlan,
         alert: Alert,
         run_id: str,
-        confidence_policy: ConfidencePolicy = None,
+        confidence_policy: Optional[ConfidencePolicy] = None,
         human_hook: Optional[Callable[[Decision], HumanDecision]] = None,
         replay_mode: bool = False,
         replay_results: Optional[Dict[str, AgentExecution]] = None,
         master_seed: Optional[int] = None,
         max_retry_rounds: int = 10,
-        max_runtime_seconds: float = 300.0,
+        max_runtime_seconds: float = 3000.0,
         max_total_attempts: int = 50,
         use_llm_fallback: bool = True,
         llm_fallback_threshold: float = 0.5,
-    ) -> (SwarmRun, List[RetryAttempt], List[RetryDecision]):
+    ) -> tuple[SwarmRun, List[RetryAttempt], List[RetryDecision]]:
         
         # Registrar início da execução para o console
         self._execution_history[run_id] = {
@@ -240,7 +240,8 @@ class SwarmRunCoordinator:
                 "avg_confidence": current_avg_confidence,
                 "mandatory_success": all_mandatory_successful,
             }
-            llm_step = SwarmStep(agent_id=self.llm_agent_id, mandatory=True, parameters=llm_input)
+            llm_agent = self.llm_agent_id or "llm_agent"
+            llm_step = SwarmStep(agent_id=llm_agent, mandatory=True, parameters=llm_input)
             llm_executions = await self.execution_controller.execute([llm_step])
             for ex in llm_executions:
                 self._record_agent_step(run_id, ex)
@@ -275,7 +276,19 @@ class SwarmRunCoordinator:
         duration = time.time() - start_time
         self.metrics.record_execution(duration, domain.name, alert.data.get("severity", "medium"))
         if decision:
-            self.metrics.record_decision(decision.confidence, decision.decision_state.value)
+            # `Decision` may come from different modules with different fields.
+            # Prefer `decision_state` if present, otherwise fall back to `action_proposed`.
+            # Safely access `decision_state` if present on Decision-like objects
+            decision_state = getattr(decision, "decision_state", None)
+            if decision_state is not None:
+                state_value = decision_state.value if hasattr(decision_state, 'value') else str(decision_state)
+            else:
+                # fallback to legacy `action_proposed` field
+                try:
+                    state_value = decision.action_proposed
+                except Exception:
+                    state_value = "UNKNOWN"
+            self.metrics.record_decision(decision.confidence, state_value)
 
         # Register successful execution in deduplicator
         if not replay_mode and self.deduplicator:
@@ -293,10 +306,13 @@ class SwarmRunCoordinator:
         """Registra um passo de agente no histórico para o console."""
         if run_id in self._execution_history:
             status = "SUCCESS" if execution.is_successful() else "FAILED"
+            # Safely format latency if available and numeric
+            latency_val = getattr(execution, 'duration_seconds', None)
+            latency_str = f"{latency_val:.2f}s" if isinstance(latency_val, (int, float)) else "0.0s"
             step = {
                 "name": execution.agent_id,
                 "status": status,
-                "latency": f"{execution.duration_seconds:.2f}s" if hasattr(execution, 'duration_seconds') else "0.0s",
+                "latency": latency_str,
                 "details": f"Agent {execution.agent_id} finished with status {status}"
             }
             self._execution_history[run_id]["agents"].append(step)

@@ -57,6 +57,8 @@
   let incidentData = null
   let incidentList = []
   let autoRefreshInterval = null
+  let elapsedTimerId = null
+  let selectedAgent = null
 
   function getApiUrl() {
     return `/api/incidents/${currentIncident}`
@@ -76,6 +78,8 @@
       populateIncidentSelector()
     } catch (err) {
       console.error('Failed to load incident list:', err)
+      // Fallback: try again in 5 seconds
+      setTimeout(loadIncidentList, 5000)
     }
   }
 
@@ -84,7 +88,7 @@
     if (!selector || !incidentList || incidentList.length === 0) return
 
     selector.innerHTML = incidentList
-      .map(inc => `<option value="${inc.id}">${inc.id}: ${inc.alert_name}</option>`)
+      .map(inc => `<option value="${inc.id}">${inc.id}: ${inc.alert_name.substring(0, 50)}...</option>`)
       .join('')
     
     if (currentIncident) {
@@ -137,7 +141,7 @@
     }
 
     const agentCards = agents.map(agent => `
-      <div class="flex flex-col items-center gap-3 p-4 rounded-lg border border-border-dark bg-surface-dark/50 hover:bg-surface-dark transition-colors group cursor-pointer">
+      <div class="flex flex-col items-center gap-3 p-4 rounded-lg border border-border-dark bg-surface-dark/50 hover:bg-surface-dark transition-colors group cursor-pointer" onclick="selectAgent('${agent.key}')">
         <div class="flex items-center justify-center w-12 h-12 rounded-full ${colorClasses[agent.color] || colorClasses['blue']} border border-current/30">
           <span class="material-symbols-outlined text-[24px]">${agent.icon}</span>
         </div>
@@ -162,6 +166,64 @@
     `
   }
 
+  function selectAgent(agentKey) {
+    if (!incidentData || !incidentData.agents) return
+    selectedAgent = incidentData.agents.find(agent => agent.key === agentKey)
+    if (selectedAgent) {
+      updateSidebar(selectedAgent)
+    }
+  }
+
+  function updateSidebar(agent) {
+    // Update agent name
+    const nameEl = document.querySelector('aside h3')
+    if (nameEl) nameEl.textContent = agent.name
+
+    // Update status
+    const statusEl = document.querySelector('aside p span')
+    if (statusEl) statusEl.textContent = agent.status === 'completed' ? 'Concluído' : 'Executando'
+
+    // Update icon
+    const iconEl = document.querySelector('aside .material-symbols-outlined')
+    if (iconEl) iconEl.textContent = agent.icon
+
+    // Update duration (mock or from data)
+    const durationEl = document.querySelector('aside .grid p:nth-child(2)')
+    if (durationEl) durationEl.textContent = agent.duration || '142ms'
+
+    // Update memory
+    const memoryEl = document.querySelector('aside .grid p:nth-child(4)')
+    if (memoryEl) memoryEl.textContent = agent.memory || '128MB'
+
+    // Update version
+    const versionEl = document.querySelector('aside .flex-col span:nth-child(2)')
+    if (versionEl) versionEl.textContent = agent.version || 'v4.2.0-beta'
+
+    // Update threshold
+    const thresholdEl = document.querySelector('aside .flex-col span:nth-child(4)')
+    if (thresholdEl) thresholdEl.textContent = agent.threshold || '0.85'
+
+    // Update region
+    const regionEl = document.querySelector('aside .flex-col span:nth-child(6)')
+    if (regionEl) regionEl.textContent = agent.region || 'us-east-1'
+
+    // Update input params (mock)
+    const inputEl = document.querySelector('aside pre')
+    if (inputEl) inputEl.textContent = JSON.stringify(agent.input_params || { "entity_id": "cust_8821", "check_depth": "deep" }, null, 2)
+
+    // Update output flags (mock)
+    const flagsEl = document.querySelector('aside .flex-wrap')
+    if (flagsEl) {
+      flagsEl.innerHTML = (agent.output_flags || ['alto_risco', 'correspondencia_encontrada']).map(flag => 
+        `<span class="px-2 py-1 rounded-full bg-red-500/10 text-red-400 text-[10px] font-mono border border-red-500/20">${flag}</span>`
+      ).join('')
+    }
+
+    // Update ID
+    const idEl = document.querySelector('aside .border-t p')
+    if (idEl) idEl.textContent = `ID: ${agent.id || 'node_1992-88x-221'}`
+  }
+
   function populateDashboard() {
     if (!incidentData) return
 
@@ -181,7 +243,7 @@
     if (totalEl) totalEl.textContent = `/ 8 implantados`
 
     const timeEl = el('elapsed-time')
-    if (timeEl) timeEl.textContent = incidentData.elapsed_time_ms || 'N/A'
+    if (timeEl) startElapsedTimer(incidentData)
 
     const costEl = el('estimated-cost')
     if (costEl) costEl.textContent = incidentData.estimated_cost || 'N/A'
@@ -204,6 +266,55 @@
     autoRefreshInterval = setInterval(() => {
       loadIncidentData()
     }, intervalMs)
+  }
+
+  function stopElapsedTimer() {
+    if (elapsedTimerId) {
+      clearInterval(elapsedTimerId)
+      elapsedTimerId = null
+    }
+  }
+
+  function formatDuration(ms) {
+    if (ms == null || isNaN(ms)) return 'N/A'
+    const totalSeconds = Math.floor(ms / 1000)
+    const hours = Math.floor(totalSeconds / 3600)
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+    const seconds = totalSeconds % 60
+    if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`
+    if (minutes > 0) return `${minutes}m ${seconds}s`
+    return `${seconds}s`
+  }
+
+  function startElapsedTimer(data) {
+    stopElapsedTimer()
+    const el = (id) => document.getElementById(id)
+    const timeEl = el('elapsed-time')
+    if (!timeEl) return
+
+    // Determine start timestamp
+    let startTs = null
+    if (data && data.created_at) {
+      const parsed = Date.parse(data.created_at)
+      if (!isNaN(parsed)) startTs = parsed
+    }
+    if (startTs == null && data && typeof data.elapsed_time_ms === 'number') {
+      // reconstruct approximate start time from provided elapsed snapshot
+      startTs = Date.now() - data.elapsed_time_ms
+    }
+
+    if (startTs == null) {
+      timeEl.textContent = 'N/A'
+      return
+    }
+
+    const tick = () => {
+      const elapsed = Date.now() - startTs
+      timeEl.textContent = formatDuration(elapsed)
+    }
+
+    tick()
+    elapsedTimerId = setInterval(tick, 1000)
   }
 
   function stopAutoRefresh() {

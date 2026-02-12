@@ -1,16 +1,9 @@
 from typing import List, Dict, Any, Optional, Set
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from swarm_intelligence.policy.retry_policy import RetryPolicy
 from .enums import EvidenceType, HumanAction, RiskLevel
-
-# Forward declaration for type hinting
-class DecisionContext(BaseModel): pass
-class ConfidenceSnapshot(BaseModel): pass
-class RetryAttempt(BaseModel): pass
-class AgentExecution(BaseModel): pass
-class Evidence(BaseModel): pass
 
 class RetryDecision(BaseModel):
     """Represents a decision made by the RetryController about a failed execution."""
@@ -48,6 +41,8 @@ class AgentExecution(BaseModel):
 
 class SwarmStep(BaseModel):
     """Defines a single step in a SwarmPlan."""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    
     agent_id: str
     step_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     mandatory: bool = True

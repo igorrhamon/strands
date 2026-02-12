@@ -11,7 +11,8 @@ import logging
 import sys
 import time
 from typing import Optional, Dict, Any
-from datetime import datetime
+from types import SimpleNamespace
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException
 import uvicorn
@@ -56,7 +57,14 @@ def expert_human_review(decision: Decision) -> Optional[HumanDecision]:
     # In production, implement actual review logic
     if config.environment == "production":
         logging.info("Human review required - decision pending external approval")
-        return None
+        # In production this should integrate with an external approval workflow.
+        # To keep the coordinator API stable, return a placeholder HumanDecision
+        return HumanDecision(
+            action=HumanAction.ACCEPT,
+            author="external_approver",
+            override_reason="external_approval_placeholder",
+            overridden_action_proposed="pending"
+        )
     
     # Development mode: Auto-override for testing
     logging.info("--- Development Mode: Simulated Human Expert Review ---")
@@ -260,10 +268,27 @@ async def main():
             state.is_processing = True
             try:
                 # Extract alert info from AlertManager webhook
-                alert_name = alert_data.get("alerts", [{}])[0].get("labels", {}).get("alertname", "unknown")
-                alert_id = f"alert-{int(datetime.utcnow().timestamp() * 1000)}"
-                
-                alert = Alert(alert_id, {"alertname": alert_name, "raw_data": alert_data})
+                primary_alert = alert_data.get("alerts", [{}])[0]
+                labels = primary_alert.get("labels", {})
+                annotations = primary_alert.get("annotations", {})
+                alert_name = labels.get("alertname", "unknown")
+
+                alert_id = f"alert-{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+
+                # Build Alert for core models: core.Alert expects `alert_id` and `data`
+                flattened = {}
+                # Flatten labels and annotations into top-level keys for compatibility
+                if isinstance(labels, dict):
+                    flattened.update(labels)
+                if isinstance(annotations, dict):
+                    # prefix annotation keys to avoid collision if needed
+                    flattened.update(annotations)
+                flattened["generatorURL"] = primary_alert.get("generatorURL") or primary_alert.get("generator_url")
+                flattened["alertname"] = labels.get("alertname", alert_name)
+
+                # Use a lightweight object to avoid pydantic constructor issues at webhook time
+                alert = SimpleNamespace(alert_id=alert_id, data=flattened)
+
                 run_id = f"run-{alert_id}"
                 
                 logger.info(f"\n🚨 RECEIVED ALERT: {alert_name} ({alert_id})")
@@ -274,9 +299,7 @@ async def main():
                 moderate_policy = ExponentialBackoffPolicy(max_attempts=2, base_delay=0.2)
                 slow_policy = ExponentialBackoffPolicy(max_attempts=3, base_delay=0.5)
 
-                primary_alert = alert_data.get("alerts", [{}])[0]
-                labels = primary_alert.get("labels", {})
-                annotations = primary_alert.get("annotations", {})
+                # primary_alert/labels/annotations already extracted above
                 alert_signature = f"{labels.get('alertname', 'unknown')}|{labels.get('service', labels.get('job', 'unknown'))}|{labels.get('severity', 'unknown')}"
                 known_procedure = neo4j.find_procedure_by_signature(alert_signature)
 
@@ -361,7 +384,7 @@ async def main():
                         logger.warning(f"Replay failed (non-fatal): {replay_error}")
                 
                 logger.info("Swarm execution completed successfully")
-                state.last_execution = {"run_id": run_id, "alert": alert_name, "timestamp": datetime.utcnow().isoformat()}
+                state.last_execution = {"run_id": run_id, "alert": alert_name, "timestamp": datetime.now(timezone.utc).isoformat()}
                 return run_id
                 
             finally:

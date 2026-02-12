@@ -14,9 +14,43 @@ services:
       - QDRANT__LOG_LEVEL=INFO
     networks:
       - strads_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.10'
+          memory: 128M
     # Note: the qdrant image does not include `curl`, so in-container HTTP
     # checks will fail. Health is verified externally by the host (prometheus
     # or the app) — omitting container healthcheck to avoid false `unhealthy`.
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis-strads
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    environment:
+      - REDIS_PORT=6379
+    networks:
+      - strads_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.10'
+          memory: 64M
+        reservations:
+          cpus: '0.05'
+          memory: 32M
     restart: unless-stopped
 
   neo4j:
@@ -33,9 +67,9 @@ services:
     environment:
       - NEO4J_AUTH=${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD}
       - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
-      - NEO4J_dbms_memory_pagecache_size=512M
-      - NEO4J_dbms_memory_heap_initial__size=512M
-      - NEO4J_dbms_memory_heap_max__size=1G
+      - NEO4J_dbms_memory_pagecache_size=128M
+      - NEO4J_dbms_memory_heap_initial__size=128M
+      - NEO4J_dbms_memory_heap_max__size=256M
       - NEO4J_dbms_security_procedures_unrestricted=apoc.*
       - NEO4J_dbms_security_procedures_allowlist=apoc.*
     networks:
@@ -45,7 +79,16 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 40s
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
 
   prometheus:
     image: prom/prometheus:latest
@@ -66,6 +109,14 @@ services:
       - "host.docker.internal:host-gateway"
     networks:
       - strads_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.10'
+          memory: 128M
     restart: unless-stopped
 
   alertmanager:
@@ -83,6 +134,14 @@ services:
       - '--storage.path=/alertmanager'
     networks:
       - strads_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.20'
+          memory: 128M
+        reservations:
+          cpus: '0.05'
+          memory: 64M
     restart: unless-stopped
 
   grafana:
@@ -99,6 +158,14 @@ services:
       - strads_network
     depends_on:
       - prometheus
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.10'
+          memory: 128M
     restart: unless-stopped
 
   grafana-proxy:
@@ -112,6 +179,14 @@ services:
       - strads_network
     depends_on:
       - grafana
+    deploy:
+      resources:
+        limits:
+          cpus: '0.10'
+          memory: 64M
+        reservations:
+          cpus: '0.05'
+          memory: 32M
     restart: unless-stopped
 
   ollama:
@@ -125,6 +200,14 @@ services:
       - OLLAMA_HOST=0.0.0.0:11434
     networks:
       - strads_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 4512M
+        reservations:
+          cpus: '0.20'
+          memory: 256M
     restart: unless-stopped
 
   strands-agent-orchestrator:
@@ -136,6 +219,7 @@ services:
     container_name: strands-agent-orchestrator
     ports:
       - "8080:8080"
+      - "5678:5678" # debugpy remote debug port
     volumes:
       - ./examples:/app/examples
       - ./src:/app/src
@@ -151,18 +235,24 @@ services:
       - QDRANT_PORT=6333
       - PROMETHEUS_URL=${PROMETHEUS_URL:-http://prometheus-strads:9090}
       - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=ministral-3:3b
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - ENVIRONMENT=${ENVIRONMENT:-development}
+      - REDIS_URL=redis://redis-strads:6379/0
+      - ENABLE_DEBUG=${ENABLE_DEBUG:-1}
+      - PYDEVD_DISABLE_FILE_VALIDATION=1
     networks:
       - strads_network
     depends_on:
-      neo4j:
-        condition: service_started
+      #neo4j:
+        #condition: service_healthy
       qdrant:
         condition: service_started
       prometheus:
         condition: service_started
       ollama:
+        condition: service_started
+      redis:
         condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/health"]
@@ -170,8 +260,16 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
     restart: on-failure
-    command: ["python3", "main.py"]
+    command: ["sh", "-c", "if [ \"$ENABLE_DEBUG\" = \"1\" ]; then python3 -Xfrozen_modules=off -m debugpy --listen 0.0.0.0:5678 main.py; else python3 main.py; fi"]
 
   strands-dashboard:
     env_file:
@@ -216,6 +314,14 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.10'
+          memory: 128M
     restart: unless-stopped
     command: [
       "uvicorn",
@@ -227,6 +333,8 @@ services:
   
 volumes:
   qdrant_storage:
+    driver: local
+  redis_data:
     driver: local
   neo4j_data:
     driver: local
