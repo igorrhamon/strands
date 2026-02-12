@@ -36,7 +36,7 @@ class ReplayEngine:
         alert = original_run_context.get('alert')
         original_seed = original_run_context.get('master_seed')
 
-        replayed_run, _, _ = await coordinator.aexecute_plan(domain_to_replay, plan_to_replay, alert, run_id, master_seed=original_seed)
+        replayed_run, _, _ = await coordinator.aexecute_plan(domain_to_replay, plan_to_replay, alert, run_id, master_seed=original_seed, replay_mode=True)
         replayed_decision = replayed_run.final_decision
 
         # coordinator.disable_replay_mode()

@@ -22,9 +22,43 @@ services:
         reservations:
           cpus: '0.10'
           memory: 128M
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.10'
+          memory: 128M
     # Note: the qdrant image does not include `curl`, so in-container HTTP
     # checks will fail. Health is verified externally by the host (prometheus
     # or the app) — omitting container healthcheck to avoid false `unhealthy`.
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis-strads
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    environment:
+      - REDIS_PORT=6379
+    networks:
+      - strads_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.10'
+          memory: 64M
+        reservations:
+          cpus: '0.05'
+          memory: 32M
     restart: unless-stopped
 
   redis:
@@ -204,7 +238,7 @@ services:
       resources:
         limits:
           cpus: '0.50'
-          memory: 4512M
+          memory: 5012M
         reservations:
           cpus: '0.20'
           memory: 256M

@@ -27,6 +27,8 @@ pytest-mock>=3.10.0
 pytest-asyncio>=0.21.0
 kubernetes
 
+apscheduler>=3.0.0
+
 # Remote debugger for Python (used when ENABLE_DEBUG=1 in docker-compose)
 debugpy>=1.6.0
 
