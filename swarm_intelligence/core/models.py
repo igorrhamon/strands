@@ -80,6 +80,22 @@ class Decision(BaseModel):
     monitor_policy: Optional[MonitorPolicy] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
+    # Backward compatibility properties for legacy code
+    @property
+    def evidence_summary(self) -> str:
+        """Backward compatibility: maps to summary."""
+        return self.summary
+    
+    @property
+    def recommended_action(self) -> str:
+        """Backward compatibility: maps to action_proposed."""
+        return self.action_proposed
+    
+    @property
+    def confidence_score(self) -> float:
+        """Backward compatibility: maps to confidence."""
+        return self.confidence
+
 class Alert(BaseModel):
     """Represents an incoming event that may trigger a swarm run."""
     alert_id: str
