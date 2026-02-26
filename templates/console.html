@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Strands Operational Console</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: #0d1117;
+            color: #c9d1d9;
+            line-height: 1.6;
+        }
+
+        .console-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* ============= HEADER ============= */
+        .console-header {
+            background: linear-gradient(135deg, #1c2128 0%, #0d1117 100%);
+            border-bottom: 2px solid #30363d;
+            padding: 16px 24px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-top {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr;
+            gap: 32px;
+            margin-bottom: 12px;
+        }
+
+        .header-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .header-label {
+            font-size: 11px;
+            color: #8b949e;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .header-value {
+            font-size: 14px;
+            color: #58a6ff;
+            font-weight: bold;
+            font-family: 'Courier New', monospace;
+        }
+
+        .header-status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-top: 4px;
+        }
+
+        .status-completed {
+            background: #238636;
+            color: #fff;
+        }
+
+        .status-pending {
+            background: #d29922;
+            color: #fff;
+        }
+
+        .status-failed {
+            background: #da3633;
+            color: #fff;
+        }
+
+        .header-bottom {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            color: #8b949e;
+        }
+
+        .header-meta {
+            display: flex;
+            gap: 24px;
+        }
+
+        .meta-item {
+            display: flex;
+            gap: 8px;
+        }
+
+        .meta-label {
+            color: #8b949e;
+        }
+
+        .meta-value {
+            color: #58a6ff;
+            font-weight: bold;
+        }
+
+        /* ============= TIMELINE ============= */
+        .timeline-section {
+            padding: 20px 24px;
+            background: #0d1117;
+            border-bottom: 1px solid #30363d;
+            overflow-y: auto;
+            flex: 0 0 auto;
+            max-height: 280px;
+        }
+
+        .timeline-title {
+            font-size: 12px;
+            color: #8b949e;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+        }
+
+        .timeline-items {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .timeline-item {
+            display: grid;
+            grid-template-columns: 200px 100px 80px 1fr;
+            gap: 16px;
+            align-items: center;
+            padding: 10px 12px;
+            background: #161b22;
+            border-left: 3px solid #30363d;
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .timeline-item.success {
+            border-left-color: #238636;
+        }
+
+        .timeline-item.retry {
+            border-left-color: #d29922;
+        }
+
+        .timeline-item.failed {
+            border-left-color: #da3633;
+        }
+
+        .timeline-agent-name {
+            color: #58a6ff;
+            font-weight: bold;
+        }
+
+        .timeline-status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: bold;
+            text-align: center;
+        }
+
+        .timeline-status.success {
+            background: #238636;
+            color: #fff;
+        }
+
+        .timeline-status.retry {
+            background: #d29922;
+            color: #fff;
+        }
+
+        .timeline-status.failed {
+            background: #da3633;
+            color: #fff;
+        }
+
+        .timeline-latency {
+            color: #79c0ff;
+            text-align: right;
+        }
+
+        .timeline-details {
+            color: #8b949e;
+            font-size: 12px;
+        }
+
+        /* ============= TABS ============= */
+        .tabs-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .tabs-header {
+            display: flex;
+            gap: 0;
+            background: #161b22;
+            border-bottom: 1px solid #30363d;
+            padding: 0 24px;
+            overflow-x: auto;
+        }
+
+        .tab-button {
+            padding: 12px 16px;
+            background: transparent;
+            border: none;
+            color: #8b949e;
+            cursor: pointer;
+            font-size: 13px;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+            white-space: nowrap;
+            font-family: 'Courier New', monospace;
+        }
+
+        .tab-button:hover {
+            color: #c9d1d9;
+        }
+
+        .tab-button.active {
+            color: #58a6ff;
+            border-bottom-color: #58a6ff;
+        }
+
+        .tabs-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px 24px;
+        }
+
+        .tab-pane {
+            display: none;
+        }
+
+        .tab-pane.active {
+            display: block;
+        }
+
+        /* ============= TAB CONTENT STYLES ============= */
+        .confidence-breakdown {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+
+        .breakdown-item {
+            background: #161b22;
+            padding: 16px;
+            border-radius: 6px;
+            border-left: 3px solid #58a6ff;
+        }
+
+        .breakdown-label {
+            font-size: 12px;
+            color: #8b949e;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        .breakdown-value {
+            font-size: 24px;
+            color: #58a6ff;
+            font-weight: bold;
+            font-family: 'Courier New', monospace;
+        }
+
+        .breakdown-detail {
+            font-size: 12px;
+            color: #8b949e;
+            margin-top: 8px;
+        }
+
+        .rag-evidence-item {
+            background: #161b22;
+            padding: 16px;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            border-left: 3px solid #238636;
+        }
+
+        .rag-title {
+            color: #58a6ff;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .rag-detail {
+            font-size: 12px;
+            color: #8b949e;
+            margin: 4px 0;
+        }
+
+        .rag-score {
+            display: inline-block;
+            background: #0d1117;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: 8px;
+            color: #79c0ff;
+        }
+
+        .retry-attempt {
+            background: #161b22;
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            border-left: 3px solid #d29922;
+        }
+
+        .retry-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .retry-attempt-num {
+            color: #58a6ff;
+            font-weight: bold;
+        }
+
+        .retry-status {
+            color: #238636;
+        }
+
+        .retry-status.failed {
+            color: #da3633;
+        }
+
+        .retry-error {
+            font-size: 12px;
+            color: #da3633;
+            margin-top: 8px;
+        }
+
+        .json-viewer {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 12px;
+            font-size: 12px;
+            overflow-x: auto;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .json-key {
+            color: #79c0ff;
+        }
+
+        .json-string {
+            color: #a371f7;
+        }
+
+        .json-number {
+            color: #79c0ff;
+        }
+
+        .json-boolean {
+            color: #79c0ff;
+        }
+
+        /* ============= SCROLLBAR ============= */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #0d1117;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #30363d;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #484f58;
+        }
+
+        /* ============= RESPONSIVE ============= */
+        @media (max-width: 1400px) {
+            .header-top {
+                grid-template-columns: 1fr 1fr;
+                gap: 24px;
+            }
+
+            .confidence-breakdown {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .header-top {
+                grid-template-columns: 1fr;
+            }
+
+            .timeline-item {
+                grid-template-columns: 1fr;
+                gap: 8px;
+            }
+
+            .tabs-header {
+                overflow-x: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="console-container">
+        <!-- HEADER -->
+        <div class="console-header">
+            <div class="header-top">
+                <div class="header-item">
+                    <span class="header-label">Run ID</span>
+                    <span class="header-value" id="runId">run-2026-02-11-001</span>
+                </div>
+                <div class="header-item">
+                    <span class="header-label">Alert / Domain / Risk</span>
+                    <span class="header-value" id="alertInfo">alert-12345 / payment-service / CRITICAL</span>
+                </div>
+                <div class="header-item">
+                    <span class="header-label">Final Decision</span>
+                    <span class="header-value" id="finalDecision">ESCALATE</span>
+                </div>
+                <div class="header-item">
+                    <span class="header-label">Confidence / Status</span>
+                    <div>
+                        <span class="header-value" id="confidence">0.92</span>
+                        <span class="header-status status-completed" id="status">COMPLETED</span>
+                    </div>
+                </div>
+            </div>
+            <div class="header-bottom">
+                <div class="header-meta">
+                    <div class="meta-item">
+                        <span class="meta-label">Total Latency:</span>
+                        <span class="meta-value" id="latency">2847ms</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Confidence Model:</span>
+                        <span class="meta-value" id="modelVersion">v2.1</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Requires Review:</span>
+                        <span class="meta-value" id="requiresReview">NO</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TIMELINE -->
+        <div class="timeline-section">
+            <div class="timeline-title">Agent Execution Timeline</div>
+            <div class="timeline-items" id="timelineItems">
+                <div class="timeline-item success">
+                    <div class="timeline-agent-name">[LogAnalysisAgent]</div>
+                    <div class="timeline-status success">SUCCESS</div>
+                    <div class="timeline-latency">120ms</div>
+                    <div class="timeline-details">Found 3 ERROR logs in pod payment-service-1</div>
+                </div>
+                <div class="timeline-item success">
+                    <div class="timeline-agent-name">[NetworkScannerAgent]</div>
+                    <div class="timeline-status success">SUCCESS</div>
+                    <div class="timeline-latency">310ms</div>
+                    <div class="timeline-details">Network latency to DB: 45ms (normal)</div>
+                </div>
+                <div class="timeline-item retry">
+                    <div class="timeline-agent-name">[ThreatIntelAgent]</div>
+                    <div class="timeline-status retry">RETRY(1)</div>
+                    <div class="timeline-latency">420ms</div>
+                    <div class="timeline-details">Threat level: LOW (after 1 retry)</div>
+                </div>
+                <div class="timeline-item success">
+                    <div class="timeline-agent-name">[RecommenderAgent]</div>
+                    <div class="timeline-status success">SUCCESS</div>
+                    <div class="timeline-latency">95ms</div>
+                    <div class="timeline-details">Recommended action: ESCALATE to on-call</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TABS -->
+        <div class="tabs-section">
+            <div class="tabs-header">
+                <button class="tab-button active" onclick="switchTab('agent-outputs')">Agent Outputs</button>
+                <button class="tab-button" onclick="switchTab('confidence')">Confidence Breakdown</button>
+                <button class="tab-button" onclick="switchTab('rag-evidence')">RAG Evidence</button>
+                <button class="tab-button" onclick="switchTab('retries')">Retry Attempts</button>
+                <button class="tab-button" onclick="switchTab('raw-json')">Raw JSON</button>
+                <button class="tab-button" onclick="switchTab('neo4j')">Neo4j Persistence</button>
+            </div>
+
+            <div class="tabs-content">
+                <!-- Agent Outputs Tab -->
+                <div id="agent-outputs" class="tab-pane active">
+                    <div style="color: #8b949e; font-size: 12px;">
+                        <p><strong style="color: #58a6ff;">[LogAnalysisAgent]</strong></p>
+                        <p>Found 3 ERROR logs in pod payment-service-1 (last 10 minutes)</p>
+                        <p style="margin-top: 12px; color: #da3633;">ERROR: Database connection failed</p>
+                        <p style="margin-top: 12px; color: #da3633;">ERROR: Timeout connecting to cache</p>
+                        <p style="margin-top: 12px; color: #da3633;">ERROR: Payment gateway unreachable</p>
+                        
+                        <p style="margin-top: 20px;"><strong style="color: #58a6ff;">[NetworkScannerAgent]</strong></p>
+                        <p>Network latency to primary database: 45ms (normal)</p>
+                        <p>Network latency to cache: 12ms (normal)</p>
+                        <p>Network latency to payment gateway: 250ms (elevated)</p>
+                        
+                        <p style="margin-top: 20px;"><strong style="color: #58a6ff;">[ThreatIntelAgent]</strong></p>
+                        <p>Threat level: LOW</p>
+                        <p>No known vulnerabilities in payment-service version 2.3.1</p>
+                    </div>
+                </div>
+
+                <!-- Confidence Breakdown Tab -->
+                <div id="confidence" class="tab-pane">
+                    <div class="confidence-breakdown">
+                        <div class="breakdown-item">
+                            <div class="breakdown-label">Base Weighted Score</div>
+                            <div class="breakdown-value">0.81</div>
+                            <div class="breakdown-detail">
+                                Log Analysis: 0.85<br>
+                                Network Health: 0.78<br>
+                                Threat Intel: 0.80
+                            </div>
+                        </div>
+                        <div class="breakdown-item">
+                            <div class="breakdown-label">Risk Adjustment</div>
+                            <div class="breakdown-value">+0.05</div>
+                            <div class="breakdown-detail">CRITICAL risk level requires higher confidence</div>
+                        </div>
+                        <div class="breakdown-item">
+                            <div class="breakdown-label">Category Multiplier</div>
+                            <div class="breakdown-value">x0.92</div>
+                            <div class="breakdown-detail">payment-service: Financial services require stricter thresholds</div>
+                        </div>
+                        <div class="breakdown-item">
+                            <div class="breakdown-label">Final Score</div>
+                            <div class="breakdown-value">0.92</div>
+                            <div class="breakdown-detail">
+                                Threshold: 0.85<br>
+                                Auto-Approval: <span style="color: #238636;">YES</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- RAG Evidence Tab -->
+                <div id="rag-evidence" class="tab-pane">
+                    <div>
+                        <h3 style="color: #58a6ff; margin-bottom: 12px;">Similar Historical Decisions</h3>
+                        <div class="rag-evidence-item">
+                            <div class="rag-title">decision-2026-02-10-042</div>
+                            <div class="rag-detail">Alert: PaymentServiceHighLatency</div>
+                            <div class="rag-detail">Decision: ESCALATE <span class="rag-score">0.94 similarity</span></div>
+                            <div class="rag-detail">Historical Confidence: 0.89</div>
+                        </div>
+                        <div class="rag-evidence-item">
+                            <div class="rag-title">decision-2026-02-09-156</div>
+                            <div class="rag-detail">Alert: PaymentServiceHighLatency</div>
+                            <div class="rag-detail">Decision: MONITOR <span class="rag-score">0.87 similarity</span></div>
+                            <div class="rag-detail">Historical Confidence: 0.72</div>
+                        </div>
+
+                        <h3 style="color: #58a6ff; margin-top: 24px; margin-bottom: 12px;">Applied Runbooks</h3>
+                        <div class="rag-evidence-item">
+                            <div class="rag-title">rb-payment-latency-001</div>
+                            <div class="rag-detail">Payment Service High Latency Response</div>
+                            <div class="rag-detail">Section: Immediate Actions <span class="rag-score">0.96 relevance</span></div>
+                            <div class="rag-detail" style="margin-top: 8px; color: #c9d1d9;">
+                                1. Check database connection pool<br>
+                                2. Verify network latency to payment gateway<br>
+                                3. Review recent deployments
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Retry Attempts Tab -->
+                <div id="retries" class="tab-pane">
+                    <div>
+                        <h3 style="color: #58a6ff; margin-bottom: 12px;">ThreatIntelAgent - 2 Attempts</h3>
+                        <div class="retry-attempt">
+                            <div class="retry-header">
+                                <span class="retry-attempt-num">Attempt 1</span>
+                                <span class="retry-status failed">FAILED</span>
+                            </div>
+                            <div class="rag-detail">Error: Timeout connecting to threat DB</div>
+                            <div class="rag-detail">Latency: 300ms</div>
+                            <div class="retry-error">Connection timeout after 5s</div>
+                        </div>
+                        <div class="retry-attempt" style="border-left-color: #238636;">
+                            <div class="retry-header">
+                                <span class="retry-attempt-num">Attempt 2</span>
+                                <span class="retry-status">SUCCESS</span>
+                            </div>
+                            <div class="rag-detail">Latency: 120ms</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Raw JSON Tab -->
+                <div id="raw-json" class="tab-pane">
+                    <div class="json-viewer">
+                        <pre>{
+  <span class="json-key">"run_id"</span>: <span class="json-string">"run-2026-02-11-001"</span>,
+  <span class="json-key">"alert_id"</span>: <span class="json-string">"alert-12345"</span>,
+  <span class="json-key">"domain"</span>: <span class="json-string">"payment-service"</span>,
+  <span class="json-key">"risk_level"</span>: <span class="json-string">"CRITICAL"</span>,
+  <span class="json-key">"final_decision"</span>: <span class="json-string">"ESCALATE"</span>,
+  <span class="json-key">"confidence_score"</span>: <span class="json-number">0.92</span>,
+  <span class="json-key">"total_latency_ms"</span>: <span class="json-number">2847</span>,
+  <span class="json-key">"status"</span>: <span class="json-string">"COMPLETED"</span>,
+  <span class="json-key">"timestamp_start"</span>: <span class="json-string">"2026-02-11T14:30:00Z"</span>,
+  <span class="json-key">"timestamp_end"</span>: <span class="json-string">"2026-02-11T14:30:02.847Z"</span>
+}</pre>
+                    </div>
+                </div>
+
+                <!-- Neo4j Persistence Tab -->
+                <div id="neo4j" class="tab-pane">
+                    <div>
+                        <div class="breakdown-item">
+                            <div class="breakdown-label">Persisted</div>
+                            <div class="breakdown-value" style="color: #238636;">YES</div>
+                        </div>
+                        <div class="breakdown-item" style="margin-top: 12px;">
+                            <div class="breakdown-label">Neo4j Node ID</div>
+                            <div class="breakdown-value">decision-node-98765</div>
+                        </div>
+                        <div class="breakdown-item" style="margin-top: 12px;">
+                            <div class="breakdown-label">Persistence Timestamp</div>
+                            <div class="breakdown-value" style="font-size: 14px;">2026-02-11T14:30:03.100Z</div>
+                        </div>
+                        <h3 style="color: #58a6ff; margin-top: 24px; margin-bottom: 12px;">Graph Relationships</h3>
+                        <div class="rag-evidence-item">
+                            <div class="rag-detail"><strong>CAUSED_BY</strong> → alert-node-12345</div>
+                        </div>
+                        <div class="rag-evidence-item">
+                            <div class="rag-detail"><strong>SIMILAR_TO</strong> → decision-node-98764</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function switchTab(tabName) {
+            // Hide all tab panes
+            const panes = document.querySelectorAll('.tab-pane');
+            panes.forEach(pane => pane.classList.remove('active'));
+
+            // Remove active class from all buttons
+            const buttons = document.querySelectorAll('.tab-button');
+            buttons.forEach(btn => btn.classList.remove('active'));
+
+            // Show selected tab pane
+            document.getElementById(tabName).classList.add('active');
+
+            // Add active class to clicked button
+            event.target.classList.add('active');
+        }
+
+        // Example: Load data from API
+        async function loadRunData(runId) {
+            try {
+                const response = await fetch(`/api/v1/console/runs/${runId}`);
+                const data = await response.json();
+                
+                // Update header
+                document.getElementById('runId').textContent = data.run_id;
+                document.getElementById('alertInfo').textContent = 
+                    `${data.alert_id} / ${data.domain} / ${data.risk_level}`;
+                document.getElementById('finalDecision').textContent = data.final_decision;
+                document.getElementById('confidence').textContent = data.confidence_score;
+                document.getElementById('latency').textContent = `${data.total_latency_ms}ms`;
+                document.getElementById('modelVersion').textContent = data.confidence_model_version;
+                document.getElementById('requiresReview').textContent = 
+                    data.requires_human_review ? 'YES' : 'NO';
+                
+                // Update status
+                const statusEl = document.getElementById('status');
+                statusEl.textContent = data.status;
+                statusEl.className = `header-status status-${data.status.toLowerCase()}`;
+            } catch (error) {
+                console.error('Failed to load run data:', error);
+            }
+        }
+
+        // Load data on page load (example run ID)
+        // loadRunData('run-2026-02-11-001');
+    </script>
+</body>
+</html>

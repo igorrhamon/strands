@@ -4,6 +4,7 @@ import pytest
 
 from types import SimpleNamespace
 from pathlib import Path
+from unittest.mock import patch
 
 import src.utils.audit_logger as audit_logger_mod
 from src.utils.alert_normalizer import AlertNormalizer
@@ -55,15 +56,21 @@ def test_alert_normalizer_timestamp_naive_is_coerced():
     assert errors is None or (isinstance(errors, list) and len(errors) == 0)
 
 
-def test_embedding_client_missing_sentence_transformer_attribute():
-    # The module is expected to expose SentenceTransformer; current codebase
-    # lacks it and tests earlier surfaced AttributeError. Assert behavior.
-    # The module should expose `SentenceTransformer` (shim). Attempting to
-    # instantiate the shim without the external dependency should raise a
-    # RuntimeError with a helpful message.
-    assert hasattr(embedding_client, "SentenceTransformer")
-    with pytest.raises(RuntimeError):
-        embedding_client.SentenceTransformer("model-name")
+def test_embedding_client_missing_sentence_transformer_attribute(monkeypatch):
+    # Mock sentence_transformers to be missing
+    import sys
+    with patch.dict(sys.modules, {'sentence_transformers': None}):
+        # Reload module to trigger the shim
+        import importlib
+        importlib.reload(embedding_client)
+        
+        assert hasattr(embedding_client, "SentenceTransformer")
+        with pytest.raises(RuntimeError) as excinfo:
+            embedding_client.SentenceTransformer("model-name")
+        assert "sentence-transformers is not installed" in str(excinfo.value)
+    
+    # Restore for other tests
+    importlib.reload(embedding_client)
 
 
 def test_metrics_analysisresult_validation_error():

@@ -1,106 +1,127 @@
-import uuid
-from typing import List, Dict, Optional, Set
-from swarm_intelligence.core.models import (
-    SwarmPlan,
-    SwarmStep,
-    AgentExecution,
-    RetryAttempt,
-    RetryDecision,
-    RetryEvaluationResult,
-)
-from swarm_intelligence.policy.retry_policy import RetryContext
-from swarm_intelligence.services.confidence_service import ConfidenceService
+"""SwarmRetryController for managing retry logic in swarm execution."""
+
+from typing import Optional, Dict, Any
+from dataclasses import dataclass
+from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class RetryDecision:
+    """Decision result from retry evaluation."""
+    should_retry: bool
+    delay_seconds: float
+    reason: str
+    attempt_number: int
+    max_attempts: int
 
 
 class SwarmRetryController:
-    """
-    Evaluates failed executions and decides if, when, and why a retry should happen.
-    This controller is a stateless policy engine.
-    """
-
-    async def evaluate(
-        self,
-        plan: SwarmPlan,
-        executions: List[AgentExecution],
-        previous_attempts: List[RetryAttempt],
-        confidence_service: ConfidenceService,
-        run_id: str,
-        master_seed: int,
-        successful_step_ids: Set[str],
-    ) -> RetryEvaluationResult:
-        steps_to_retry = []
-        new_retry_attempts = []
-        new_retry_decisions = []
-        newly_successful_step_ids = set()
-        max_delay = 0.0
-
-        executed_step_ids = {ex.step_id for ex in executions}
-
-        for step in plan.steps:
-            if step.step_id in successful_step_ids or step.step_id not in executed_step_ids:
-                continue
-
-            latest_execution = next(
-                (ex for ex in reversed(executions) if ex.step_id == step.step_id), None
-            )
-            if not latest_execution:
-                continue
-
-            if latest_execution.is_successful():
-                newly_successful_step_ids.add(step.step_id)
-                continue
-
-            if step.mandatory and step.retry_policy:
-                retries_for_step = [
-                    r for r in previous_attempts if r.step_id == step.step_id
-                ]
-                attempt_num = len(retries_for_step) + 1
-
-                context = RetryContext(
-                    run_id=run_id,
-                    step_id=step.step_id,
-                    agent_id=step.agent_id,
-                    attempt=attempt_num,
-                    error=latest_execution.error,
-                    random_seed=master_seed + attempt_num,
-                    last_confidence=confidence_service.get_last_confidence(
-                        step.agent_id
-                    ),
-                    domain_hints=[],  # Placeholder
-                )
-
-                if step.retry_policy.should_retry(context):
-                    delay = step.retry_policy.next_delay(context)
-                    max_delay = max(max_delay, delay)
-
-                    attempt_id = str(uuid.uuid4())
-
-                    decision = RetryDecision(
-                        step_id=step.step_id,
-                        reason=str(context.error),
-                        policy_name=step.retry_policy.__class__.__name__,
-                        policy_version=step.retry_policy.version,
-                        policy_logic_hash=step.retry_policy.logic_hash,
-                        attempt_id=attempt_id,
-                    )
-                    new_retry_decisions.append(decision)
-
-                    new_retry_attempts.append(
-                        RetryAttempt(
-                            step_id=step.step_id,
-                            attempt_number=context.attempt,
-                            delay_seconds=delay,
-                            reason=str(context.error),
-                            failed_execution_id=latest_execution.execution_id,
-                            attempt_id=attempt_id,
-                        )
-                    )
-                    steps_to_retry.append(step)
-
-        return RetryEvaluationResult(
-            steps_to_retry=steps_to_retry,
-            retry_attempts=new_retry_attempts,
-            retry_decisions=new_retry_decisions,
-            max_delay_seconds=max_delay,
-            newly_successful_step_ids=newly_successful_step_ids,
+    """Manages retry logic for swarm execution steps."""
+    
+    def __init__(self, max_retries: int = 3, base_delay: float = 1.0, max_delay: float = 60.0):
+        """Initialize retry controller.
+        
+        Args:
+            max_retries: Maximum number of retry attempts
+            base_delay: Initial delay in seconds
+            max_delay: Maximum delay in seconds
+        """
+        self.max_retries = max_retries
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self._retry_history: Dict[str, list] = {}
+    
+    def evaluate(self, run_id: str, step_id: str, error: Exception) -> RetryDecision:
+        """Evaluate whether a step should be retried.
+        
+        Args:
+            run_id: Run identifier
+            step_id: Step identifier
+            error: Exception that occurred
+        
+        Returns:
+            RetryDecision with retry recommendation
+        """
+        key = f"{run_id}:{step_id}"
+        
+        # Initialize history for this step if not present
+        if key not in self._retry_history:
+            self._retry_history[key] = []
+        
+        # Get current attempt count
+        attempt_count = len(self._retry_history[key])
+        
+        # Record this attempt
+        self._retry_history[key].append({
+            "timestamp": datetime.utcnow().isoformat(),
+            "error": str(error),
+            "error_type": type(error).__name__
+        })
+        
+        # Determine if retry should happen
+        should_retry = self._should_retry(attempt_count, error)
+        
+        # Calculate delay if retrying
+        delay = self._calculate_delay(attempt_count) if should_retry else 0.0
+        
+        reason = self._get_retry_reason(attempt_count, error, should_retry)
+        
+        decision = RetryDecision(
+            should_retry=should_retry,
+            delay_seconds=delay,
+            reason=reason,
+            attempt_number=attempt_count + 1,
+            max_attempts=self.max_retries
         )
+        
+        logger.debug(f"Retry evaluation for {key}: {decision}")
+        
+        return decision
+    
+    def _should_retry(self, attempt_count: int, error: Exception) -> bool:
+        """Determine if retry should be attempted."""
+        if attempt_count >= self.max_retries:
+            return False
+        
+        # Retry on transient errors
+        transient_errors = (
+            ConnectionError,
+            TimeoutError,
+            OSError,
+            RuntimeError,
+        )
+        
+        return isinstance(error, transient_errors)
+    
+    def _calculate_delay(self, attempt_count: int) -> float:
+        """Calculate delay using exponential backoff."""
+        if attempt_count < 0:
+            return 0.0
+        
+        delay = self.base_delay * (2 ** attempt_count)
+        return min(delay, self.max_delay)
+    
+    def _get_retry_reason(self, attempt_count: int, error: Exception, should_retry: bool) -> str:
+        """Get human-readable reason for retry decision."""
+        if not should_retry:
+            if attempt_count >= self.max_retries:
+                return f"Max retries ({self.max_retries}) exhausted"
+            else:
+                return f"Non-transient error: {type(error).__name__}"
+        
+        return f"Transient error, retrying (attempt {attempt_count + 1}/{self.max_retries})"
+    
+    def get_retry_history(self, run_id: str, step_id: str) -> list:
+        """Get retry history for a specific step."""
+        key = f"{run_id}:{step_id}"
+        return self._retry_history.get(key, [])
+    
+    def clear_history(self, run_id: str) -> None:
+        """Clear retry history for a run."""
+        keys_to_remove = [k for k in self._retry_history.keys() if k.startswith(f"{run_id}:")]
+        for key in keys_to_remove:
+            del self._retry_history[key]
+        logger.debug(f"Cleared retry history for run {run_id}")

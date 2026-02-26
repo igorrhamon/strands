@@ -508,12 +508,17 @@ class LLMResolutionAgentAdapter(Agent):
             version="1.0-llm-fallback",
             logic_hash=hashlib.md5(logic_str.encode()).hexdigest(),
         )
-        self.ollama_client = None
+        # Use centralized provider factory so the LLM backend can be selected
+        # via environment variable `LLM_PROVIDER` (e.g. 'ollama' or 'github').
+        self.llm_provider = None
         try:
-            from src.ollama_client import get_ollama_client
-            self.ollama_client = get_ollama_client()
+            from src.llm.provider_factory import LLMFactory
+
+            # Factory reads LLM_PROVIDER, LLM_API_KEY, LLM_MODEL, LLM_BASE_URL from env
+            self.llm_provider = LLMFactory.create_provider()
+            logger.info("✅ LLM provider initialized via LLMFactory")
         except Exception as e:
-            logger.warning(f"⚠️ LLM client unavailable, using heuristic fallback: {e}")
+            logger.warning(f"⚠️ LLM provider unavailable, using heuristic fallback: {e}")
 
     async def execute(self, params: Dict[str, Any], step_id: str) -> AgentExecution:
         execution = AgentExecution(
@@ -546,7 +551,7 @@ class LLMResolutionAgentAdapter(Agent):
             procedure = "manual_review"
             root_cause = "Insufficient evidence"
             llm_used = False
-            if self.ollama_client is not None:
+            if self.llm_provider is not None:
                 prompt = (
                     "Você é um engenheiro SRE. Com base nas evidências e contexto semântico, "
                     "retorne: causa provável e procedimento recomendado em 3 passos.\n"
@@ -555,7 +560,7 @@ class LLMResolutionAgentAdapter(Agent):
                     f"Semantic context: {semantic_context}\n"
                 )
                 try:
-                    llm_resp = await self.ollama_client.generate(prompt=prompt, temperature=0.2)
+                    llm_resp = await self.llm_provider.generate(prompt=prompt, temperature=0.2)
                     llm_used = True
                     root_cause = llm_resp[:400]
                     procedure = llm_resp[:600]

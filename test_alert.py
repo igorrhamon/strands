@@ -54,7 +54,7 @@ def send_alert(alert_name: str, severity: str = "critical", instance: str = "web
     
     try:
         # Send to AlertManager first (if running locally)
-        alertmanager_url = "http://localhost:9093/api/v1/alerts"
+        alertmanager_url = "http://localhost:9093/api/v2/alerts"
         print(f"📤 Sending alert to AlertManager: {alertmanager_url}")
         response = requests.post(alertmanager_url, json=[alert_payload["alerts"][0]], timeout=5)
         print(f"   ✓ AlertManager response: {response.status_code}")

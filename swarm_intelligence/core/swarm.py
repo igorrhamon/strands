@@ -22,7 +22,7 @@ class SwarmOrchestrator:
     The pure execution engine for the swarm. It executes a list of agents
     for given steps and returns the resulting AgentExecution events.
     """
-    def __init__(self, agents: Sequence[Agent], max_concurrency: int = 10, step_timeout: float = 60.0):
+    def __init__(self, agents: Sequence[Agent], max_concurrency: int = 10, step_timeout: float = 6000.0):
         self._agents = {agent.agent_id: agent for agent in agents}
         self.max_concurrency = max_concurrency
         self.step_timeout = step_timeout
@@ -35,7 +35,7 @@ class SwarmOrchestrator:
             return AgentExecution(
                 agent_id=step.agent_id, agent_version="N/A", logic_hash="N/A",
                 step_id=step.step_id, input_parameters=step.parameters,
-                error=Exception(f"Agent '{step.agent_id}' not found.")
+                error=f"Agent '{step.agent_id}' not found."
             )
         try:
             async with self._semaphore:
@@ -47,13 +47,13 @@ class SwarmOrchestrator:
             return AgentExecution(
                 agent_id=agent.agent_id, agent_version=agent.version, logic_hash=agent.logic_hash,
                 step_id=step.step_id, input_parameters=step.parameters,
-                error=Exception(f"Step timed out after {self.step_timeout}s")
+                error=f"Step timed out after {self.step_timeout}s"
             )
         except Exception as e:
             return AgentExecution(
                 agent_id=agent.agent_id, agent_version=agent.version, logic_hash=agent.logic_hash,
                 step_id=step.step_id, input_parameters=step.parameters,
-                error=e
+                error=str(e)
             )
 
     async def execute_swarm(self, steps: List[SwarmStep]) -> List[AgentExecution]:

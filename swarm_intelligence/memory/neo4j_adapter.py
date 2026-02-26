@@ -314,7 +314,7 @@ class Neo4jAdapter:
         MERGE (dc)-[:SUGGESTS_PROCEDURE]->(proc)
         MERGE (ap)-[:HAS_PROCEDURE]->(proc)
 
-        WITH run, dec
+        WITH run, dec, dc
         UNWIND $steps as step_param
         MERGE (step:SwarmStep {id: step_param.step_id})
         ON CREATE SET step.parameters = step_param.params
@@ -322,10 +322,12 @@ class Neo4jAdapter:
 
         MERGE (agent:Agent {id: step_param.agent_id})
 
-        WITH run, dec, step, agent, step_param.executions as executions_param
+        WITH run, dec, dc, step, agent, step_param.agent_id as agent_id, step_param.executions as executions_param
         UNWIND executions_param as exec_param
         CREATE (exec:AgentExecution {
             id: exec_param.execution_id,
+            agent_id: agent_id,
+            agent_name: agent_id,
             agent_version: exec_param.agent_version,
             logic_hash: exec_param.logic_hash,
             error: exec_param.error,
@@ -333,6 +335,7 @@ class Neo4jAdapter:
         })
         MERGE (step)-[:HAD_EXECUTION]->(exec)
         MERGE (agent)-[:EXECUTED]->(exec)
+        MERGE (dc)-[:EXECUTED_BY]->(exec)
 
         WITH run, dec, exec, exec_param.evidence as evidences_param
         UNWIND evidences_param as ev_param
@@ -381,13 +384,15 @@ class Neo4jAdapter:
             "step_id": s.step_id,
             "agent_id": s.agent_id,
             "params": json.dumps(s.parameters),
-            "executions": [{
+                "executions": [{
                 "execution_id": ex.execution_id,
                 "agent_version": ex.agent_version,
                 "logic_hash": ex.logic_hash,
                 "error": ex.error,
                 "evidence": [{
                     "evidence_id": e.evidence_id,
+                    "source_agent_execution_id": getattr(e, 'source_agent_execution_id', None),
+                    "agent_id": getattr(e, 'agent_id', None),
                     "content": json.dumps(_convert_enums_to_values(e.content)) if isinstance(e.content, dict) else str(e.content),
                     "confidence": e.confidence,
                     "evidence_type": e.evidence_type.value if isinstance(e.evidence_type, Enum) else e.evidence_type

@@ -136,3 +136,5 @@ __marimo__/
 .streamlit/secrets.toml
 uvicorn.out
 *.pyc
+.github/agents/speckit.constitution.agent.md
+.github/agents/speckit.constitution.agent.md

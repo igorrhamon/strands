@@ -6,8 +6,9 @@ Handles persistence of Agents, Alerts, Decisions and their relationships.
 
 import os
 import logging
+import uuid
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from neo4j import GraphDatabase, Driver
 
 from src.models.alert import Alert
@@ -212,4 +213,265 @@ class Neo4jRepository:
                     "severity": record["severity"]
                 })
         return decisions
+
+    def create_agent_execution(self, decision_id: str, agent_name: str, agent_config: dict) -> Optional[str]:
+        """
+        Create an AgentExecution node and link to DecisionCandidate.
+        RELATIONSHIP: (:DecisionCandidate)-[:EXECUTED_BY]->(:AgentExecution)
+        """
+        query = """
+        MATCH (d:DecisionCandidate {decision_id: $decision_id})
+        CREATE (e:AgentExecution {
+            execution_id: $execution_id,
+            agent_name: $agent_name,
+            status: $status,
+            confidence: $confidence,
+            started_at: $started_at,
+            completed_at: $completed_at,
+            duration_ms: $duration_ms,
+            input_params: $input_params,
+            output_flags: $output_flags,
+            memory_mb: $memory_mb,
+            model_version: $model_version
+        })
+        MERGE (d)-[:EXECUTED_BY]->(e)
+        RETURN e.execution_id as execution_id
+        """
+        
+        execution_id = str(uuid.uuid4())
+        
+        params = {
+            "decision_id": decision_id,
+            "execution_id": execution_id,
+            "agent_name": agent_name,
+            "status": agent_config.get("status", "pending"),
+            "confidence": agent_config.get("confidence", 0.5),
+            "started_at": agent_config.get("started_at", None),
+            "completed_at": agent_config.get("completed_at"),
+            "duration_ms": agent_config.get("duration_ms", 0),
+            "input_params": str(agent_config.get("input_params", {})),
+            "output_flags": "|".join(agent_config.get("output_flags", [])),
+            "memory_mb": agent_config.get("memory_mb", 128),
+            "model_version": agent_config.get("model_version", "v1.0.0")
+        }
+        
+        try:
+            with self._driver.session() as session:
+                result = session.run(query, params)
+                record = result.single()
+                if record is None:
+                    logger.warning(f"DecisionCandidate {decision_id} not found when creating agent execution.")
+                    return None
+                return record["execution_id"]
+        except Exception as e:
+            logger.error(f"Error creating agent execution: {e}")
+            return None
+
+    def get_incident_timeline(self, decision_id: str) -> dict:
+        """
+        Retrieve timeline of agent executions for a decision.
+        Returns timeline events from AgentExecution nodes with agent details and friendly names.
+        """
+        query = """
+        MATCH (d:DecisionCandidate {decision_id: $decision_id})
+        OPTIONAL MATCH (d)-[:EXECUTED_BY]->(e:AgentExecution)
+        RETURN d, e
+        ORDER BY e.timestamp DESC
+        """
+        
+        timeline = {
+            "decision_id": decision_id,
+            "executions": [],
+            "total_executions": 0,
+            "agents": []  # List of unique agents
+        }
+        
+        # Mapping of agent names/keys to friendly display names
+        agent_names = {
+            "loganalysis": {"name": "Log Analysis", "icon": "description", "color": "blue"},
+            "networkscanner": {"name": "Network Scanner", "icon": "cloud", "color": "cyan"},
+            "threatintel": {"name": "Threat Intel", "icon": "security", "color": "red"},
+            "correlator": {"name": "Correlator", "icon": "hub", "color": "purple"},
+            "loginspector": {"name": "Login Inspector", "icon": "person", "color": "yellow"},
+            "metricsanalyzer": {"name": "Metrics Analyzer", "icon": "analytics", "color": "green"},
+            "alertcorrelator": {"name": "Alert Correlator", "icon": "notifications", "color": "orange"},
+            "recommender": {"name": "Recommender", "icon": "lightbulb", "color": "amber"},
+        }
+        
+        try:
+            with self._driver.session() as session:
+                result = session.run(query, {"decision_id": decision_id})
+                executions = []
+                agents_map = {}
+                
+                for record in result:
+                    if record['e'] is not None:
+                        agent_name_raw = record['e'].get('agent_name', '')
+                        
+                        # Extract agent key from agent_name
+                        agent_key = None
+                        for key in agent_names.keys():
+                            if key.lower() in str(agent_name_raw).lower():
+                                agent_key = key
+                                break
+                        
+                        # Fallback to using first 8 chars of execution_id if available
+                        if not agent_key and record['e'].get('execution_id'):
+                            agent_key = f"agent_{record['e'].get('execution_id')[:8]}"
+                        
+                        # Get friendly name for agent
+                        agent_display = agent_names.get(agent_key, {
+                            "name": agent_key.replace('_', ' ').title() if agent_key else agent_name_raw,
+                            "icon": "android",
+                            "color": "slate"
+                        })
+                        
+                        execution = {
+                            'execution_id': record['e'].get('execution_id'),
+                            'agent_name': agent_display['name'],
+                            'agent_key': agent_key,
+                            'agent_icon': agent_display['icon'],
+                            'agent_color': agent_display['color'],
+                            'status': record['e'].get('status', 'completed'),
+                            'confidence': record['e'].get('confidence'),
+                            'started_at': record['e'].get('started_at'),
+                            'completed_at': record['e'].get('completed_at'),
+                            'duration_ms': record['e'].get('duration_ms'),
+                            'memory_mb': record['e'].get('memory_mb'),
+                            'model_version': record['e'].get('model_version'),
+                            'output_flags': record['e'].get('output_flags')
+                        }
+                        executions.append(execution)
+                        
+                        # Track unique agents
+                        if agent_key and agent_key not in agents_map:
+                            agents_map[agent_key] = agent_display
+                
+                # Sort by temporal order (prefer started_at, fall back to creation time)
+                # Handle None values properly to avoid comparison errors
+                executions.sort(
+                    key=lambda x: x.get('started_at') or x.get('completed_at') or '2000-01-01', 
+                    reverse=True
+                )
+                timeline["executions"] = executions
+                timeline["total_executions"] = len(executions)
+                
+                # Create agents list from unique agents found
+                timeline["agents"] = [
+                    {
+                        "key": key,
+                        "name": data['name'],
+                        "icon": data['icon'],
+                        "color": data['color'],
+                        "status": "completed"
+                    }
+                    for key, data in agents_map.items()
+                ]
+
+        except Exception as e:
+            logger.error(f"Error fetching timeline for decision {decision_id}: {e}")
+        
+        return timeline
+
+    def get_all_incidents(self) -> list:
+        """
+        Retrieve all incidents (DecisionCandidate nodes) with execution count.
+        """
+        query = """
+        MATCH (d:DecisionCandidate)
+        OPTIONAL MATCH (a:Alert)-[:HAS_CANDIDATE]->(d)
+        OPTIONAL MATCH (d)-[:EXECUTED_BY]->(e:AgentExecution)
+        RETURN 
+            d.decision_id as decision_id,
+            d.summary as summary,
+            d.status as status,
+            d.created_at as created_at,
+            d.risk as risk,
+            a.service as service,
+            a.severity as severity,
+            count(e) as execution_count
+        ORDER BY d.created_at DESC
+        """
+        
+        incidents = []
+        try:
+            with self._driver.session() as session:
+                result = session.run(query)
+                for record in result:
+                    summary = record["summary"] or ""
+                    incidents.append({
+                        "decision_id": record["decision_id"],
+                        "summary": summary[:100] + "..." if len(summary) > 100 else summary,
+                        "full_summary": summary,
+                        "status": record["status"],
+                        "created_at": record["created_at"],
+                        "risk": record["risk"],
+                        "service": record["service"],
+                        "severity": record["severity"],
+                        "execution_count": record["execution_count"] or 0
+                    })
+        except Exception as e:
+            logger.error(f"Error fetching all incidents: {e}")
+        
+        return incidents
+
+    def save_agent_execution(self, decision_id: str, execution_data: Dict[str, Any]) -> Optional[str]:
+        """
+        Persiste uma execução de agente associada a uma decisão.
+        
+        Cria um nó AgentExecution e linka à DecisionCandidate via EXECUTED_BY.
+        """
+        query = """
+        MATCH (d:DecisionCandidate {decision_id: $decision_id})
+        CREATE (e:AgentExecution {
+            execution_id: $execution_id,
+            agent_id: $agent_id,
+            agent_name: $agent_name,
+            agent_version: $agent_version,
+            logic_hash: $logic_hash,
+            step_id: $step_id,
+            status: $status,
+            confidence: $confidence,
+            timestamp: $timestamp,
+            error: $error
+        })
+        MERGE (d)-[:EXECUTED_BY]->(e)
+        RETURN e.execution_id as execution_id
+        """
+        
+        params = {
+            "decision_id": decision_id,
+            "execution_id": execution_data.get("execution_id", str(uuid.uuid4())),
+            "agent_id": execution_data.get("agent_id", "unknown"),
+            "agent_name": execution_data.get("agent_name", execution_data.get("agent_id", "unknown")),
+            "agent_version": execution_data.get("agent_version", "1.0"),
+            "logic_hash": execution_data.get("logic_hash", "undefined"),
+            "step_id": execution_data.get("step_id", ""),
+            "status": execution_data.get("status", "completed"),
+            "confidence": execution_data.get("confidence", 0.5),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "error": execution_data.get("error")
+        }
+        
+        try:
+            with self._driver.session() as session:
+                result = session.run(query, params)
+                record = result.single()
+                if record:
+                    return record["execution_id"]
+        except Exception as e:
+            logger.error(f"Error saving agent execution for decision {decision_id}: {e}")
+        
+        return None
+
+    def save_agent_executions_batch(self, decision_id: str, executions: List[Dict[str, Any]]) -> List[str]:
+        """
+        Persiste múltiplas execuções de agentes em batch.
+        """
+        execution_ids = []
+        for execution_data in executions:
+            exec_id = self.save_agent_execution(decision_id, execution_data)
+            if exec_id:
+                execution_ids.append(exec_id)
+        return execution_ids
 

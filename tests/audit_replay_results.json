@@ -1,0 +1,517 @@
+{
+  "metadata": {
+    "generator_version": "1.1",
+    "seed": 12345,
+    "timestamp": "2026-02-11T17:04:28.933259",
+    "auto_approval_threshold": 0.85,
+    "category_alignment_targets": {
+      "SLA Breach": 0.92,
+      "Database Incident": 0.85,
+      "CPU/Resource Spike": 0.9,
+      "Network Failure": 0.82,
+      "Security Alert": 0.78
+    }
+  },
+  "results": [
+    {
+      "alert_id": "ALRT-2026-000",
+      "category": "Network Failure",
+      "risk_level": "low",
+      "human_decision": "manual_intervention",
+      "strands_decision": "scale_up",
+      "confidence": 0.63,
+      "alignment": false,
+      "latency_ms": 2414.05
+    },
+    {
+      "alert_id": "ALRT-2026-001",
+      "category": "CPU/Resource Spike",
+      "risk_level": "low",
+      "human_decision": "ignore",
+      "strands_decision": "ignore",
+      "confidence": 0.89,
+      "alignment": true,
+      "latency_ms": 3063.55
+    },
+    {
+      "alert_id": "ALRT-2026-002",
+      "category": "Database Incident",
+      "risk_level": "high",
+      "human_decision": "restart_pod",
+      "strands_decision": "restart_pod",
+      "confidence": 0.92,
+      "alignment": true,
+      "latency_ms": 2964.69
+    },
+    {
+      "alert_id": "ALRT-2026-003",
+      "category": "Database Incident",
+      "risk_level": "medium",
+      "human_decision": "scale_up",
+      "strands_decision": "scale_up",
+      "confidence": 0.79,
+      "alignment": true,
+      "latency_ms": 2063.77
+    },
+    {
+      "alert_id": "ALRT-2026-004",
+      "category": "SLA Breach",
+      "risk_level": "critical",
+      "human_decision": "manual_intervention",
+      "strands_decision": "manual_intervention",
+      "confidence": 0.87,
+      "alignment": true,
+      "latency_ms": 3355.63
+    },
+    {
+      "alert_id": "ALRT-2026-005",
+      "category": "Network Failure",
+      "risk_level": "low",
+      "human_decision": "restart_pod",
+      "strands_decision": "manual_intervention",
+      "confidence": 0.78,
+      "alignment": false,
+      "latency_ms": 1461.83
+    },
+    {
+      "alert_id": "ALRT-2026-006",
+      "category": "SLA Breach",
+      "risk_level": "critical",
+      "human_decision": "restart_pod",
+      "strands_decision": "restart_pod",
+      "confidence": 0.88,
+      "alignment": true,
+      "latency_ms": 3525.35
+    },
+    {
+      "alert_id": "ALRT-2026-007",
+      "category": "Database Incident",
+      "risk_level": "high",
+      "human_decision": "restart_pod",
+      "strands_decision": "restart_pod",
+      "confidence": 0.95,
+      "alignment": true,
+      "latency_ms": 1600.61
+    },
+    {
+      "alert_id": "ALRT-2026-008",
+      "category": "Security Alert",
+      "risk_level": "critical",
+      "human_decision": "scale_up",
+      "strands_decision": "scale_up",
+      "confidence": 0.85,
+      "alignment": true,
+      "latency_ms": 4189.31
+    },
+    {
+      "alert_id": "ALRT-2026-009",
+      "category": "Database Incident",
+      "risk_level": "low",
+      "human_decision": "scale_up",
+      "strands_decision": "scale_up",
+      "confidence": 0.95,
+      "alignment": true,
+      "latency_ms": 834.62
+    },
+    {
+      "alert_id": "ALRT-2026-010",
+      "category": "Database Incident",
+      "risk_level": "high",
+      "human_decision": "flush_cache",
+      "strands_decision": "flush_cache",
+      "confidence": 0.84,
+      "alignment": true,
+      "latency_ms": 847.52
+    },
+    {
+      "alert_id": "ALRT-2026-011",
+      "category": "SLA Breach",
+      "risk_level": "critical",
+      "human_decision": "restart_pod",
+      "strands_decision": "restart_pod",
+      "confidence": 0.93,
+      "alignment": true,
+      "latency_ms": 1464.09
+    },
+    {
+      "alert_id": "ALRT-2026-012",
+      "category": "SLA Breach",
+      "risk_level": "high",
+      "human_decision": "scale_up",
+      "strands_decision": "scale_up",
+      "confidence": 0.93,
+      "alignment": true,
+      "latency_ms": 2578.87
+    },
+    {
+      "alert_id": "ALRT-2026-013",
+      "category": "SLA Breach",
+      "risk_level": "low",
+      "human_decision": "ignore",
+      "strands_decision": "ignore",
+      "confidence": 0.89,
+      "alignment": true,
+      "latency_ms": 2357.07
+    },
+    {
+      "alert_id": "ALRT-2026-014",
+      "category": "Security Alert",
+      "risk_level": "critical",
+      "human_decision": "scale_up",
+      "strands_decision": "scale_up",
+      "confidence": 0.9,
+      "alignment": true,
+      "latency_ms": 1241.71
+    },
+    {
+      "alert_id": "ALRT-2026-015",
+      "category": "Database Incident",
+      "risk_level": "low",
+      "human_decision": "ignore",
+      "strands_decision": "ignore",
+      "confidence": 0.97,
+      "alignment": true,
+      "latency_ms": 1653.38
+    },
+    {
+      "alert_id": "ALRT-2026-016",
+      "category": "Database Incident",
+      "risk_level": "medium",
+      "human_decision": "manual_intervention",
+      "strands_decision": "manual_intervention",
+      "confidence": 0.77,
+      "alignment": true,
+      "latency_ms": 3374.17
+    },
+    {
+      "alert_id": "ALRT-2026-017",
+      "category": "Database Incident",
+      "risk_level": "low",
+      "human_decision": "ignore",
+      "strands_decision": "restart_pod",
+      "confidence": 0.63,
+      "alignment": false,
+      "latency_ms": 3575.09
+    },
+    {
+      "alert_id": "ALRT-2026-018",
+      "category": "SLA Breach",
+      "risk_level": "critical",
+      "human_decision": "ignore",
+      "strands_decision": "ignore",
+      "confidence": 0.96,
+      "alignment": true,
+      "latency_ms": 1481.99
+    },
+    {
+      "alert_id": "ALRT-2026-019",
+      "category": "CPU/Resource Spike",
+      "risk_level": "high",
+      "human_decision": "scale_up",
+      "strands_decision": "scale_up",
+      "confidence": 0.79,
+      "alignment": true,
+      "latency_ms": 3315.76
+    },
+    {
+      "alert_id": "ALRT-2026-020",
+      "category": "Security Alert",
+      "risk_level": "critical",
+      "human_decision": "scale_up",
+      "strands_decision": "flush_cache",
+      "confidence": 0.56,
+      "alignment": false,
+      "latency_ms": 1050.51
+    },
+    {
+      "alert_id": "ALRT-2026-021",
+      "category": "Network Failure",
+      "risk_level": "medium",
+      "human_decision": "flush_cache",
+      "strands_decision": "flush_cache",
+      "confidence": 0.92,
+      "alignment": true,
+      "latency_ms": 2764.56
+    },
+    {
+      "alert_id": "ALRT-2026-022",
+      "category": "Database Incident",
+      "risk_level": "high",
+      "human_decision": "flush_cache",
+      "strands_decision": "flush_cache",
+      "confidence": 0.87,
+      "alignment": true,
+      "latency_ms": 3365.51
+    },
+    {
+      "alert_id": "ALRT-2026-023",
+      "category": "SLA Breach",
+      "risk_level": "high",
+      "human_decision": "ignore",
+      "strands_decision": "ignore",
+      "confidence": 0.93,
+      "alignment": true,
+      "latency_ms": 2782.84
+    },
+    {
+      "alert_id": "ALRT-2026-024",
+      "category": "SLA Breach",
+      "risk_level": "low",
+      "human_decision": "scale_up",
+      "strands_decision": "scale_up",
+      "confidence": 0.91,
+      "alignment": true,
+      "latency_ms": 930.71
+    },
+    {
+      "alert_id": "ALRT-2026-025",
+      "category": "Network Failure",
+      "risk_level": "high",
+      "human_decision": "ignore",
+      "strands_decision": "ignore",
+      "confidence": 0.89,
+      "alignment": true,
+      "latency_ms": 1953.84
+    },
+    {
+      "alert_id": "ALRT-2026-026",
+      "category": "Network Failure",
+      "risk_level": "critical",
+      "human_decision": "restart_pod",
+      "strands_decision": "restart_pod",
+      "confidence": 0.76,
+      "alignment": true,
+      "latency_ms": 2076.76
+    },
+    {
+      "alert_id": "ALRT-2026-027",
+      "category": "SLA Breach",
+      "risk_level": "low",
+      "human_decision": "restart_pod",
+      "strands_decision": "restart_pod",
+      "confidence": 0.95,
+      "alignment": true,
+      "latency_ms": 3992.91
+    },
+    {
+      "alert_id": "ALRT-2026-028",
+      "category": "Network Failure",
+      "risk_level": "medium",
+      "human_decision": "manual_intervention",
+      "strands_decision": "manual_intervention",
+      "confidence": 0.96,
+      "alignment": true,
+      "latency_ms": 3483.95
+    },
+    {
+      "alert_id": "ALRT-2026-029",
+      "category": "Network Failure",
+      "risk_level": "low",
+      "human_decision": "flush_cache",
+      "strands_decision": "flush_cache",
+      "confidence": 0.93,
+      "alignment": true,
+      "latency_ms": 949.67
+    },
+    {
+      "alert_id": "ALRT-2026-030",
+      "category": "Database Incident",
+      "risk_level": "medium",
+      "human_decision": "restart_pod",
+      "strands_decision": "restart_pod",
+      "confidence": 0.82,
+      "alignment": true,
+      "latency_ms": 2031.48
+    },
+    {
+      "alert_id": "ALRT-2026-031",
+      "category": "Database Incident",
+      "risk_level": "low",
+      "human_decision": "scale_up",
+      "strands_decision": "scale_up",
+      "confidence": 0.87,
+      "alignment": true,
+      "latency_ms": 3727.85
+    },
+    {
+      "alert_id": "ALRT-2026-032",
+      "category": "CPU/Resource Spike",
+      "risk_level": "critical",
+      "human_decision": "manual_intervention",
+      "strands_decision": "manual_intervention",
+      "confidence": 0.81,
+      "alignment": true,
+      "latency_ms": 2593.16
+    },
+    {
+      "alert_id": "ALRT-2026-033",
+      "category": "Security Alert",
+      "risk_level": "critical",
+      "human_decision": "scale_up",
+      "strands_decision": "scale_up",
+      "confidence": 0.87,
+      "alignment": true,
+      "latency_ms": 1386.03
+    },
+    {
+      "alert_id": "ALRT-2026-034",
+      "category": "CPU/Resource Spike",
+      "risk_level": "low",
+      "human_decision": "restart_pod",
+      "strands_decision": "restart_pod",
+      "confidence": 0.8,
+      "alignment": true,
+      "latency_ms": 2665.54
+    },
+    {
+      "alert_id": "ALRT-2026-035",
+      "category": "Network Failure",
+      "risk_level": "low",
+      "human_decision": "flush_cache",
+      "strands_decision": "flush_cache",
+      "confidence": 0.87,
+      "alignment": true,
+      "latency_ms": 2975.9
+    },
+    {
+      "alert_id": "ALRT-2026-036",
+      "category": "Database Incident",
+      "risk_level": "critical",
+      "human_decision": "ignore",
+      "strands_decision": "ignore",
+      "confidence": 0.84,
+      "alignment": true,
+      "latency_ms": 901.2
+    },
+    {
+      "alert_id": "ALRT-2026-037",
+      "category": "Network Failure",
+      "risk_level": "high",
+      "human_decision": "flush_cache",
+      "strands_decision": "flush_cache",
+      "confidence": 0.75,
+      "alignment": true,
+      "latency_ms": 2539.89
+    },
+    {
+      "alert_id": "ALRT-2026-038",
+      "category": "SLA Breach",
+      "risk_level": "high",
+      "human_decision": "manual_intervention",
+      "strands_decision": "manual_intervention",
+      "confidence": 0.82,
+      "alignment": true,
+      "latency_ms": 2204.96
+    },
+    {
+      "alert_id": "ALRT-2026-039",
+      "category": "Security Alert",
+      "risk_level": "critical",
+      "human_decision": "restart_pod",
+      "strands_decision": "restart_pod",
+      "confidence": 0.86,
+      "alignment": true,
+      "latency_ms": 1239.18
+    },
+    {
+      "alert_id": "ALRT-2026-040",
+      "category": "Security Alert",
+      "risk_level": "critical",
+      "human_decision": "scale_up",
+      "strands_decision": "scale_up",
+      "confidence": 0.76,
+      "alignment": true,
+      "latency_ms": 3889.5
+    },
+    {
+      "alert_id": "ALRT-2026-041",
+      "category": "Security Alert",
+      "risk_level": "critical",
+      "human_decision": "restart_pod",
+      "strands_decision": "restart_pod",
+      "confidence": 0.86,
+      "alignment": true,
+      "latency_ms": 2366.42
+    },
+    {
+      "alert_id": "ALRT-2026-042",
+      "category": "Database Incident",
+      "risk_level": "high",
+      "human_decision": "scale_up",
+      "strands_decision": "scale_up",
+      "confidence": 0.87,
+      "alignment": true,
+      "latency_ms": 4497.26
+    },
+    {
+      "alert_id": "ALRT-2026-043",
+      "category": "Network Failure",
+      "risk_level": "medium",
+      "human_decision": "scale_up",
+      "strands_decision": "scale_up",
+      "confidence": 0.96,
+      "alignment": true,
+      "latency_ms": 3167.48
+    },
+    {
+      "alert_id": "ALRT-2026-044",
+      "category": "Database Incident",
+      "risk_level": "critical",
+      "human_decision": "restart_pod",
+      "strands_decision": "restart_pod",
+      "confidence": 0.77,
+      "alignment": true,
+      "latency_ms": 4128.91
+    },
+    {
+      "alert_id": "ALRT-2026-045",
+      "category": "SLA Breach",
+      "risk_level": "low",
+      "human_decision": "restart_pod",
+      "strands_decision": "restart_pod",
+      "confidence": 0.8,
+      "alignment": true,
+      "latency_ms": 4428.16
+    },
+    {
+      "alert_id": "ALRT-2026-046",
+      "category": "Database Incident",
+      "risk_level": "critical",
+      "human_decision": "manual_intervention",
+      "strands_decision": "manual_intervention",
+      "confidence": 0.85,
+      "alignment": true,
+      "latency_ms": 2293.12
+    },
+    {
+      "alert_id": "ALRT-2026-047",
+      "category": "Database Incident",
+      "risk_level": "critical",
+      "human_decision": "flush_cache",
+      "strands_decision": "flush_cache",
+      "confidence": 0.76,
+      "alignment": true,
+      "latency_ms": 4180.28
+    },
+    {
+      "alert_id": "ALRT-2026-048",
+      "category": "CPU/Resource Spike",
+      "risk_level": "medium",
+      "human_decision": "ignore",
+      "strands_decision": "ignore",
+      "confidence": 0.77,
+      "alignment": true,
+      "latency_ms": 2522.56
+    },
+    {
+      "alert_id": "ALRT-2026-049",
+      "category": "CPU/Resource Spike",
+      "risk_level": "medium",
+      "human_decision": "ignore",
+      "strands_decision": "ignore",
+      "confidence": 0.88,
+      "alignment": true,
+      "latency_ms": 1433.48
+    }
+  ]
+}

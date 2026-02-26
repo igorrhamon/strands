@@ -1,32 +1,24 @@
+from pydantic import BaseModel, Field
 
-from abc import ABC, abstractmethod
-from typing import Dict, Any
 
-class ConfidencePolicy(ABC):
+class ConfidencePolicy(BaseModel):
+    """Pydantic model for confidence policy used across the system.
+
+    Provides default values and helper accessors so it is compatible with
+    `ConfidenceService` which expects `get_penalty_for_override()` and
+    `get_reinforcement_for_success()` methods.
     """
-    Abstract base class for policies governing confidence adjustments.
-    """
-    version: str = "1.0"
+    penalty_override: float = Field(0.1, ge=0.0, le=1.0)
+    reinforcement_success: float = Field(0.05, ge=0.0, le=1.0)
 
-    @abstractmethod
     def get_penalty_for_override(self) -> float:
-        pass
+        return float(self.penalty_override)
 
-    @abstractmethod
     def get_reinforcement_for_success(self) -> float:
-        pass
+        return float(self.reinforcement_success)
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {"policy_name": self.__class__.__name__, "version": self.version}
 
 class DefaultConfidencePolicy(ConfidencePolicy):
-    """
-    A default, simple confidence policy.
-    """
-    version = "1.0"
-
-    def get_penalty_for_override(self) -> float:
-        return 0.1
-
-    def get_reinforcement_for_success(self) -> float:
-        return 0.05
+    """Default policy with sensible defaults for overrides and reinforcements."""
+    penalty_override: float = Field(0.1, ge=0.0, le=1.0)
+    reinforcement_success: float = Field(0.05, ge=0.0, le=1.0)

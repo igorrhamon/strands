@@ -10,6 +10,7 @@ def mock_cluster():
     cluster = MagicMock(spec=AlertCluster)
     cluster.cluster_id = "test-cluster-id"
     cluster.primary_service = "auth-service"
+    cluster.primary_severity = "CRITICAL"
     alert = MagicMock()
     alert.description = "Multiple failed login attempts"
     cluster.alerts = [alert]
