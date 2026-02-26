@@ -364,6 +364,6 @@ class RecommenderAgentWithLearning:
         return {
             "agent_id": self.agent_id,
             "playbook_store_connected": self.playbook_store.connected,
-            "playbook_generator_connected": self.playbook_generator.llm_client is not None,
+            "playbook_generator_connected": self.playbook_generator.llm_agent is not None,
             "cache_size": len(self.cache)
         }

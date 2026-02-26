@@ -123,9 +123,13 @@ class SemanticRecoveryService:
         if not self.github_token:
             return {}
             
+        github_org = os.getenv("GITHUB_ORG", "")
+        if not github_org:
+            return {}
+
         # Simplificação: assume que o nome do serviço é o nome do repo
         # Em produção, isso usaria uma busca mais robusta ou mapeamento
-        url = f"https://api.github.com/repos/igorrhamon/{service_name}"
+        url = f"https://api.github.com/repos/{github_org}/{service_name}"
         headers = {"Authorization": f"token {self.github_token}"}
         
         try:
@@ -144,9 +148,32 @@ class SemanticRecoveryService:
             
         return {}
 
-    def _query_knowledge_graph(self, entities: List, github_context: Dict) -> Optional[Dict[str, Any]]:
+    def _query_knowledge_graph(self, entities: Any, github_context: Dict) -> Optional[Dict[str, Any]]:
         """
         Internal method to query the Knowledge Graph.
         To be mocked in tests.
         """
-        return None
+        try:
+            if not entities:
+                return None
+
+            # entities can be a list or a dict from NERExtractor
+            entity_names = []
+            if isinstance(entities, dict):
+                for val in entities.values():
+                    if isinstance(val, list):
+                        entity_names.extend(val)
+            elif isinstance(entities, list):
+                entity_names = [
+                    e.get("text", "") if isinstance(e, dict) else str(e)
+                    for e in entities
+                ]
+
+            if not entity_names:
+                return None
+
+            result = self.graph_builder.query_remediation_patterns(entity_names)
+            return result if result else None
+        except Exception as e:
+            logger.warning(f"[SEMANTIC_RECOVERY] Knowledge graph query failed: {e}")
+            return None

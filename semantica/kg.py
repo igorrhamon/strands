@@ -149,3 +149,35 @@ class GraphBuilder:
         results.sort(key=lambda x: x.get("score", 0), reverse=True)
         logger.debug(f"Semantic search returned {len(results[:limit])} results")
         return results[:limit]
+
+    def query_remediation_patterns(self, entities: List[str]) -> Optional[Dict[str, Any]]:
+        """
+        Query for remediation patterns matching the given entities.
+
+        Args:
+            entities: List of entity names to search for
+
+        Returns:
+            Best matching remediation pattern data or None
+        """
+        if not entities:
+            return None
+
+        # Try to find a match using semantic search for each entity
+        all_results = []
+        for entity in entities:
+            matches = self.semantic_search(entity, entity_type="REMEDIATION_PATTERN")
+            all_results.extend(matches)
+
+        if not all_results:
+            return None
+
+        # Sort by score and return the best match
+        all_results.sort(key=lambda x: x.get("score", 0), reverse=True)
+        best_match = all_results[0]
+
+        # In a real system, these would be retrieved from the graph
+        return {
+            "state": best_match.get("state", "MANUAL_REVIEW"),
+            "confidence": min(0.95, 0.6 + (best_match.get("score", 0) * 0.1))
+        }
