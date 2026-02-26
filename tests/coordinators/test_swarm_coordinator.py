@@ -29,7 +29,7 @@ def coordinator(mock_controller):
     )
 
 @pytest.mark.asyncio
-async def test_execute_new_swarm_returns_decision_id(coordinator, mock_controller):
+async def test_execute_new_swarm_returns_decision_id_and_dict(coordinator, mock_controller):
     # Setup
     request = CoordinationRequest(
         source_id="test_source_123",
@@ -49,10 +49,11 @@ async def test_execute_new_swarm_returns_decision_id(coordinator, mock_controlle
     mock_controller.make_decision.return_value = mock_decision
 
     # Execute
-    execution_id = await coordinator._execute_new_swarm(request)
+    execution_id, decision_dict = await coordinator._execute_new_swarm(request)
 
     # Assert
     assert execution_id == expected_decision_id
+    assert decision_dict["decision_id"] == expected_decision_id
     assert mock_controller.make_decision.called
 
 @pytest.mark.asyncio
@@ -134,4 +135,6 @@ async def test_coordinate_new_execution_end_to_end(coordinator, mock_controller)
     assert result.execution_mode == ExecutionMode.NEW_SWARM
     assert result.execution_id == "dec_e2e"
     assert result.execution_id != ""
+    assert result.decision is not None
+    assert result.decision["decision_id"] == "dec_e2e"
     assert mock_controller.make_decision.called

@@ -12,7 +12,7 @@ Resiliência: Integração com EventDeduplicator e GraphUpdateStrategy
 import logging
 import asyncio
 import uuid
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Tuple
 from datetime import datetime, timezone
 from enum import Enum
 
@@ -132,10 +132,12 @@ class SwarmCoordinator:
             action = DeduplicationAction.NEW_EXECUTION
             original_exec_id = None
         
+        decision_dict = None
+
         # Decidir modo de execução baseado na ação de deduplicação
         if action == DeduplicationAction.NEW_EXECUTION:
             execution_mode = ExecutionMode.NEW_SWARM
-            execution_id = await self._execute_new_swarm(request)
+            execution_id, decision_dict = await self._execute_new_swarm(request)
             dedup_key = self.deduplicator.register_execution(
                 source_id=request.source_id,
                 execution_id=execution_id,
@@ -189,21 +191,22 @@ class SwarmCoordinator:
             execution_id=execution_id,
             dedup_key=dedup_key,
             original_execution_id=original_exec_id if action == DeduplicationAction.UPDATE_EXISTING else None,
+            decision=decision_dict,
         )
         
         return result
     
-    async def _execute_new_swarm(self, request: CoordinationRequest) -> str:
+    async def _execute_new_swarm(self, request: CoordinationRequest) -> Tuple[str, Dict]:
         """Executa novo swarm.
         
         Args:
             request: Requisição
         
         Returns:
-            ID da execução
+            Tuple contendo (ID da execução, Dados da decisão)
         """
         self.logger.info(f"Iniciando novo swarm para source_id={request.source_id}")
-        
+
         # 1. Build context
         context = {
             "source_id": request.source_id,
@@ -238,6 +241,9 @@ class SwarmCoordinator:
 
         # If no executions, create default triage agent
         if not agent_executions:
+            # Note: confidence_score=0.6 is intentional to ensure the decision
+            # falls below the default threshold (0.7) and triggers
+            # PENDING_HUMAN_APPROVAL for unanalyzed events.
             agent_executions.append(AgentExecution(
                 agent_id=f"triage_{uuid.uuid4().hex[:8]}",
                 agent_name="Initial Triage Agent",
@@ -275,7 +281,7 @@ class SwarmCoordinator:
                 f"confidence={confidence:.3f}"
             )
 
-            return execution_id
+            return execution_id, decision.to_dict()
 
         except Exception as e:
             # 6. Handle exceptions
