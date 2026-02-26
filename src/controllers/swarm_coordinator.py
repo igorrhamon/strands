@@ -223,6 +223,7 @@ class SwarmCoordinator:
                     try:
                         role = AgentRole(role_val)
                     except ValueError:
+                        self.logger.warning(f"AgentRole desconhecido: {role_val}, usando LOG_ANALYZER")
                         role = AgentRole.LOG_ANALYZER
 
                     agent_executions.append(AgentExecution(
