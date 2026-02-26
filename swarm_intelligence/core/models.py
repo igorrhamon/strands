@@ -75,6 +75,7 @@ class Decision(BaseModel):
     confidence: float
     supporting_evidence: List[Evidence]
     decision_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    decision_state: str = "pending"
     human_decision: Optional["HumanDecision"] = None
     context: DecisionContext = Field(default_factory=DecisionContext)
     monitor_policy: Optional[MonitorPolicy] = None

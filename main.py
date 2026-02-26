@@ -395,8 +395,11 @@ async def main():
             """Webhook endpoint for AlertManager alerts."""
             logger.debug(f"Received webhook: {json.dumps(data)}")
             try:
-                run_id = await process_alert(data)
+                async with asyncio.timeout(30):
+                    run_id = await process_alert(data)
                 return {"status": "processing", "run_id": run_id}
+            except asyncio.TimeoutError:
+                raise HTTPException(status_code=504, detail="Alert processing timed out after 30 seconds")
             except HTTPException:
                 raise
             except Exception as e:

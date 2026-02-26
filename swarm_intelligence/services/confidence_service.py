@@ -57,11 +57,11 @@ class ConfidenceService:
             try:
                 query = """
                 MATCH (a:Agent {id: $agent_id})-[:HAS_CONFIDENCE]->(s:ConfidenceSnapshot)
-                RETURN s.value ORDER BY s.sequence_id DESC LIMIT 1
+                RETURN s.value as value ORDER BY s.sequence_id DESC LIMIT 1
                 """
                 result = self.neo4j_adapter.run_read_transaction(query, {"agent_id": agent_id})
                 if result:
-                    confidence = result[0]['s.value']
+                    confidence = result[0]['value']
                     self._confidence_cache[agent_id] = confidence
                     return confidence
             except Exception as e:
@@ -70,17 +70,20 @@ class ConfidenceService:
         return 1.0  # Default confidence
     
     def _get_next_sequence_id(self) -> int:
-        """Fetch the latest sequence_id and increment it."""
+        """Returns the next sequence ID atomically using a dedicated counter node.
+        This eliminates the race condition inherent in read-then-increment patterns."""
         if not self.neo4j_adapter:
             return 1
-        
+
         try:
             query = """
-            MATCH (s:ConfidenceSnapshot)
-            RETURN s.sequence_id ORDER BY s.sequence_id DESC LIMIT 1
+            MERGE (counter:SequenceCounter {name: 'confidence_snapshot'})
+            ON CREATE SET counter.value = 1
+            ON MATCH SET counter.value = coalesce(counter.value, 0) + 1
+            RETURN counter.value as sequence_id
             """
-            result = self.neo4j_adapter.run_read_transaction(query)
-            return result[0]['s.sequence_id'] + 1 if result else 1
+            result = self.neo4j_adapter.run_write_transaction(query)
+            return result['sequence_id'] if result else 1
         except Exception as e:
             logger.warning(f"Failed to get sequence ID: {e}")
             return 1

@@ -162,6 +162,64 @@ class Neo4jAdapter:
             steps=reconstructed_steps
         )
         
+        # Fetch retry attempts for this run
+        retry_query = """
+        MATCH (run:SwarmRun {id: $run_id})-[:EXECUTED_STEP]->(step:SwarmStep)-[:RETRIED_WITH]->(ra:RetryAttempt)
+        OPTIONAL MATCH (ra)-[:FAILED_EXECUTION]->(failed_exec:AgentExecution)
+        RETURN ra, step, failed_exec
+        ORDER BY ra.attempt_number
+        """
+        retry_data = self.run_read_transaction(retry_query, {"run_id": run_id})
+        reconstructed_retries = [
+            RetryAttempt(
+                attempt_id=row['ra']['id'],
+                step_id=row['step']['id'],
+                attempt_number=row['ra'].get('attempt_number', 0),
+                delay_seconds=row['ra'].get('delay_seconds', 0.0),
+                reason=row['ra'].get('reason', ''),
+                failed_execution_id=row['failed_exec']['id'] if row.get('failed_exec') else ''
+            )
+            for row in retry_data
+        ]
+
+        # Fetch retry decisions for this run
+        retry_dec_query = """
+        MATCH (run:SwarmRun {id: $run_id})-[:EXECUTED_STEP]->(step:SwarmStep)
+        MATCH (:AgentExecution)-[:TRIGGERED]->(rd:RetryDecision)-[:RESULTED_IN]->(:RetryAttempt)<-[:RETRIED_WITH]-(step)
+        MATCH (ra:RetryAttempt)<-[:RESULTED_IN]-(rd)
+        RETURN rd, step, ra
+        """
+        retry_dec_data = self.run_read_transaction(retry_dec_query, {"run_id": run_id})
+        reconstructed_retry_decisions = [
+            RetryDecision(
+                decision_id=row['rd']['id'],
+                step_id=row['step']['id'],
+                reason=row['rd'].get('reason', ''),
+                policy_name=row['rd'].get('policy_name', ''),
+                policy_version=row['rd'].get('policy_version', ''),
+                policy_logic_hash=row['rd'].get('policy_logic_hash', ''),
+                attempt_id=row['ra']['id']
+            )
+            for row in retry_dec_data
+        ]
+
+        # Fetch human decision for this run's final decision
+        human_dec_query = """
+        MATCH (run:SwarmRun {id: $run_id})-[:HAS_FINAL_DECISION]->(d:Decision)-[:OVERRULED]->(hd:HumanDecision)
+        RETURN hd LIMIT 1
+        """
+        human_dec_data = self.run_read_transaction(human_dec_query, {"run_id": run_id})
+        reconstructed_human_decision = None
+        if human_dec_data:
+            hd = human_dec_data[0]['hd']
+            from swarm_intelligence.core.enums import HumanAction
+            reconstructed_human_decision = HumanDecision(
+                human_decision_id=hd.get('id', ''),
+                action=HumanAction(hd.get('action', 'accept')),
+                author=hd.get('author', ''),
+                override_reason=hd.get('reason')
+            )
+
         return {
             'run_id': run_node['id'],
             'plan': reconstructed_plan,
@@ -170,7 +228,10 @@ class Neo4jAdapter:
             'master_seed': run_node.get('master_seed'),
             'results': reconstructed_results,
             'evidence': [],
-            'decision': None
+            'decision': None,
+            'retry_attempts': reconstructed_retries,
+            'retry_decisions': reconstructed_retry_decisions,
+            'human_decision': reconstructed_human_decision,
         }
 
 
@@ -525,7 +586,7 @@ class Neo4jAdapter:
     def create_confidence_snapshot(self, agent_id: str, value: float, source_event: str, sequence_id: int) -> str:
         """Creates a ConfidenceSnapshot node and returns its ID."""
         query = """
-        MATCH (a:Agent {id: $agent_id})
+        MERGE (a:Agent {id: $agent_id})
         CREATE (s:ConfidenceSnapshot {
             id: randomUUID(),
             value: $value,
@@ -547,8 +608,16 @@ class Neo4jAdapter:
             return None
         return result["snapshot_id"]
 
+    _ALLOWED_CAUSE_TYPES = frozenset({
+        "Decision", "HumanDecision", "AgentExecution", "SystemEvent", "Alert", "OperationalOutcome"
+    })
+
     def link_snapshot_to_cause(self, snapshot_id: str, cause_id: str, cause_type: str):
         """Creates a [:CAUSED_BY] relationship from a snapshot to its cause."""
+        if cause_type not in self._ALLOWED_CAUSE_TYPES:
+            raise ValueError(
+                f"Invalid cause_type '{cause_type}'. Must be one of: {sorted(self._ALLOWED_CAUSE_TYPES)}"
+            )
         query = f"""
         MATCH (s:ConfidenceSnapshot {{id: $snapshot_id}})
         MATCH (c:{cause_type} {{id: $cause_id}})
