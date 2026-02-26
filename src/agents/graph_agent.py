@@ -84,7 +84,7 @@ class GraphAgent:
         # Use environment variables for security as suggested by ChatGPT
         neo4j_uri = neo4j_uri or os.getenv("NEO4J_URI", "bolt://localhost:7687")
         neo4j_user = neo4j_user or os.getenv("NEO4J_USER", "neo4j")
-        neo4j_password = neo4j_password or os.getenv("NEO4J_PASSWORD", "strads123")
+        neo4j_password = neo4j_password or os.getenv("NEO4J_PASSWORD")
         
         # Initialize embedding model
         try:

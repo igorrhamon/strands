@@ -21,7 +21,7 @@ class Neo4jRepository:
     def __init__(self):
         self.uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
         self.user = os.getenv("NEO4J_USER", "neo4j")
-        self.password = os.getenv("NEO4J_PASSWORD", "strads123")
+        self.password = os.getenv("NEO4J_PASSWORD")
         self._driver: Optional[Driver] = None
 
     def connect(self):
@@ -381,7 +381,7 @@ class Neo4jRepository:
         MATCH (d:DecisionCandidate)
         OPTIONAL MATCH (a:Alert)-[:HAS_CANDIDATE]->(d)
         OPTIONAL MATCH (d)-[:EXECUTED_BY]->(e:AgentExecution)
-        RETURN 
+        RETURN
             d.decision_id as decision_id,
             d.summary as summary,
             d.status as status,
@@ -389,7 +389,8 @@ class Neo4jRepository:
             d.risk as risk,
             a.service as service,
             a.severity as severity,
-            count(e) as execution_count
+            count(e) as execution_count,
+            avg(e.confidence) as avg_confidence
         ORDER BY d.created_at DESC
         """
         
@@ -408,7 +409,8 @@ class Neo4jRepository:
                         "risk": record["risk"],
                         "service": record["service"],
                         "severity": record["severity"],
-                        "execution_count": record["execution_count"] or 0
+                        "execution_count": record["execution_count"] or 0,
+                        "avg_confidence": record["avg_confidence"],
                     })
         except Exception as e:
             logger.error(f"Error fetching all incidents: {e}")

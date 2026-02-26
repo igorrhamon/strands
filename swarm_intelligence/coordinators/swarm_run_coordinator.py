@@ -125,9 +125,9 @@ class SwarmRunCoordinator:
                     )
                     
                     if action == DeduplicationAction.UPDATE_EXISTING:
-                        # In a real scenario, we might want to attach this alert to the existing run
-                        self.metrics.record_dedup("update_existing")
-                        pass 
+                        # In a real scenario, attach this alert to the existing run
+                        logger.info(f"Duplicate alert detected; existing run: {existing_run_id}")
+                        pass
                 finally:
                     self.deduplicator.release_lock(lock_name)
 

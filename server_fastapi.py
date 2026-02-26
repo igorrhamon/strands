@@ -249,6 +249,16 @@ async def get_incident_details(incident_id: str):
         else:
             created_at_str = str(created_at)
         
+        # Compute real confidence from execution data
+        _confidences = [
+            float(e["confidence"]) for e in timeline_data.get("executions", [])
+            if e.get("confidence") is not None
+        ]
+        confidence = (
+            sum(_confidences) / len(_confidences) if _confidences
+            else float(matching_incident.get("avg_confidence") or 0.5)
+        )
+
         # Ensure all fields from incident are strings or numbers (JSON serializable)
         incident_data = {
             "id": str(incident_id),
@@ -259,10 +269,10 @@ async def get_incident_details(incident_id: str):
             "created_at": created_at_str,
             "trigger": str(matching_incident.get("summary", ""))[:100],
             "trigger_source": str(matching_incident.get("severity", "unknown")),
-            
+
             # Swarm metrics
-            "confidence": 0.5,  # TODO: Get from decision data
-            "swarm_confidence": 50.0,
+            "confidence": confidence,
+            "swarm_confidence": round(confidence * 100, 1),
             "confidence_trend": "+0",
             "active_agents": int(len(timeline_data.get("executions", [])) or 0),
             "total_agents": 8,
@@ -332,7 +342,7 @@ async def list_incidents():
                 "created_at": created_at_str,
                 "status": inc.get("status", "PROPOSED"),
                 "action_proposed": "manual_review",
-                "confidence": 0.5,  # TODO: Get from decision
+                "confidence": float(inc.get("avg_confidence") or 0.5),
                 "decision_summary": inc.get("full_summary", ""),
                 "execution_count": inc.get("execution_count", 0)
             })
