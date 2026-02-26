@@ -56,15 +56,11 @@ def expert_human_review(decision: Decision) -> Optional[HumanDecision]:
     
     # In production, implement actual review logic
     if config.environment == "production":
-        logging.info("Human review required - decision pending external approval")
-        # In production this should integrate with an external approval workflow.
-        # To keep the coordinator API stable, return a placeholder HumanDecision
-        return HumanDecision(
-            action=HumanAction.APPROVE,
-            author="external_approver",
-            override_reason="external_approval_placeholder",
-            overridden_action_proposed="pending"
+        logging.warning(
+            "Human review hook not integrated with external system. "
+            "Set HUMAN_REVIEW_WEBHOOK_URL to enable. Decision proceeds without human gate."
         )
+        return None
     
     # Development mode: Auto-override for testing
     logging.info("--- Development Mode: Simulated Human Expert Review ---")
@@ -374,14 +370,13 @@ async def main():
                     logger.info("Human override persisted")
                 
                 # Replay for audit trail
-                if config.environment != "production":
-                    try:
-                        logger.info("--- Initiating Deterministic Replay ---")
-                        replay_engine = ReplayEngine(neo4j)
-                        report = await replay_engine.replay_decision(run_id, coordinator)
-                        logger.info(f"Replay Report ({report.report_id}) generated and saved")
-                    except Exception as replay_error:
-                        logger.warning(f"Replay failed (non-fatal): {replay_error}")
+                try:
+                    logger.info("--- Initiating Deterministic Replay ---")
+                    replay_engine = ReplayEngine(neo4j)
+                    report = await replay_engine.replay_decision(run_id, coordinator)
+                    logger.info(f"Replay Report ({report.report_id}) generated and saved")
+                except Exception as replay_error:
+                    logger.warning(f"Replay failed (non-fatal): {replay_error}")
                 
                 logger.info("Swarm execution completed successfully")
                 state.last_execution = {"run_id": run_id, "alert": alert_name, "timestamp": datetime.now(timezone.utc).isoformat()}

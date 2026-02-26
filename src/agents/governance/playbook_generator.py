@@ -13,6 +13,9 @@ from datetime import datetime, timezone
 import json
 
 from strands import Agent
+
+logger = logging.getLogger(__name__)
+
 try:
     from http_provider import HTTPModel
 except ImportError:
@@ -29,8 +32,6 @@ except ImportError:
 from src.core.neo4j_playbook_store import (
     Neo4jPlaybookStore, Playbook, PlaybookStatus, PlaybookSource
 )
-
-logger = logging.getLogger(__name__)
 
 
 class PlaybookGeneratorAgent:

@@ -169,7 +169,7 @@ class RunbookEmbeddingService:
                 {
                     "score": res.score,
                     "file_name": res.payload.get("file_name"),
-                    "content": res.payload.get("full_content"),
+                    "content": res.payload.get("full_context"),
                     "path": res.payload.get("path")
                 }
                 for res in results
