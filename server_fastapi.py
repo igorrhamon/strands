@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 import time
 from pydantic import BaseModel
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Gauge
+from src.services.metrics_service import MetricsService
 
 # Import configuration FIRST, before any other src imports
 try:
@@ -74,14 +75,16 @@ app = FastAPI(
 
 # CORS Configuration
 if config.api.enable_cors:
+    _cors_env = os.environ.get("CORS_ORIGINS", "")
+    cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()] if _cors_env else ["*"]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # In production, specify allowed origins
+        allow_origins=cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    logger.info("CORS enabled for all origins")
+    logger.info(f"CORS enabled for origins: {cors_origins}")
 
 templates = Jinja2Templates(directory="templates")
 
@@ -121,10 +124,12 @@ class GenerateRequest(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     """Initialize application services on startup."""
+    MetricsService().start_server()
+
     if repo is None:
         logger.warning("Neo4j repository not initialized at startup")
         return
-    
+
     try:
         repo.connect()
         logger.info(f"Connected to Neo4j at {config.neo4j.uri}")

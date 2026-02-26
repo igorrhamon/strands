@@ -233,7 +233,7 @@ class SwarmRunCoordinator:
         duration = time.time() - start_time
         self.metrics.record_execution(duration, domain.name, alert.data.get("severity", "medium"))
         if decision:
-            self.metrics.record_decision(decision.confidence, decision.decision_state.value)
+            self.metrics.record_decision(decision.confidence, decision.decision_state)
 
         # Register successful execution in deduplicator
         if not replay_mode and self.deduplicator:

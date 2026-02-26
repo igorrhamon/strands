@@ -59,11 +59,13 @@ class ExponentialBackoffPolicy(RetryPolicy):
         self.max_delay = max_delay
         self.use_jitter = use_jitter
 
-        # --- Logic Hash Calculation ---
-        # A deterministic hash of the policy's core logic and parameters.
-        # This is critical for auditing and replay.
+    @property
+    def logic_hash(self) -> str:
+        """A deterministic hash computed on-demand from current parameters.
+        Using a property guarantees the hash is never stale if parameters change.
+        This is critical for auditing and replay."""
         logic_str = f"{self.__class__.__name__}-{self.version}-{self.max_attempts}-{self.base_delay}-{self.max_delay}-{self.use_jitter}"
-        self.logic_hash = hashlib.sha256(logic_str.encode('utf-8')).hexdigest()
+        return hashlib.sha256(logic_str.encode('utf-8')).hexdigest()
 
     def should_retry(self, context: RetryContext) -> bool:
         """Retries if the attempt is within the max_attempts limit."""

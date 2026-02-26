@@ -17,19 +17,24 @@ class ConfidenceService:
         """Fetches the latest confidence score for an agent, ordered by sequence."""
         query = """
         MATCH (a:Agent {id: $agent_id})-[:HAS_CONFIDENCE]->(s:ConfidenceSnapshot)
-        RETURN s.value ORDER BY s.sequence_id DESC LIMIT 1
+        RETURN s.value as value ORDER BY s.sequence_id DESC LIMIT 1
         """
         result = self.neo4j_adapter.run_read_transaction(query, {"agent_id": agent_id})
-        return result[0]['s.value'] if result else 1.0  # Default to 1.0
+        return result[0]['value'] if result else 1.0  # Default to 1.0
 
     def _get_next_sequence_id(self) -> int:
-        """Fetches the latest sequence_id and increments it."""
-        query = """
-        MATCH (s:ConfidenceSnapshot)
-        RETURN s.sequence_id ORDER BY s.sequence_id DESC LIMIT 1
         """
-        result = self.neo4j_adapter.run_read_transaction(query)
-        return result[0]['s.sequence_id'] + 1 if result else 1
+        Returns the next sequence ID atomically using a dedicated counter node.
+        This eliminates the race condition inherent in read-then-increment patterns.
+        """
+        query = """
+        MERGE (counter:SequenceCounter {name: 'confidence_snapshot'})
+        ON CREATE SET counter.value = 1
+        ON MATCH SET counter.value = coalesce(counter.value, 0) + 1
+        RETURN counter.value as sequence_id
+        """
+        result = self.neo4j_adapter.run_write_transaction(query)
+        return result['sequence_id'] if result else 1
 
     def record_confidence_snapshot(self, agent_id: str, value: float, source_event: str, cause_id: str = None, cause_type: str = None):
         """Creates a snapshot and optionally links it to its cause."""

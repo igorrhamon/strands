@@ -82,6 +82,7 @@ class Decision:
     confidence: float
     supporting_evidence: List[Evidence]
     decision_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    decision_state: str = "pending"
     human_decision: Optional['HumanDecision'] = None
     context: DecisionContext = field(default_factory=DecisionContext)
 
