@@ -19,6 +19,7 @@ from src.controllers.swarm_coordinator import (
     CoordinationRequest,
     ExecutionMode,
 )
+from src.controllers.swarm_decision_controller import SwarmDecision, DecisionState
 
 
 class TestEventDeduplicator:
@@ -43,7 +44,7 @@ class TestEventDeduplicator:
         
         # Formato correto
         assert key1.startswith("dedup_")
-        assert len(key1) == 21  # "dedup_" + 16 caracteres
+        assert len(key1) == 22  # "dedup_" + 16 caracteres
     
     def test_generate_deduplication_key_with_type_and_system(self, deduplicator):
         """Testa geração de chave com tipo e sistema."""
@@ -230,7 +231,15 @@ class TestSwarmCoordinator:
     @pytest.fixture
     def mock_controller(self):
         """Cria mock do controller."""
-        return Mock()
+        mock = Mock()
+        # Setup mock return for make_decision
+        mock_decision = SwarmDecision(
+            decision_id="test_exec_id",
+            state=DecisionState.APPROVED,
+            confidence_score=0.9
+        )
+        mock.make_decision.return_value = mock_decision
+        return mock
     
     @pytest.fixture
     def coordinator(self, mock_controller):

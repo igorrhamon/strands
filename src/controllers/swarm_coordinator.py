@@ -10,7 +10,9 @@ Resiliência: Integração com EventDeduplicator e GraphUpdateStrategy
 """
 
 import logging
-from typing import Dict, Optional, List
+import asyncio
+import uuid
+from typing import Dict, Optional, List, Tuple
 from datetime import datetime, timezone
 from enum import Enum
 
@@ -22,8 +24,15 @@ from src.deduplication.event_deduplicator import (
     DeduplicationPolicy,
 )
 from src.controllers.swarm_decision_controller import SwarmDecisionController, SwarmDecision
+from src.strategies.consensus_strategy import AgentExecution, AgentRole
 
 logger = logging.getLogger(__name__)
+
+# Confidence score assigned to the default triage agent when no agent_executions
+# are present in the event data. Intentionally below WeightedScoreStrategy's
+# default threshold (0.7) so the decision routes to PENDING_HUMAN_APPROVAL,
+# enforcing Human-in-the-Loop for unanalyzed events (Constitution Principle #1).
+DEFAULT_TRIAGE_CONFIDENCE = 0.6
 
 
 class ExecutionMode(str, Enum):
@@ -129,10 +138,12 @@ class SwarmCoordinator:
             action = DeduplicationAction.NEW_EXECUTION
             original_exec_id = None
         
+        decision_dict = None
+
         # Decidir modo de execução baseado na ação de deduplicação
         if action == DeduplicationAction.NEW_EXECUTION:
             execution_mode = ExecutionMode.NEW_SWARM
-            execution_id = await self._execute_new_swarm(request)
+            execution_id, decision_dict = await self._execute_new_swarm(request)
             dedup_key = self.deduplicator.register_execution(
                 source_id=request.source_id,
                 execution_id=execution_id,
@@ -186,27 +197,99 @@ class SwarmCoordinator:
             execution_id=execution_id,
             dedup_key=dedup_key,
             original_execution_id=original_exec_id if action == DeduplicationAction.UPDATE_EXISTING else None,
+            decision=decision_dict,
         )
         
         return result
     
-    async def _execute_new_swarm(self, request: CoordinationRequest) -> str:
+    async def _execute_new_swarm(self, request: CoordinationRequest) -> Tuple[str, Dict]:
         """Executa novo swarm.
         
         Args:
             request: Requisição
         
         Returns:
-            ID da execução
+            Tuple contendo (ID da execução, Dados da decisão)
         """
-        # Chamar SwarmDecisionController para executar novo swarm
-        import uuid
-        # Gerar ID único para execução
-        execution_id = f"exec_{uuid.uuid4().hex[:12]}"
+        self.logger.info(f"Iniciando novo swarm para source_id={request.source_id}")
+
+        # 1. Build context
+        context = {
+            "source_id": request.source_id,
+            "event_type": request.event_type,
+            "source_system": request.source_system,
+            "priority": request.priority,
+        }
         
-        self.logger.debug(f"Novo swarm executado com sucesso: {execution_id}")
-        
-        return execution_id
+        # 2. Build AgentExecution objects from event_data
+        agent_executions = []
+        raw_executions = request.event_data.get("agent_executions", [])
+
+        if isinstance(raw_executions, list):
+            for raw in raw_executions:
+                if isinstance(raw, dict):
+                    role_val = raw.get("agent_role")
+                    try:
+                        role = AgentRole(role_val)
+                    except ValueError:
+                        self.logger.warning(f"AgentRole desconhecido: {role_val}, usando LOG_ANALYZER")
+                        role = AgentRole.LOG_ANALYZER
+
+                    agent_executions.append(AgentExecution(
+                        agent_id=raw.get("agent_id", f"agent_{uuid.uuid4().hex[:8]}"),
+                        agent_name=raw.get("agent_name", "Unknown Agent"),
+                        agent_role=role,
+                        confidence_score=float(raw.get("confidence_score", 0.5)),
+                        evidence_count=int(raw.get("evidence_count", 0)),
+                        result=raw.get("result", "investigating"),
+                        reasoning=raw.get("reasoning", "No reasoning provided"),
+                    ))
+
+        # If no executions, create default triage agent
+        if not agent_executions:
+            agent_executions.append(AgentExecution(
+                agent_id=f"triage_{uuid.uuid4().hex[:8]}",
+                agent_name="Initial Triage Agent",
+                agent_role=AgentRole.LOG_ANALYZER,
+                confidence_score=DEFAULT_TRIAGE_CONFIDENCE,
+                evidence_count=1,
+                result="investigating",
+                reasoning=f"Initial triage for event {request.source_id}",
+            ))
+
+        try:
+            # 3. Call SwarmDecisionController.make_decision (synchronous)
+            # Wrap with asyncio.to_thread to avoid blocking
+            decision = await asyncio.to_thread(
+                self.swarm_decision_controller.make_decision,
+                agent_executions,
+                context
+            )
+
+            # 4. Extract decision_id
+            execution_id = str(decision.decision_id)
+
+            # 5. Log decision state and confidence score
+            confidence = decision.confidence_score
+            if not isinstance(confidence, (int, float)):
+                try:
+                    confidence = float(confidence)
+                except (TypeError, ValueError):
+                    confidence = 0.0
+
+            self.logger.info(
+                f"Novo swarm finalizado | "
+                f"execution_id={execution_id} | "
+                f"state={decision.state} | "
+                f"confidence={confidence:.3f}"
+            )
+
+            return execution_id, decision.to_dict()
+
+        except Exception as e:
+            # 6. Handle exceptions
+            self.logger.error(f"Erro ao executar novo swarm: {str(e)}", exc_info=True)
+            raise
     
     async def _update_existing_graph(self,
                                     execution_id: str,
@@ -318,7 +401,6 @@ class GraphUpdateStrategy:
         """
         
         try:
-            import uuid
             event_id = f"evt_{uuid.uuid4().hex[:12]}"
             
             result = self.neo4j_adapter.execute_query(
