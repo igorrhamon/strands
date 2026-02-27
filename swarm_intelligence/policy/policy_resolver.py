@@ -1,7 +1,7 @@
 
 from typing import List, Optional
 from swarm_intelligence.core.models import Domain
-from swarm_intelligence.policy.retry_policy import RetryPolicy, RetryContext, ExponentialBackoffPolicy
+from swarm_intelligence.policy.retry_policy import RetryPolicy, RetryContext, ExponentialBackoffPolicy, ImmediateRetryPolicy
 from swarm_intelligence.memory.neo4j_adapter import Neo4jAdapter
 
 class PolicyResolver:
@@ -34,10 +34,7 @@ class PolicyResolver:
         if policy_name == "ExponentialBackoffPolicy":
             return ExponentialBackoffPolicy()
         elif policy_name == "ImmediateRetry":
-            # Assuming an ImmediateRetryPolicy exists
-            # from .retry_policy import ImmediateRetryPolicy
-            # return ImmediateRetryPolicy()
-            pass
+            return ImmediateRetryPolicy()
 
         # Fallback if the policy name is unknown
         return ExponentialBackoffPolicy()

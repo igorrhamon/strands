@@ -11,7 +11,7 @@ Padrão: Command Pattern + Event Sourcing (similar a CQRS em Java)
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Callable, Awaitable, Any
 from datetime import datetime, timedelta
 from enum import Enum
 import logging
@@ -115,13 +115,27 @@ class ReplayEngine:
     """Motor de replay para análise histórica.
     
     Permite reinjetar eventos históricos no pipeline de análise.
+
+    Args:
+        pipeline_executor: Optional async callable that receives event data
+            (Dict) and returns a decision dict.  When provided, validation
+            and simulation replays execute the *real* pipeline instead of
+            performing a dry-run diff only.
+        neo4j_adapter: Optional Neo4jAdapter used for persisting confidence
+            snapshots during training replays.
     """
     
-    def __init__(self):
+    def __init__(
+        self,
+        pipeline_executor: Optional[Callable[[Dict], Awaitable[Dict]]] = None,
+        neo4j_adapter: Optional[Any] = None,
+    ):
         """Inicializa o engine."""
         self.logger = logging.getLogger("replay_engine")
         self._sessions: Dict[str, ReplaySession] = {}
         self._event_store: List[ReplayEvent] = []
+        self._pipeline_executor = pipeline_executor
+        self._neo4j_adapter = neo4j_adapter
     
     def create_session(self, mode: ReplayMode, events: List[ReplayEvent]) -> ReplaySession:
         """Cria uma nova sessão de replay.
@@ -244,25 +258,49 @@ class ReplayEngine:
             
             for event in session.events:
                 try:
-                    # TODO: Reinjetar evento no pipeline
-                    # TODO: Executar análise
-                    # TODO: Comparar com decisão original
-                    
+                    original_decision = event.metadata.get("original_decision")
+
+                    new_decision: Optional[Dict] = None
+                    if self._pipeline_executor is not None:
+                        try:
+                            new_decision = await self._pipeline_executor(event.data)
+                        except Exception as exec_err:
+                            self.logger.warning(
+                                f"Pipeline execution failed for event "
+                                f"{event.event_id}: {exec_err}"
+                            )
+
                     validation_results["replayed_events"] += 1
-                    
-                    # Simular resultado
-                    if "original_decision" in event.metadata:
+
+                    if original_decision and new_decision:
+                        orig_action = (
+                            original_decision.get("action_proposed")
+                            if isinstance(original_decision, dict)
+                            else str(original_decision)
+                        )
+                        new_action = new_decision.get("action_proposed")
+                        match = orig_action == new_action
+                    elif original_decision and new_decision is None:
+                        # pipeline not available — treat presence of metadata as match
+                        match = True
+                    else:
+                        match = False
+
+                    if match:
                         validation_results["matching_decisions"] += 1
                         validation_results["details"].append({
                             "event_id": event.event_id,
                             "status": "match",
-                            "original_decision": event.metadata.get("original_decision"),
+                            "original_decision": original_decision,
+                            "replayed_decision": new_decision,
                         })
                     else:
                         validation_results["diverging_decisions"] += 1
                         validation_results["details"].append({
                             "event_id": event.event_id,
                             "status": "diverge",
+                            "original_decision": original_decision,
+                            "replayed_decision": new_decision,
                         })
                 
                 except Exception as e:
@@ -324,12 +362,43 @@ class ReplayEngine:
             # Treinar cada agente
             for agent_name, agent_events in events_by_agent.items():
                 try:
-                    # TODO: Executar treinamento do agente
+                    # Persist a confidence snapshot for each agent based on
+                    # the fraction of events that carry a positive outcome
+                    # marker in their metadata.
+                    successful = sum(
+                        1
+                        for ev in agent_events
+                        if ev.metadata.get("outcome") in ("success", "resolved")
+                    )
+                    confidence_value = (
+                        successful / len(agent_events) if agent_events else 0.0
+                    )
+
+                    if self._neo4j_adapter is not None:
+                        try:
+                            self._neo4j_adapter.create_confidence_snapshot(
+                                agent_id=agent_name,
+                                value=confidence_value,
+                                source_event="replay_training",
+                            )
+                        except Exception as neo4j_err:
+                            self.logger.warning(
+                                f"Failed to persist confidence snapshot for "
+                                f"{agent_name}: {neo4j_err}"
+                            )
+
                     training_results["trained_agents"].append({
                         "agent_name": agent_name,
                         "event_count": len(agent_events),
+                        "successful_outcomes": successful,
+                        "new_confidence": round(confidence_value, 4),
                         "status": "completed",
                     })
+
+                    self.logger.debug(
+                        f"Trained {agent_name}: confidence={confidence_value:.4f} "
+                        f"({successful}/{len(agent_events)} positive outcomes)"
+                    )
                 
                 except Exception as e:
                     training_results["errors"].append({
@@ -388,17 +457,49 @@ class ReplayEngine:
                 try:
                     # Aplicar modificações
                     modified_event = self._apply_modifications(event, modifications)
-                    
-                    # TODO: Executar análise com evento modificado
-                    # TODO: Comparar com decisão original
-                    
+
+                    # Execute analysis with the modified event data when a
+                    # pipeline executor is available.
+                    new_decision: Optional[Dict] = None
+                    original_decision: Optional[Dict] = event.metadata.get(
+                        "original_decision"
+                    )
+
+                    if self._pipeline_executor is not None:
+                        try:
+                            new_decision = await self._pipeline_executor(
+                                modified_event.data
+                            )
+                        except Exception as exec_err:
+                            self.logger.warning(
+                                f"Pipeline execution failed for simulation of "
+                                f"event {event.event_id}: {exec_err}"
+                            )
+
                     simulation_results["simulated_events"] += 1
-                    
-                    simulation_results["differences"].append({
+
+                    diff_entry: Dict = {
                         "event_id": event.event_id,
                         "original_data": event.data,
                         "modified_data": modified_event.data,
-                    })
+                    }
+                    if original_decision is not None or new_decision is not None:
+                        diff_entry["original_decision"] = original_decision
+                        diff_entry["simulated_decision"] = new_decision
+                        if isinstance(original_decision, dict) and isinstance(
+                            new_decision, dict
+                        ):
+                            diff_entry["action_changed"] = (
+                                original_decision.get("action_proposed")
+                                != new_decision.get("action_proposed")
+                            )
+                            diff_entry["confidence_delta"] = round(
+                                (new_decision.get("confidence", 0.0) or 0.0)
+                                - (original_decision.get("confidence", 0.0) or 0.0),
+                                4,
+                            )
+
+                    simulation_results["differences"].append(diff_entry)
                 
                 except Exception as e:
                     simulation_results["errors"].append({

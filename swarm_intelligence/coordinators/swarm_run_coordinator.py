@@ -56,6 +56,8 @@ class SwarmRunCoordinator:
         confidence_service: ConfidenceService,
         llm_agent_id: Optional[str] = "llm_agent",
         deduplicator: Optional[DistributedEventDeduplicator] = None,
+        metrics_service: Optional[Any] = None,
+        neo4j_adapter: Optional[Any] = None,
     ):
         self.execution_controller = execution_controller
         self.retry_controller = retry_controller
@@ -63,6 +65,8 @@ class SwarmRunCoordinator:
         self.confidence_service = confidence_service
         self.llm_agent_id = llm_agent_id
         self.deduplicator = deduplicator or DistributedEventDeduplicator()
+        self.metrics_service = metrics_service
+        self.neo4j_adapter = neo4j_adapter
         
         # Scheduler para decisões MONITOR
         self.scheduler = AsyncIOScheduler()
@@ -125,9 +129,34 @@ class SwarmRunCoordinator:
                     )
                     
                     if action == DeduplicationAction.UPDATE_EXISTING:
-                        # In a real scenario, attach this alert to the existing run
-                        logger.info(f"Duplicate alert detected; existing run: {existing_run_id}")
-                        pass
+                        # Return the existing run result instead of starting a
+                        # duplicate execution, guaranteeing idempotency.
+                        logger.warning(
+                            f"Duplicate alert detected — returning existing run result. "
+                            f"existing_run_id={existing_run_id}, "
+                            f"source_id={source_id}"
+                        )
+                        # Attempt to fetch the existing run from Neo4j
+                        existing_result = None
+                        if self.neo4j_adapter is not None:
+                            try:
+                                existing_result = self.neo4j_adapter.fetch_full_run_context(
+                                    existing_run_id
+                                )
+                            except Exception as fetch_err:
+                                logger.warning(
+                                    f"Could not fetch existing run {existing_run_id}: "
+                                    f"{fetch_err}"
+                                )
+                        run_result["dedup_action"] = "RETURNED_EXISTING"
+                        run_result["existing_run_id"] = existing_run_id
+                        if existing_result:
+                            return existing_result
+                        # If fetch failed, fall through to normal execution
+                        logger.warning(
+                            f"Could not retrieve existing run {existing_run_id}; "
+                            "proceeding with new execution instead."
+                        )
                 finally:
                     self.deduplicator.release_lock(lock_name)
 
@@ -292,6 +321,19 @@ class SwarmRunCoordinator:
                 severity=alert.data.get("severity"),
                 source_system=alert.data.get("source")
             )
+
+        # Record metrics if a MetricsService was provided
+        if self.metrics_service is not None:
+            elapsed = time.time() - start_time
+            domain_name = domain.name if hasattr(domain, "name") else str(domain)
+            risk_level = alert.data.get("severity", "unknown")
+            self.metrics_service.record_execution(elapsed, domain_name, risk_level)
+            decision_state = (
+                decision.decision_state
+                if isinstance(decision.decision_state, str)
+                else str(decision.decision_state)
+            )
+            self.metrics_service.record_decision(decision.confidence, decision_state)
 
         return swarm_run, all_retry_attempts, all_retry_decisions
 

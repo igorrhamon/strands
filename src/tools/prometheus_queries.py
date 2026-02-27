@@ -198,15 +198,33 @@ class PrometheusClient:
             time = datetime.now(timezone.utc)
 
         try:
-            # In real implementation, call mcp_sgn-agendamen_query_prometheus
-            # with queryType="instant"
             logger.info(f"Instant query: {expr} at {time.isoformat()}")
 
-            # Placeholder - real implementation would parse MCP response
-            raw_result = self._call_mcp_query()
+            if self._base_url:
+                # Direct synchronous HTTP call to Prometheus API
+                with httpx.Client(
+                    base_url=self._base_url,
+                    timeout=self._timeout,
+                ) as client:
+                    response = client.get(
+                        "/api/v1/query",
+                        params={
+                            "query": expr,
+                            "time": int(time.timestamp()),
+                        },
+                    )
+                    response.raise_for_status()
+                    raw_result = response.json()
+            else:
+                raw_result = self._call_mcp_query()
 
             return self._parse_instant_result(raw_result, time)
 
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning(f"Metric not found: {expr}")
+                return []
+            raise PrometheusQueryError(f"Instant query HTTP {e.response.status_code}: {e}") from e
         except Exception as e:
             raise PrometheusQueryError(f"Instant query failed: {e}") from e
 

@@ -76,16 +76,98 @@ class Neo4jRepository:
             result = session.run(query, params)
             return result.single()["fingerprint"]
 
-    # Placeholder for future methods
-    def create_incident_from_alert(self, _alert_fingerprint: str):
-        # Intentionally left unimplemented in this prototype.
-        # Implement when incident creation workflow is defined.
-        return None
-        
-    def save_swarm_hypothesis(self, _incident_id: str, _swarm_result):
-        # Persist swarm hypothesis for an incident (TBD)
-        # Returning None indicates not implemented in this stub.
-        return None
+    def create_incident_from_alert(self, alert_fingerprint: str) -> Optional[str]:
+        """
+        Create an Incident node linked to an existing Alert.
+        RELATIONSHIP: (:Alert)-[:ESCALATED_TO]->(:Incident)
+
+        Returns:
+            incident_id if created, None if alert not found.
+        """
+        incident_id = str(uuid.uuid4())
+        query = """
+        MATCH (a:Alert {fingerprint: $fingerprint})
+        CREATE (i:Incident {
+            incident_id:  $incident_id,
+            status:       'OPEN',
+            severity:     coalesce(a.severity, 'unknown'),
+            created_at:   $created_at,
+            resolved_at:  null
+        })
+        MERGE (a)-[:ESCALATED_TO]->(i)
+        RETURN i.incident_id AS id
+        """
+        params = {
+            "fingerprint": alert_fingerprint,
+            "incident_id": incident_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with self._driver.session() as session:
+            result = session.run(query, params)
+            record = result.single()
+            if record is None:
+                logger.warning(
+                    "Alert %s not found; incident not created.", alert_fingerprint
+                )
+                return None
+            return record["id"]
+
+    def save_swarm_hypothesis(self, incident_id: str, swarm_result: Any) -> Optional[str]:
+        """
+        Persist a Hypothesis node for an incident based on swarm results.
+        RELATIONSHIP: (:Incident)-[:HAS_HYPOTHESIS]->(:Hypothesis)
+
+        Args:
+            incident_id: Incident node identifier.
+            swarm_result: Dict or object with hypothesis data
+                          (keys: summary, action_proposed, confidence, risk_level).
+
+        Returns:
+            hypothesis_id if created, None if incident not found.
+        """
+        if isinstance(swarm_result, dict):
+            summary = swarm_result.get("summary", "")
+            action_proposed = swarm_result.get("action_proposed", "")
+            confidence = float(swarm_result.get("confidence", 0.0))
+            risk_level = swarm_result.get("risk_level", "UNKNOWN")
+        else:
+            summary = getattr(swarm_result, "summary", "")
+            action_proposed = getattr(swarm_result, "action_proposed", "")
+            confidence = float(getattr(swarm_result, "confidence", 0.0))
+            risk_level = getattr(swarm_result, "risk_level", "UNKNOWN")
+
+        hypothesis_id = str(uuid.uuid4())
+        query = """
+        MATCH (i:Incident {incident_id: $incident_id})
+        CREATE (h:Hypothesis {
+            hypothesis_id:    $hypothesis_id,
+            summary:          $summary,
+            action_proposed:  $action_proposed,
+            confidence:       $confidence,
+            risk_level:       $risk_level,
+            created_at:       $created_at
+        })
+        MERGE (i)-[:HAS_HYPOTHESIS]->(h)
+        RETURN h.hypothesis_id AS id
+        """
+        params = {
+            "incident_id": incident_id,
+            "hypothesis_id": hypothesis_id,
+            "summary": summary,
+            "action_proposed": action_proposed,
+            "confidence": confidence,
+            "risk_level": str(risk_level),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with self._driver.session() as session:
+            result = session.run(query, params)
+            record = result.single()
+            if record is None:
+                logger.warning(
+                    "Incident %s not found; hypothesis not saved.", incident_id
+                )
+                return None
+            return record["id"]
 
     def save_decision_candidate(self, candidate: Any) -> Optional[str]:
         """
