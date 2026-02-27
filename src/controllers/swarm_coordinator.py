@@ -28,6 +28,12 @@ from src.strategies.consensus_strategy import AgentExecution, AgentRole
 
 logger = logging.getLogger(__name__)
 
+# Confidence score assigned to the default triage agent when no agent_executions
+# are present in the event data. Intentionally below WeightedScoreStrategy's
+# default threshold (0.7) so the decision routes to PENDING_HUMAN_APPROVAL,
+# enforcing Human-in-the-Loop for unanalyzed events (Constitution Principle #1).
+DEFAULT_TRIAGE_CONFIDENCE = 0.6
+
 
 class ExecutionMode(str, Enum):
     """Modo de execução."""
@@ -241,14 +247,11 @@ class SwarmCoordinator:
 
         # If no executions, create default triage agent
         if not agent_executions:
-            # Note: confidence_score=0.6 is intentional to ensure the decision
-            # falls below the default threshold (0.7) and triggers
-            # PENDING_HUMAN_APPROVAL for unanalyzed events.
             agent_executions.append(AgentExecution(
                 agent_id=f"triage_{uuid.uuid4().hex[:8]}",
                 agent_name="Initial Triage Agent",
                 agent_role=AgentRole.LOG_ANALYZER,
-                confidence_score=0.6,
+                confidence_score=DEFAULT_TRIAGE_CONFIDENCE,
                 evidence_count=1,
                 result="investigating",
                 reasoning=f"Initial triage for event {request.source_id}",
@@ -398,7 +401,6 @@ class GraphUpdateStrategy:
         """
         
         try:
-            import uuid
             event_id = f"evt_{uuid.uuid4().hex[:12]}"
             
             result = self.neo4j_adapter.execute_query(

@@ -138,3 +138,78 @@ async def test_coordinate_new_execution_end_to_end(coordinator, mock_controller)
     assert result.decision is not None
     assert result.decision["decision_id"] == "dec_e2e"
     assert mock_controller.make_decision.called
+
+
+@pytest.mark.asyncio
+async def test_coordinate_update_graph_decision_is_none(coordinator, mock_controller):
+    """UPDATE_GRAPH path must not set decision — _execute_new_swarm is never called."""
+    mock_decision = SwarmDecision(decision_id="dec_first", confidence_score=0.9, state=DecisionState.APPROVED)
+    mock_controller.make_decision.return_value = mock_decision
+
+    request_first = CoordinationRequest(
+        source_id="src_upd",
+        event_data={"severity": "high"},
+        event_type="security_alert",
+        source_system="prometheus",
+    )
+
+    # First call registers execution in dedup cache
+    result_first = await coordinator.coordinate(request_first)
+    assert result_first.execution_mode == ExecutionMode.NEW_SWARM
+    assert result_first.decision is not None
+
+    # Second call with same source_id → UPDATE_GRAPH
+    request_dup = CoordinationRequest(
+        source_id="src_upd",
+        event_data={"severity": "critical"},
+        event_type="security_alert",
+        source_system="prometheus",
+    )
+
+    result_dup = await coordinator.coordinate(request_dup)
+
+    assert result_dup.execution_mode == ExecutionMode.UPDATE_GRAPH
+    assert result_dup.decision is None
+    assert result_dup.execution_id == result_first.execution_id
+    assert result_dup.original_execution_id == result_first.execution_id
+
+
+@pytest.mark.asyncio
+async def test_coordinate_skip_execution_decision_is_none(mock_controller):
+    """SKIP_EXECUTION path must not set decision — _execute_new_swarm is never called."""
+    from src.deduplication.event_deduplicator import DeduplicationAction
+
+    mock_decision = SwarmDecision(decision_id="dec_skip", confidence_score=0.9, state=DecisionState.APPROVED)
+    mock_controller.make_decision.return_value = mock_decision
+
+    # Use a policy that skips duplicates instead of updating
+    policy = DeduplicationPolicy(
+        enabled=True,
+        ttl_minutes=30,
+        action_on_duplicate=DeduplicationAction.SKIP_DUPLICATE,
+    )
+    coord = SwarmCoordinator(swarm_decision_controller=mock_controller, deduplication_policy=policy)
+
+    request = CoordinationRequest(
+        source_id="src_skip",
+        event_data={"severity": "high"},
+        event_type="cpu_alert",
+    )
+
+    # First execution registers source_id
+    result_first = await coord.coordinate(request)
+    assert result_first.execution_mode == ExecutionMode.NEW_SWARM
+
+    # Manually register in dedup cache to simulate SKIP_DUPLICATE on next call
+    # (EventDeduplicator always returns UPDATE_EXISTING; patch to SKIP_DUPLICATE)
+    from unittest.mock import patch
+    with patch.object(
+        coord.deduplicator,
+        "check_duplicate",
+        return_value=(DeduplicationAction.SKIP_DUPLICATE, result_first.execution_id),
+    ):
+        result_skip = await coord.coordinate(request)
+
+    assert result_skip.execution_mode == ExecutionMode.SKIP_EXECUTION
+    assert result_skip.decision is None
+    assert result_skip.execution_id == result_first.execution_id
