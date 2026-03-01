@@ -11,7 +11,7 @@ from typing import Optional
 
 from src.models.alert import NormalizedAlert
 from src.models.swarm import SwarmResult, EvidenceItem, EvidenceType
-from src.tools.prometheus_client import PrometheusClient
+from src.tools.prometheus_queries import PrometheusClient
 
 logger = logging.getLogger(__name__)
 

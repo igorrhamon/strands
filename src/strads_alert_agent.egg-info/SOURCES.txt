@@ -68,7 +68,6 @@ src/detection/hallucination_detector.py
 src/engines/replay_engine.py
 src/graph/__init__.py
 src/graph/neo4j_repo.py
-src/graph/neo4j_repo_ext.py
 src/graph/qdrant_repo.py
 src/integration/replay_audit_integration.py
 src/llm/provider_factory.py
@@ -116,7 +115,6 @@ src/tools/grafana_client.py
 src/tools/grafana_mcp.py
 src/tools/kubectl_client.py
 src/tools/mysql_client.py
-src/tools/prometheus_client.py
 src/tools/prometheus_queries.py
 src/tools/qdrant_client.py
 src/utils/__init__.py

@@ -29,6 +29,7 @@ dependencies = [
     "qdrant-client>=1.7.0",
     "strands-agents-tools>=0.2.19",
     "slack-bolt>=1.18.0",
+    "apscheduler>=3.11.2",
 ]
 
 [project.optional-dependencies]

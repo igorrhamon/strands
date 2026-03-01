@@ -106,6 +106,19 @@ class ImmediateRetryPolicy(RetryPolicy):
     backoff_factor: float = 1.0
     max_attempts: int = 3
 
+    @property
+    def logic_hash(self) -> str:
+        """Fingerprint for ImmediateRetryPolicy."""
+        params = {
+            "max_attempts": self.max_attempts,
+            "base_delay": 0.0,
+            "max_delay": 0.0,
+            "backoff_factor": 1.0,
+            "policy_type": "ImmediateRetryPolicy"
+        }
+        raw = json.dumps(params, sort_keys=True)
+        return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
     def calculate_delay(self, attempt: int) -> float:
         """Always returns 0.0 — retries are immediate."""
         return 0.0
@@ -113,6 +126,10 @@ class ImmediateRetryPolicy(RetryPolicy):
     def should_retry(self, ctx: "RetryContext") -> bool:  # type: ignore[override]
         """Retry up to max_attempts regardless of error type."""
         return ctx.attempt <= self.max_attempts
+
+    def next_delay(self, ctx: "RetryContext") -> float:
+        """Always returns 0.0."""
+        return 0.0
 
 
 @dataclass

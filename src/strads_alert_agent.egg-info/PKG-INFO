@@ -24,6 +24,7 @@ Requires-Dist: azure-ai-inference>=1.0.0b9
 Requires-Dist: qdrant-client>=1.7.0
 Requires-Dist: strands-agents-tools>=0.2.19
 Requires-Dist: slack-bolt>=1.18.0
+Requires-Dist: apscheduler>=3.11.2
 Provides-Extra: dev
 Requires-Dist: black>=23.0.0; extra == "dev"
 Requires-Dist: ruff>=0.0.280; extra == "dev"

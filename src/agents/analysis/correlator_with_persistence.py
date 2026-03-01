@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 
 from src.models.alert import NormalizedAlert
 from src.models.swarm import SwarmResult, EvidenceItem, EvidenceType
-from src.tools.prometheus_client import PrometheusClient
+from src.tools.prometheus_queries import PrometheusClient
 from src.tools.kubectl_client import KubectlMCPClient
 from src.core.resilience import ResilienceContext, CircuitBreaker, RetryConfig
 from src.core.observability import ObservabilityContext
