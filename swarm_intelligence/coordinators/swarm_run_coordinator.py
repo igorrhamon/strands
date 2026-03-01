@@ -3,15 +3,9 @@ import random
 import logging
 import time
 import uuid
-import logging
-import uuid
-import logging
-import uuid
 from typing import List, Dict, Optional, Callable, Any
 from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
-from datetime import datetime, timezone
 
 from swarm_intelligence.core.models import (
     SwarmPlan,
@@ -101,7 +95,7 @@ class SwarmRunCoordinator:
             "start_time": datetime.now(timezone.utc).isoformat(),
             "alert_name": alert.data.get("alertname", "Unknown Alert"),
             "domain": domain.name if hasattr(domain, 'name') else str(domain),
-            "risk_level": alert.data.get("severity", "MEDIUM").upper(),
+            "risk_level": str(alert.data.get("severity", "MEDIUM")).upper(),
             "agents": [],
             "confidence_breakdown": {},
             "rag_evidence": [],
@@ -137,10 +131,10 @@ class SwarmRunCoordinator:
                             f"source_id={source_id}"
                         )
                         # Attempt to fetch the existing run from Neo4j
-                        existing_result = None
+                        existing_context = None
                         if self.neo4j_adapter is not None:
                             try:
-                                existing_result = self.neo4j_adapter.fetch_full_run_context(
+                                existing_context = self.neo4j_adapter.fetch_full_run_context(
                                     existing_run_id
                                 )
                             except Exception as fetch_err:
@@ -148,10 +142,28 @@ class SwarmRunCoordinator:
                                     f"Could not fetch existing run {existing_run_id}: "
                                     f"{fetch_err}"
                                 )
-                        run_result["dedup_action"] = "RETURNED_EXISTING"
-                        run_result["existing_run_id"] = existing_run_id
-                        if existing_result:
-                            return existing_result
+
+                        if existing_context:
+                            # Reconstruct SwarmRun from context
+                            executions = list(existing_context.get('results', {}).values())
+                            reconstructed_run = SwarmRun(
+                                run_id=existing_context['run_id'],
+                                domain=domain, # Use current domain as fallback/context
+                                plan=existing_context['plan'],
+                                master_seed=existing_context.get('master_seed', 0),
+                                executions=executions,
+                                final_decision=existing_context.get('decision')
+                            )
+                            reconstructed_run.metadata = {
+                                "dedup_action": "RETURNED_EXISTING",
+                                "existing_run_id": existing_run_id
+                            }
+
+                            return (
+                                reconstructed_run,
+                                existing_context.get('retry_attempts', []),
+                                existing_context.get('retry_decisions', [])
+                            )
                         # If fetch failed, fall through to normal execution
                         logger.warning(
                             f"Could not retrieve existing run {existing_run_id}; "
@@ -205,18 +217,44 @@ class SwarmRunCoordinator:
                     self._record_agent_step(run_id, ex)
                 
                 all_executions.extend(new_executions)
-                # evaluate(self, run_id: str, step_id: str, error: Exception) -> RetryDecision:
-                retry_decision = self.retry_controller.evaluate(
-                    run_id, steps_to_process[0].step_id if steps_to_process else "", Exception("Simulated error for retry evaluation")
-                )
                 
-                reply_decision = self.retry_controller.evaluate(run_id, "", Exception("Simulated error for retry evaluation"))
-                all_retry_decisions.append(retry_decision)
+                # Determine which steps failed and need retry
+                failed_steps_to_retry = []
+                for ex in new_executions:
+                    if not ex.is_successful():
+                        # Find the corresponding step
+                        step = next((s for s in steps_to_process if s.step_id == ex.step_id), None)
+                        if step:
+                            # Evaluate retry decision
+                            retry_dec = self.retry_controller.evaluate(
+                                run_id,
+                                step.step_id,
+                                Exception(ex.error) if ex.error else Exception("Unknown execution error")
+                            )
+                            all_retry_decisions.append(retry_dec)
+
+                            if retry_dec.should_retry:
+                                failed_steps_to_retry.append(step)
+                                # Record retry attempt
+                                attempt = RetryAttempt(
+                                    step_id=step.step_id,
+                                    attempt_number=retry_dec.attempt_number,
+                                    delay_seconds=retry_dec.delay_seconds,
+                                    reason=retry_dec.reason,
+                                    failed_execution_id=ex.execution_id
+                                )
+                                all_retry_attempts.append(attempt)
+
+                                # Wait before retry if specified
+                                if retry_dec.delay_seconds > 0:
+                                    await asyncio.sleep(retry_dec.delay_seconds)
+
+                # Only continue loop with steps that failed and are allowed to retry
+                steps_to_process = failed_steps_to_retry
                 
 
         try:
-            #await asyncio.wait_for(_internal_run(), timeout=max_runtime_seconds)
-            await asyncio.wait_for(_internal_run(), timeout=300000.0)
+            await asyncio.wait_for(_internal_run(), timeout=max_runtime_seconds)
         except asyncio.TimeoutError:
             aborted_by_limit = True
 

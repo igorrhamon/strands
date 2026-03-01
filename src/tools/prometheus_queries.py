@@ -222,7 +222,7 @@ class PrometheusClient:
 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
-                logger.warning(f"Metric not found: {expr}")
+                logger.warning(f"Metric not found (404): {expr}")
                 return []
             raise PrometheusQueryError(f"Instant query HTTP {e.response.status_code}: {e}") from e
         except Exception as e:
@@ -306,7 +306,7 @@ class PrometheusClient:
             raise
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
-                logger.warning(f"Metric not found: {expr}")
+                logger.warning(f"Metric not found (404): {expr}")
                 return []  # Graceful degradation for missing metrics
             raise PrometheusQueryError(f"HTTP {e.response.status_code}: {e}") from e
         except Exception as e:
