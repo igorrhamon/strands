@@ -12,10 +12,13 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from uuid import uuid4
 import logging
 from pydantic import BaseModel, Field, validator
+
+if TYPE_CHECKING:
+    from swarm_intelligence.memory.neo4j_adapter import Neo4jAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -168,12 +171,18 @@ class BaseAgent(ABC):
                     )
     """
     
-    def __init__(self, name: str, config: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        name: str,
+        config: Optional[Dict[str, Any]] = None,
+        neo4j_adapter: Optional[Any] = None,
+    ):
         """Inicializa o agente.
         
         Args:
             name: Nome único do agente
             config: Configuração do agente
+            neo4j_adapter: Adaptador Neo4j para persistência de evidências (opcional)
         """
         self.agent_id = str(uuid4())
         self.name = name
@@ -182,6 +191,7 @@ class BaseAgent(ABC):
         self._execution_count = 0
         self._error_count = 0
         self._total_execution_time = 0.0
+        self._neo4j_adapter = neo4j_adapter
         
         self.logger.info(f"Agent initialized: {name} (ID: {self.agent_id})")
     
@@ -266,12 +276,53 @@ class BaseAgent(ABC):
             True se registrado com sucesso
         """
         try:
-            # TODO: Implementar integração com Neo4j
             self.logger.info(f"Registering {len(evidence)} evidence items for context {context_id}")
-            
-            for ev in evidence:
-                self.logger.debug(f"Evidence: {ev.type.value} from {ev.source} (confidence: {ev.confidence})")
-            
+
+            if self._neo4j_adapter is not None:
+                query = """
+                UNWIND $evidence AS ev
+                MERGE (ctx:ExecutionContext {context_id: $context_id})
+                CREATE (e:Evidence {
+                    evidence_id:  ev.evidence_id,
+                    agent_id:     $agent_id,
+                    agent_name:   $agent_name,
+                    evidence_type: ev.type,
+                    source:       ev.source,
+                    confidence:   ev.confidence,
+                    timestamp:    ev.timestamp,
+                    context_id:   $context_id
+                })
+                CREATE (ctx)-[:HAS_EVIDENCE]->(e)
+                """
+                evidence_params = [
+                    {
+                        "evidence_id": str(uuid4()),
+                        "type": ev.type.value,
+                        "source": ev.source,
+                        "confidence": ev.confidence,
+                        "timestamp": ev.timestamp.isoformat(),
+                    }
+                    for ev in evidence
+                ]
+                self._neo4j_adapter.run_transaction(
+                    query,
+                    {
+                        "context_id": context_id,
+                        "agent_id": self.agent_id,
+                        "agent_name": self.name,
+                        "evidence": evidence_params,
+                    },
+                )
+                self.logger.debug(
+                    f"Persisted {len(evidence)} evidence nodes for context {context_id}"
+                )
+            else:
+                for ev in evidence:
+                    self.logger.debug(
+                        f"Evidence (no-persist): {ev.type.value} from {ev.source} "
+                        f"(confidence: {ev.confidence})"
+                    )
+
             return True
         except Exception as e:
             self.logger.error(f"Failed to register evidence: {e}")

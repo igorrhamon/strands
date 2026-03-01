@@ -305,10 +305,29 @@ class SwarmCoordinator:
             f"execution_id={execution_id} | "
             f"novos_dados={request.event_data}"
         )
-        
-        # Usar GraphUpdateStrategy para atualizar grafo no Neo4j
-        # Adicionar novos dados ao grafo existente
-        pass
+
+        # Delegate to GraphUpdateStrategy if a Neo4j adapter was injected.
+        if hasattr(self, '_graph_update_strategy') and self._graph_update_strategy is not None:
+            source_id = request.source_id
+            await self._graph_update_strategy.add_duplicate_event(
+                execution_id=execution_id,
+                event_data=request.event_data,
+                source_id=source_id,
+            )
+            await self._graph_update_strategy.update_execution_node(
+                execution_id=execution_id,
+                new_event_data=request.event_data,
+            )
+        else:
+            self.logger.warning(
+                f"GraphUpdateStrategy not configured; duplicate event "
+                f"execution_id={execution_id} was detected but graph was "
+                "not updated. Inject a Neo4jAdapter via set_neo4j_adapter()."
+            )
+
+    def set_neo4j_adapter(self, neo4j_adapter) -> None:
+        """Inject a Neo4jAdapter to enable graph updates for duplicated events."""
+        self._graph_update_strategy = GraphUpdateStrategy(neo4j_adapter)
     
     def get_deduplication_stats(self) -> Dict:
         """Retorna estatísticas de deduplicação.
@@ -361,12 +380,13 @@ class GraphUpdateStrategy:
         """
         
         try:
-            result = self.neo4j_adapter.execute_query(
+            self.neo4j_adapter.run_write_transaction(
                 query,
-                execution_id=execution_id,
-                event_data=str(new_event_data),
+                {
+                    "execution_id": execution_id,
+                    "event_data": str(new_event_data),
+                },
             )
-            
             self.logger.info(f"Nó de execução atualizado: {execution_id}")
             return True
         
@@ -402,15 +422,15 @@ class GraphUpdateStrategy:
         
         try:
             event_id = f"evt_{uuid.uuid4().hex[:12]}"
-            
-            result = self.neo4j_adapter.execute_query(
+            self.neo4j_adapter.run_write_transaction(
                 query,
-                execution_id=execution_id,
-                event_id=event_id,
-                source_id=source_id,
-                event_data=str(event_data),
+                {
+                    "execution_id": execution_id,
+                    "event_id": event_id,
+                    "source_id": source_id,
+                    "event_data": str(event_data),
+                },
             )
-            
             self.logger.info(f"Evento duplicado adicionado: {event_id}")
             return True
         
@@ -438,12 +458,13 @@ class GraphUpdateStrategy:
         """
         
         try:
-            result = self.neo4j_adapter.execute_query(
+            self.neo4j_adapter.run_write_transaction(
                 query,
-                execution_id=execution_id,
-                confidence=new_confidence,
+                {
+                    "execution_id": execution_id,
+                    "confidence": new_confidence,
+                },
             )
-            
             self.logger.info(f"Confiança atualizada: {execution_id} → {new_confidence}")
             return True
         

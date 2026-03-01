@@ -18,6 +18,7 @@ class EvidenceType(str, Enum):
 
 class HumanAction(str, Enum):
     APPROVE = "approve"
+    ACCEPT = "accept"   # alias used in human-in-the-loop review flows
     REJECT = "reject"
     OVERRIDE = "override"
 

@@ -5,9 +5,12 @@ Interfaces with Grafana via MCP tools to retrieve alerts.
 Uses the sgn-agendamen MCP server for Grafana access.
 """
 
+import os
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+
+import httpx
 
 from src.models.alert import Alert
 
@@ -31,22 +34,31 @@ class GrafanaMCPClient:
         self,
         datasource_uid: Optional[str] = None,
         default_lookback_minutes: int = 60,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
     ):
         """
         Initialize Grafana MCP client.
-        
+
         Args:
             datasource_uid: Optional datasource UID for filtering.
             default_lookback_minutes: Default time window for queries.
+            base_url: Grafana base URL (overrides GRAFANA_URL env var).
+            api_key: Grafana API key (overrides GRAFANA_API_KEY env var).
         """
         self._datasource_uid = datasource_uid
         self._default_lookback = default_lookback_minutes
         self._mcp_available = False
-    
+        self._base_url = (
+            base_url
+            or os.environ.get("GRAFANA_URL", "")
+        ).rstrip("/")
+        self._api_key = api_key or os.environ.get("GRAFANA_API_KEY", "")
+
     def check_connection(self) -> bool:
         """
-        Verify MCP connection is available.
-        
+        Check if MCP tools are accessible.
+
         Returns:
             True if MCP tools are accessible.
         """
@@ -103,13 +115,50 @@ class GrafanaMCPClient:
     
     def _call_mcp_alerts(self) -> list[Alert]:
         """
-        Internal method to call MCP tools.
-        
-        Returns raw alert dictionaries from MCP response.
+        Internal method to call Grafana Alertmanager API.
+
+        Tries direct HTTP first (via GRAFANA_URL + GRAFANA_API_KEY env vars),
+        then falls back to empty list.
         """
-        # This would be implemented with actual MCP tool calls
-        # Example: mcp_sgn-agendamen_get_alert_rules, etc.
-        return []
+        if not self._base_url:
+            logger.warning(
+                "GRAFANA_URL not configured; returning empty alert list. "
+                "Set GRAFANA_URL and GRAFANA_API_KEY environment variables."
+            )
+            return []
+
+        headers = {}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                response = client.get(
+                    f"{self._base_url}/api/alertmanager/grafana/api/v2/alerts",
+                    headers=headers,
+                    params={"active": "true", "silenced": "false", "inhibited": "false"},
+                )
+                response.raise_for_status()
+                raw_alerts = response.json()  # list of alert dicts
+                alerts = []
+                for raw in raw_alerts:
+                    try:
+                        alerts.append(self._parse_alert(raw))
+                    except Exception as parse_err:
+                        logger.warning(f"Skipping malformed alert: {parse_err}")
+                logger.info(f"Fetched {len(alerts)} alerts from Grafana")
+                return alerts
+        except httpx.ConnectError as e:
+            logger.error(f"Cannot connect to Grafana at {self._base_url}: {e}")
+            return []
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Grafana API error {e.response.status_code}: {e}"
+            )
+            return []
+        except Exception as e:
+            logger.error(f"Unexpected error fetching Grafana alerts: {e}")
+            return []
     
     def _parse_alert(self, raw: dict) -> Alert:
         """
