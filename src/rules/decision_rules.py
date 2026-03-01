@@ -29,6 +29,8 @@ RULE_HISTORICAL_CLOSE = "rule_historical_close"
 RULE_HISTORICAL_ESCALATE = "rule_historical_escalate"
 RULE_INSUFFICIENT_DATA = "rule_insufficient_data"
 RULE_DEFAULT_OBSERVE = "rule_default_observe"
+RULE_CRITICAL_SLO_BURN = "rule_critical_slo_burn"
+RULE_HISTORICAL_BOOST = "rule_historical_boost"
 
 
 class RuleResult:
@@ -69,6 +71,42 @@ class DecisionRules:
     MEDIUM_CONFIDENCE = 0.70
     LOW_CONFIDENCE = 0.50
     
+    @staticmethod
+    def check_critical_slo_burn(
+        context: dict,
+    ) -> RuleResult:
+        """
+        Rule: Critical SLO Burn Rate (> 14.4x) → ESCALATE
+        """
+        burn_rate = (context or {}).get("slo_burn_rate", 0.0)
+        if burn_rate > 14.4:
+            return RuleResult(
+                decision_state=DecisionState.ESCALATE,
+                confidence=DecisionRules.HIGH_CONFIDENCE + 0.1, # 0.95
+                rule_id=RULE_CRITICAL_SLO_BURN,
+                justification=f"Critical SLO burn rate detected: {burn_rate:.1f}x",
+            )
+        return RuleResult(None, 0.0, RULE_CRITICAL_SLO_BURN, "SLO burn within limits", fires=False)
+
+    @staticmethod
+    def check_historical_boost(
+        context: dict,
+    ) -> RuleResult:
+        """
+        Rule: High similarity to past successful resolution → BOOST confidence
+        """
+        similar_incidents = (context or {}).get("similar_incidents", [])
+        if similar_incidents:
+            best_match = similar_incidents[0]
+            if best_match.get("similarity", 0.0) > 0.9:
+                return RuleResult(
+                    decision_state=DecisionState(best_match["snapshot"].decision_state),
+                    confidence=0.9,
+                    rule_id=RULE_HISTORICAL_BOOST,
+                    justification=f"Historical pattern match ({best_match['similarity']:.1%}) to incident {best_match['snapshot'].incident_id}",
+                )
+        return RuleResult(None, 0.0, RULE_HISTORICAL_BOOST, "No strong historical match", fires=False)
+
     @staticmethod
     def check_critical_degrading(
         cluster: AlertCluster,
@@ -337,6 +375,7 @@ class RuleEngine:
         cluster: AlertCluster,
         trends: dict[str, MetricTrend],
         semantic_evidence: list[SemanticEvidence],
+        context: dict = None,
     ) -> tuple[RuleResult, list[str]]:
         """
         Evaluate all rules and return the best decision.
@@ -345,6 +384,7 @@ class RuleEngine:
             cluster: Alert cluster being analyzed.
             trends: Metric trends for the cluster.
             semantic_evidence: Historical context from RAG.
+            context: Additional context for evaluation.
         
         Returns:
             Tuple of (best RuleResult, list of all fired rule IDs)
@@ -352,8 +392,13 @@ class RuleEngine:
         fired_rules = []
         best_result: Optional[RuleResult] = None
         
+        # Capture context for lambdas
+        ctx = context or {}
+
         # Rule evaluation order (priority)
         rules = [
+            lambda: DecisionRules.check_critical_slo_burn(ctx),
+            lambda: DecisionRules.check_historical_boost(ctx),
             lambda: DecisionRules.check_critical_degrading(cluster, trends),
             lambda: DecisionRules.check_recovery_detected(trends),
             lambda: DecisionRules.check_insufficient_data(trends),

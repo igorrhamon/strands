@@ -12,6 +12,7 @@ from typing import Optional
 from src.models.alert import NormalizedAlert
 from src.models.swarm import SwarmResult, EvidenceItem, EvidenceType
 from src.tools.prometheus_client import PrometheusClient
+from src.agents.metrics.slo_engine import SLOEngine
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ class MetricsAnalysisAgent:
     def __init__(self):
         # Fallback URL if config logic isn't fully wired or env var missing
         self.prometheus = PrometheusClient(base_url="http://localhost:9090")
+        self.slo_engine = SLOEngine()
 
     def analyze(self, alert: NormalizedAlert) -> SwarmResult:
         logger.info(f"[{self.agent_id}] Analyzing metrics for {alert.service}...")
@@ -42,6 +44,7 @@ class MetricsAnalysisAgent:
         
         anomalies = []
         evidence = []
+        quantitative_metrics = {}
         
         try:
             now = datetime.now(timezone.utc)
@@ -66,25 +69,40 @@ class MetricsAnalysisAgent:
                             continue
                             
                         current_val = float(values[-1][1])
+                        quantitative_metrics[metric_name] = current_val
                         
                         # Basic anomaly detection logic
+                        qualitative_summary = None
                         if metric_name == "availability" and current_val == 0:
-                            anomalies.append(f"Service {alert.service} is DOWN (availability=0).")
+                            qualitative_summary = f"Service {alert.service} is DOWN (availability=0)."
+                            anomalies.append(qualitative_summary)
                         elif metric_name == "error_rate" and current_val > 0.05: # > 5% error rate
-                            anomalies.append(f"High error rate detected: {current_val:.2f} errors/sec.")
+                            qualitative_summary = f"High error rate detected: {current_val:.2f} errors/sec."
+                            anomalies.append(qualitative_summary)
                         elif metric_name == "latency" and current_val > 2.0: # > 2s latency
-                            anomalies.append(f"High P95 latency detected: {current_val:.2f}s.")
+                            qualitative_summary = f"High P95 latency detected: {current_val:.2f}s."
+                            anomalies.append(qualitative_summary)
                             
-                    evidence.append(EvidenceItem(
-                        type=EvidenceType.METRIC,
-                        description=f"Metric '{metric_name}' analyzed via query '{query}'.",
-                        source_url=f"http://localhost:9090/graph?g0.expr={query}",
-                        timestamp=now
-                    ))
+                        evidence.append(EvidenceItem(
+                            type=EvidenceType.METRIC,
+                            description=f"Metric '{metric_name}' analyzed via query '{query}'.",
+                            source_url=f"http://localhost:9090/graph?g0.expr={query}",
+                            timestamp=now,
+                            quantitative_value=current_val,
+                            qualitative_summary=qualitative_summary
+                        ))
                     
                 except Exception as q_err:
                     logger.warning(f"Failed to query {metric_name}: {q_err}")
                     continue
+
+            # SLO Burn Rate calculation
+            burn_rate = 0.0
+            if "error_rate" in quantitative_metrics:
+                burn_rate = self.slo_engine.compute_burn_rate(alert.service, quantitative_metrics["error_rate"])
+                quantitative_metrics["slo_burn_rate"] = burn_rate
+                if burn_rate > 1.0:
+                    anomalies.append(f"SLO Burn Rate is high: {burn_rate:.2f}x")
 
             if anomalies:
                 hypothesis = f"Metrics anomalies detected for {alert.service}: " + "; ".join(anomalies)
@@ -103,5 +121,7 @@ class MetricsAnalysisAgent:
             hypothesis=hypothesis,
             confidence=confidence,
             evidence=evidence,
-            suggested_actions=["Check Prometheus targets"]
+            suggested_actions=["Check Prometheus targets"],
+            quantitative_metrics=quantitative_metrics,
+            qualitative_findings=anomalies
         )

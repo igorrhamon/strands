@@ -1,7 +1,7 @@
 """Alert Orchestrator Agent - coordinates the decision pipeline"""
 from typing import List, Optional
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from src.models.alert import Alert, NormalizedAlert
 from src.models.cluster import AlertCluster
@@ -15,6 +15,10 @@ from src.agents.decision_engine import DecisionEngine
 import asyncio
 from src.agents.human_review import HumanReviewAgent
 from src.config.settings import config
+from src.state.incident_state_machine import IncidentStateMachine, IncidentState
+from src.state.incident_registry import IncidentRegistry, IncidentSnapshot
+from src.state.similarity_index import SimilarityIndex
+from src.rules.runbook_resolver import RunbookResolver
 
 
 logger = logging.getLogger(__name__)
@@ -51,6 +55,10 @@ class AlertOrchestratorAgent:
         self.decision_engine = decision_engine
         self.human_review = human_review
         self.agent_name = "AlertOrchestratorAgent"
+        self.state_machine = IncidentStateMachine()
+        self.incident_registry = IncidentRegistry()
+        self.similarity_index = SimilarityIndex()
+        self.runbook_resolver = RunbookResolver()
     
     def run_pipeline(self) -> List[Decision]:
         """Execute the complete decision pipeline
@@ -119,16 +127,43 @@ class AlertOrchestratorAgent:
         Returns:
             Decision object or None if processing failed
         """
-        logger.info(f"Processing cluster {cluster.cluster_id}")
+        cluster_id = str(cluster.cluster_id)
+        logger.info(f"Processing cluster {cluster_id}")
         
+        # Transition to INVESTIGATING
+        self.state_machine.transition_to(cluster_id, IncidentState.INVESTIGATING)
+
         # Step 4: Analyze metrics
         logger.info("  Step 4: Analyzing metrics...")
         metrics_result = self.metrics_analysis.analyze_cluster_sync(cluster)
         
+        # Step 4.1: Run Swarm Analysis (Simulation for now)
+        swarm_results = []
+
+        # Step 4.2: Historical Context
+        similar_incidents = []
+        try:
+            query_text = f"Service: {cluster.primary_service}. Alerts: {cluster.alert_count}. Severity: {cluster.primary_severity}"
+            similar_incidents = self.similarity_index.find_similar(query_text)
+        except Exception as e:
+            logger.warning(f"Failed to fetch similar incidents: {e}")
+
         # Step 5: Make decision
         logger.info("  Step 5: Making decision...")
         # Extract trends from metrics result for decision engine
         trends = metrics_result.trends if metrics_result else {}
+
+        # Build context for decision engine
+        slo_burn_rate = 0.0
+        if metrics_result and hasattr(metrics_result, "trends") and "slo_burn_rate" in metrics_result.trends:
+             slo_burn_rate = metrics_result.trends["slo_burn_rate"]
+        elif hasattr(metrics_result, "quantitative_metrics") and "slo_burn_rate" in metrics_result.quantitative_metrics:
+             slo_burn_rate = metrics_result.quantitative_metrics["slo_burn_rate"]
+
+        decision_context = {
+            "similar_incidents": similar_incidents,
+            "slo_burn_rate": slo_burn_rate
+        }
 
         # If the decision engine has LLM enabled, run the async path so LLM fallback can be used.
         if getattr(self.decision_engine, "_llm_enabled", False):
@@ -138,6 +173,8 @@ class AlertOrchestratorAgent:
                         cluster=cluster,
                         trends=trends,
                         semantic_evidence=[],
+                        swarm_results=swarm_results,
+                        context=decision_context
                     )
                 )
             except Exception as e:
@@ -146,14 +183,43 @@ class AlertOrchestratorAgent:
                     cluster=cluster,
                     trends=trends,
                     semantic_evidence=[],
+                    context=decision_context
                 )
         else:
             decision = self.decision_engine.decide_sync(
                 cluster=cluster,
                 trends=trends,
                 semantic_evidence=[],
+                context=decision_context
             )
         
+        # Step 5.1: Runbook Selection
+        runbook = self.runbook_resolver.rank_and_select(
+            self.runbook_resolver.match_runbooks(decision.justification, cluster.primary_service, decision.confidence),
+            {}
+        )
+        if runbook:
+            logger.info(f"  Selected Runbook: {runbook.name} ({runbook.id})")
+            decision.metadata["selected_runbook_id"] = runbook.id
+            decision.metadata["selected_runbook_name"] = runbook.name
+
+        # Step 5.2: Registry Snapshot
+        try:
+            snapshot = IncidentSnapshot(
+                incident_id=cluster_id,
+                service=cluster.primary_service,
+                severity=cluster.primary_severity,
+                description=cluster.alerts[0].description if cluster.alerts else "",
+                metrics={k: float(v.current_value) for k, v in trends.items() if hasattr(v, 'current_value') and v.current_value is not None},
+                findings=[decision.justification],
+                decision_state=decision.decision_state.value,
+                confidence=decision.confidence
+            )
+            self.incident_registry.register_snapshot(snapshot)
+            self.similarity_index.add_snapshot(snapshot)
+        except Exception as e:
+            logger.warning(f"Failed to record incident snapshot: {e}")
+
         # Step 6: Human review if required
         if decision.decision_state == DecisionState.MANUAL_REVIEW:
             logger.info("  Step 6: Human review required")
@@ -162,10 +228,15 @@ class AlertOrchestratorAgent:
             
             # In production, this would wait for async human feedback
             # For now, we just log and return the decision
+        elif decision.decision_state == DecisionState.CLOSE:
+            self.state_machine.transition_to(cluster_id, IncidentState.CLOSED)
+        elif decision.decision_state == DecisionState.ESCALATE:
+            self.state_machine.transition_to(cluster_id, IncidentState.MITIGATING)
         
         logger.info(
             f"  Decision: {decision.decision_state.value} "
-            f"(confidence: {decision.confidence:.2f})"
+            f" (State: {self.state_machine.get_state(cluster_id)})"
+            f" (confidence: {decision.confidence:.2f})"
         )
         
         return decision

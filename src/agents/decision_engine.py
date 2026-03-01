@@ -19,6 +19,9 @@ from src.models.decision import Decision, DecisionState, HumanValidationStatus, 
 from src.rules.decision_rules import RuleEngine, RuleResult
 from src.providers.github_models import GitHubModels, MissingTokenError
 from src.services.semantic_recovery_service import SemanticRecoveryService
+from src.agents.evidence_fusion_agent import EvidenceFusionAgent
+from src.agents.base_agent import AgentStatus
+from src.models.swarm import SwarmResult
 
 logger = logging.getLogger(__name__)
 
@@ -64,12 +67,15 @@ class DecisionEngine:
         self._llm_threshold = llm_fallback_threshold
         self._llm_enabled = llm_enabled
         self._semantic_recovery = SemanticRecoveryService(threshold=llm_fallback_threshold)
+        self._fusion_agent = EvidenceFusionAgent()
     
     async def decide(
         self,
         cluster: AlertCluster,
         trends: dict[str, MetricTrend],
         semantic_evidence: list[SemanticEvidence],
+        swarm_results: list[SwarmResult] = None,
+        context: dict = None,
     ) -> Decision:
         """
         Generate a decision for an alert cluster.
@@ -87,12 +93,26 @@ class DecisionEngine:
             f"({cluster.alert_count} alerts, {cluster.primary_severity} severity)"
         )
         
+        # Step 0: Evidence Fusion (if swarm results provided)
+        fused_justification = ""
+        if swarm_results:
+            logger.info(f"[{self.AGENT_NAME}] Fusing {len(swarm_results)} swarm results")
+            fusion_output = await self._fusion_agent.execute({"agent_outputs": swarm_results})
+            if fusion_output.status == AgentStatus.SUCCESS:
+                fused_justification = fusion_output.result.get("hypothesis", "")
+                logger.info(f"[{self.AGENT_NAME}] Fused confidence: {fusion_output.confidence:.2f}")
+                # We can optionally boost/adjust rule confidence here
+
         # Step 1: Evaluate deterministic rules
         rule_result, fired_rules = self._rule_engine.evaluate(
             cluster=cluster,
             trends=trends,
             semantic_evidence=semantic_evidence,
+            context=context
         )
+
+        if fused_justification:
+            rule_result.justification = f"{rule_result.justification} | Fused: {fused_justification}"
         
         logger.info(
             f"[{self.AGENT_NAME}] Rules result: {rule_result.decision_state.value} "
@@ -313,6 +333,7 @@ class DecisionEngine:
         cluster: AlertCluster,
         trends: dict[str, MetricTrend],
         semantic_evidence: list[SemanticEvidence],
+        context: dict = None,
     ) -> Decision:
         """
         Synchronous version of decide() - rules only, no LLM.
@@ -323,6 +344,7 @@ class DecisionEngine:
             cluster=cluster,
             trends=trends,
             semantic_evidence=semantic_evidence,
+            context=context
         )
         
         return Decision(

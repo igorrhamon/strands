@@ -1,0 +1,40 @@
+runbooks:
+  - id: RB-001
+    name: Database Connection Reset
+    description: Reset database connection pool for checkout-service
+    service: checkout-service
+    hypotheses:
+      - "Database unavailable"
+      - "Connection timeout"
+    min_confidence: 0.8
+    risk_level: low
+    steps:
+      - "Stop application"
+      - "Clear connection pool"
+      - "Restart application"
+
+  - id: RB-002
+    name: Scale Up Worker
+    description: Increase replica count for worker-service
+    service: worker-service
+    hypotheses:
+      - "High CPU usage"
+      - "Queue backlog"
+    min_confidence: 0.75
+    risk_level: low
+    steps:
+      - "Increase replicas by 2"
+      - "Monitor queue depth"
+
+  - id: RB-003
+    name: Critical Rollback
+    description: Rollback to previous stable version
+    service: any
+    hypotheses:
+      - "High error rate"
+      - "CPU Saturation"
+    min_confidence: 0.8
+    risk_level: high
+    steps:
+      - "Identify last stable tag"
+      - "Trigger CI/CD rollback pipeline"

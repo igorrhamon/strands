@@ -16,6 +16,7 @@ src/agents/alert_orchestrator.py
 src/agents/auditor_agent.py
 src/agents/base_agent.py
 src/agents/decision_engine.py
+src/agents/evidence_fusion_agent.py
 src/agents/graph_agent.py
 src/agents/human_review.py
 src/agents/metrics_analysis.py
@@ -42,6 +43,7 @@ src/agents/grafana_alert_analysis/recommender.py
 src/agents/grafana_alert_analysis/schemas.py
 src/agents/grafana_alert_analysis/tools/__init__.py
 src/agents/grafana_alert_analysis/tools/grafana_mcp.py
+src/agents/metrics/slo_engine.py
 src/agents/multi_agent/__init__.py
 src/agents/multi_agent/supervisor.py
 src/agents/multi_agent/tools.py
@@ -95,6 +97,7 @@ src/rules/__init__.py
 src/rules/correlation_rules.py
 src/rules/decision_rules.py
 src/rules/policy_engine.py
+src/rules/runbook_resolver.py
 src/rules/trend_rules.py
 src/services/confidence_service.py
 src/services/confidence_service_v2.py
@@ -102,6 +105,9 @@ src/services/metrics_service.py
 src/services/runbook_embedding_service.py
 src/services/semantic_recovery_service.py
 src/simulation/deterministic_simulation.py
+src/state/incident_registry.py
+src/state/incident_state_machine.py
+src/state/similarity_index.py
 src/strads_alert_agent.egg-info/PKG-INFO
 src/strads_alert_agent.egg-info/SOURCES.txt
 src/strads_alert_agent.egg-info/dependency_links.txt

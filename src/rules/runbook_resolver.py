@@ -1,0 +1,77 @@
+"""
+Runbook Resolver - Deterministic selection of runbooks based on context.
+"""
+
+import logging
+import yaml
+import os
+from typing import List, Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
+
+class Runbook:
+    def __init__(self, data: Dict[str, Any]):
+        self.id = data.get("id")
+        self.name = data.get("name")
+        self.description = data.get("description")
+        self.service = data.get("service")
+        self.hypotheses = data.get("hypotheses", [])
+        self.min_confidence = data.get("min_confidence", 0.0)
+        self.risk_level = data.get("risk_level", "medium")
+        self.steps = data.get("steps", [])
+
+class RunbookResolver:
+    """
+    Resolves relevant runbooks based on hypothesis, service, and confidence.
+    """
+    def __init__(self, catalog_path: str = "src/rules/catalog/runbooks.yaml"):
+        self.catalog_path = catalog_path
+        self.runbooks: List[Runbook] = []
+        self._load_catalog()
+
+    def _load_catalog(self):
+        if not os.path.exists(self.catalog_path):
+            logger.warning(f"Runbook catalog not found at {self.catalog_path}")
+            return
+
+        try:
+            with open(self.catalog_path, 'r') as f:
+                data = yaml.safe_load(f)
+                if data and "runbooks" in data:
+                    self.runbooks = [Runbook(rb) for rb in data["runbooks"]]
+            logger.info(f"Loaded {len(self.runbooks)} runbooks from catalog")
+        except Exception as e:
+            logger.error(f"Failed to load runbook catalog: {e}")
+
+    def match_runbooks(self, hypothesis: str, service: str, confidence: float) -> List[Runbook]:
+        matches = []
+        for rb in self.runbooks:
+            # Service match (or 'any')
+            service_match = (rb.service == "any" or rb.service == service)
+
+            # Hypothesis keyword match (simple containment for now)
+            hyp_match = any(h.lower() in hypothesis.lower() for h in rb.hypotheses)
+
+            # Confidence threshold
+            conf_match = (confidence >= rb.min_confidence)
+
+            if service_match and hyp_match and conf_match:
+                matches.append(rb)
+
+        return matches
+
+    def rank_and_select(self, matches: List[Runbook], context: Dict[str, Any]) -> Optional[Runbook]:
+        """
+        Ranks matched runbooks and selects the best one.
+        Can use risk levels, past success rates (from context), etc.
+        """
+        if not matches:
+            return None
+
+        # Sort by risk_level (low first) then by number of matching hypotheses
+        def rank_key(rb):
+            risk_score = {"low": 0, "medium": 1, "high": 2}.get(rb.risk_level, 1)
+            return risk_score
+
+        sorted_matches = sorted(matches, key=rank_key)
+        return sorted_matches[0]
