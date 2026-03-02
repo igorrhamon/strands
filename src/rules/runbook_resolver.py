@@ -63,15 +63,18 @@ class RunbookResolver:
     def rank_and_select(self, matches: List[Runbook], context: Dict[str, Any]) -> Optional[Runbook]:
         """
         Ranks matched runbooks and selects the best one.
-        Can use risk levels, past success rates (from context), etc.
+        Ensures stable, deterministic sorting.
         """
         if not matches:
             return None
 
-        # Sort by risk_level (low first) then by number of matching hypotheses
+        # Multi-level stable sort:
+        # 1. Risk Level (low first)
+        # 2. Number of steps (shorter first as heuristic for simplicity)
+        # 3. ID as tie-breaker (absolute determinism)
         def rank_key(rb):
             risk_score = {"low": 0, "medium": 1, "high": 2}.get(rb.risk_level, 1)
-            return risk_score
+            return (risk_score, len(rb.steps), rb.id)
 
         sorted_matches = sorted(matches, key=rank_key)
         return sorted_matches[0]

@@ -45,3 +45,22 @@ def test_runbook_resolver_ranking(mock_catalog):
     selected = resolver.rank_and_select(matches, {})
     assert selected is not None
     assert selected.id == "RB-TEST"
+
+def test_runbook_resolver_determinism(tmp_path):
+    # Two identical runbooks except for ID
+    catalog_content = {
+        "runbooks": [
+            {"id": "B", "name": "B", "service": "any", "hypotheses": ["H"], "risk_level": "low", "steps": [1]},
+            {"id": "A", "name": "A", "service": "any", "hypotheses": ["H"], "risk_level": "low", "steps": [1]}
+        ]
+    }
+    catalog_file = tmp_path / "deterministic.yaml"
+    with open(catalog_file, 'w') as f:
+        yaml.dump(catalog_content, f)
+
+    resolver = RunbookResolver(catalog_path=str(catalog_file))
+    matches = resolver.match_runbooks("H", "service", 1.0)
+
+    # Should always pick A (alphabetical tie-breaker)
+    selected = resolver.rank_and_select(matches, {})
+    assert selected.id == "A"

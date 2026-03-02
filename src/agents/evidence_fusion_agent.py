@@ -8,8 +8,9 @@ This agent is responsible for:
 """
 
 import logging
+import os
 from typing import Dict, List, Any
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from src.agents.base_agent import BaseAgent, AgentOutput, AgentStatus, Evidence, EvidenceType
 from src.models.swarm import SwarmResult, EvidenceItem
@@ -26,7 +27,6 @@ class EvidenceFusionAgent(BaseAgent):
         self.agent_id = "evidence_fusion"
 
         # Priority for environment variables in weights
-        import os
         self.weights = {
             "metrics_analysis": float(os.getenv("FUSION_WEIGHT_METRICS", 0.4)),
             "correlator": float(os.getenv("FUSION_WEIGHT_CORRELATOR", 0.4)),
@@ -81,16 +81,31 @@ class EvidenceFusionAgent(BaseAgent):
         total_weight = 0.0
         weighted_confidence = 0.0
         all_metrics = {}
+        confidences = []
 
         for out in outputs:
             weight = self.weights.get(out.agent_id, 0.1)
             weighted_confidence += out.confidence * weight
             total_weight += weight
+            confidences.append(out.confidence)
 
             # Merge metrics
             all_metrics.update(out.quantitative_metrics)
 
-        final_confidence = weighted_confidence / total_weight if total_weight > 0 else 0.0
+        base_confidence = weighted_confidence / total_weight if total_weight > 0 else 0.0
+
+        # Apply Conflict Penalty (variance-based)
+        if len(confidences) > 1:
+            import statistics
+            variance = statistics.variance(confidences)
+            # Reduce confidence proportionally to variance (up to 0.3 reduction)
+            penalty = min(variance * 2, 0.3)
+            if penalty > 0.05:
+                self.logger.warning(f"Conflict detected between agents (variance: {variance:.3f}). Penalty applied: {penalty:.3f}")
+            final_confidence = max(0.0, base_confidence - penalty)
+        else:
+            final_confidence = base_confidence
+
         return final_confidence, all_metrics
 
     def _fuse_qualitative(self, outputs: List[SwarmResult]) -> (str, List[str]):
@@ -127,6 +142,7 @@ class EvidenceFusionAgent(BaseAgent):
                 type=EvidenceType.INFERENCE,
                 source=self.name,
                 value=result,
+                timestamp=datetime.now(timezone.utc),
                 confidence=result,
                 qualitative_summary="Fused confidence from multiple agents"
             )

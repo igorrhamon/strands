@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 from src.models.alert import Alert, NormalizedAlert
 from src.models.cluster import AlertCluster
 from src.models.metrics import MetricsAnalysisResult
-from src.models.decision import Decision, DecisionState
+from src.models.decision import Decision, DecisionState, DecisionTrace
 from src.agents.alert_collector import AlertCollectorAgent
 from src.agents.alert_normalizer import AlertNormalizerAgent
 from src.agents.alert_correlation import AlertCorrelationAgent
@@ -60,11 +60,11 @@ class AlertOrchestratorAgent:
         self.similarity_index = SimilarityIndex()
         self.runbook_resolver = RunbookResolver()
     
-    def run_pipeline(self) -> List[Decision]:
+    def run_pipeline(self) -> (List[Decision], List[DecisionTrace]):
         """Execute the complete decision pipeline
         
         Returns:
-            List of Decision objects
+            Tuple of (List of Decision objects, List of DecisionTrace objects)
         """
         logger.info("=== Starting Alert Decision Pipeline ===")
         start_time = datetime.now(timezone.utc)
@@ -98,11 +98,13 @@ class AlertOrchestratorAgent:
             
             # Step 4-6: Process each cluster
             decisions = []
+            traces = []
             for cluster in clusters:
                 try:
-                    decision = self._process_cluster(cluster)
+                    decision, trace = self._process_cluster(cluster)
                     if decision:
                         decisions.append(decision)
+                        traces.append(trace)
                 except Exception as e:
                     logger.error(f"Failed to process cluster {cluster.cluster_id}: {e}", exc_info=True)
                     continue
@@ -112,20 +114,20 @@ class AlertOrchestratorAgent:
                 f"=== Pipeline Complete: {len(decisions)} decisions in {elapsed:.2f}s ==="
             )
             
-            return decisions
+            return decisions, traces
             
         except Exception as e:
             logger.error(f"Pipeline execution failed: {e}", exc_info=True)
             return []
     
-    def _process_cluster(self, cluster: AlertCluster) -> Optional[Decision]:
+    def _process_cluster(self, cluster: AlertCluster) -> (Optional[Decision], Optional[DecisionTrace]):
         """Process a single alert cluster through the pipeline
         
         Args:
             cluster: Alert cluster to process
             
         Returns:
-            Decision object or None if processing failed
+            Tuple of (Decision, DecisionTrace)
         """
         cluster_id = str(cluster.cluster_id)
         logger.info(f"Processing cluster {cluster_id}")
@@ -135,6 +137,7 @@ class AlertOrchestratorAgent:
 
         # Step 4: Analyze metrics
         logger.info("  Step 4: Analyzing metrics...")
+        # metrics_analysis.analyze_cluster_sync is currently wired to return MetricsAnalysisResult
         metrics_result = self.metrics_analysis.analyze_cluster_sync(cluster)
         
         # Step 4.1: Run Swarm Analysis (Simulation for now)
@@ -166,9 +169,12 @@ class AlertOrchestratorAgent:
         }
 
         # If the decision engine has LLM enabled, run the async path so LLM fallback can be used.
+        trace = None
         if getattr(self.decision_engine, "_llm_enabled", False):
             try:
-                decision = asyncio.run(
+                # Step 5: Make decision
+                # decision_engine.decide is async
+                decision, trace = asyncio.run(
                     self.decision_engine.decide(
                         cluster=cluster,
                         trends=trends,
@@ -179,14 +185,14 @@ class AlertOrchestratorAgent:
                 )
             except Exception as e:
                 logger.warning(f"Async decision failed, falling back to sync: {e}")
-                decision = self.decision_engine.decide_sync(
+                decision, trace = self.decision_engine.decide_sync(
                     cluster=cluster,
                     trends=trends,
                     semantic_evidence=[],
                     context=decision_context
                 )
         else:
-            decision = self.decision_engine.decide_sync(
+            decision, trace = self.decision_engine.decide_sync(
                 cluster=cluster,
                 trends=trends,
                 semantic_evidence=[],
@@ -232,11 +238,14 @@ class AlertOrchestratorAgent:
             self.state_machine.transition_to(cluster_id, IncidentState.CLOSED)
         elif decision.decision_state == DecisionState.ESCALATE:
             self.state_machine.transition_to(cluster_id, IncidentState.MITIGATING)
+
+        # Log Decision State with proper type check
+        state_val = getattr(decision.decision_state, 'value', str(decision.decision_state))
         
         logger.info(
-            f"  Decision: {decision.decision_state.value} "
+            f"  Decision: {state_val} "
             f" (State: {self.state_machine.get_state(cluster_id)})"
             f" (confidence: {decision.confidence:.2f})"
         )
         
-        return decision
+        return decision, trace

@@ -98,12 +98,14 @@ class DecisionRules:
         similar_incidents = (context or {}).get("similar_incidents", [])
         if similar_incidents:
             best_match = similar_incidents[0]
-            if best_match.get("similarity", 0.0) > 0.9:
+            similarity = best_match.get("similarity", 0.0)
+            if similarity > 0.8:
+                # Use historical state and boost confidence significantly
                 return RuleResult(
                     decision_state=DecisionState(best_match["snapshot"].decision_state),
-                    confidence=0.9,
+                    confidence=max(DecisionRules.HIGH_CONFIDENCE, similarity),
                     rule_id=RULE_HISTORICAL_BOOST,
-                    justification=f"Historical pattern match ({best_match['similarity']:.1%}) to incident {best_match['snapshot'].incident_id}",
+                    justification=f"Strong historical resolution found ({similarity:.1%}). Repeating past successful action from {best_match['snapshot'].incident_id}.",
                 )
         return RuleResult(None, 0.0, RULE_HISTORICAL_BOOST, "No strong historical match", fires=False)
 
