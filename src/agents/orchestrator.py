@@ -140,8 +140,38 @@ class AlertOrchestratorAgent:
         # metrics_analysis.analyze_cluster_sync is currently wired to return MetricsAnalysisResult
         metrics_result = self.metrics_analysis.analyze_cluster_sync(cluster)
         
-        # Step 4.1: Run Swarm Analysis (Simulation for now)
+        # Step 4.1: Run Swarm Analysis
         swarm_results = []
+        try:
+            # We explicitly run the Correlator as a swarm agent
+            from src.agents.analysis.correlator import CorrelatorAgent
+            correlator = CorrelatorAgent()
+            # Analyze expects NormalizedAlert, taking the first one from cluster
+            if cluster.alerts:
+                correlator_res = correlator.analyze(cluster.alerts[0])
+                swarm_results.append(correlator_res)
+
+            # Map metrics_result (MetricsAnalysisResult) to SwarmResult for fusion
+            if metrics_result:
+                metrics_swarm_res = SwarmResult(
+                    agent_id=metrics_result.service, # or "metrics_analysis"
+                    hypothesis=f"Overall health: {metrics_result.overall_health}",
+                    confidence=metrics_result.overall_confidence,
+                    quantitative_metrics=metrics_result.trends.get("_fused", {}).metadata if hasattr(metrics_result.trends.get("_fused"), "metadata") else {},
+                    qualitative_findings=metrics_result.prometheus_errors
+                )
+                # Actually, metrics_analysis.py returns MetricsAnalysisResult.
+                # Let's use a simpler mapping.
+                metrics_swarm_res = SwarmResult(
+                    agent_id="metrics_analysis",
+                    hypothesis=f"Service health is {metrics_result.overall_health.value}",
+                    confidence=metrics_result.overall_confidence,
+                    quantitative_metrics=getattr(metrics_result, 'quantitative_metrics', {}),
+                    qualitative_findings=getattr(metrics_result, 'qualitative_findings', [])
+                )
+                swarm_results.append(metrics_swarm_res)
+        except Exception as e:
+            logger.warning(f"Swarm analysis partially failed: {e}")
 
         # Step 4.2: Historical Context
         similar_incidents = []

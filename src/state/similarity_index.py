@@ -54,12 +54,6 @@ class SimilarityIndex:
 
     def find_similar(self, query_text: str, threshold: float = 0.7, limit: int = 3) -> List[Dict[str, Any]]:
         if not self._model:
-            # Fallback for trace simulation if model is missing
-            if self._index:
-                return [{
-                    "snapshot": self._index[0]["snapshot"],
-                    "similarity": 0.92 # Simulated high similarity
-                }]
             return []
 
         if not self._index:

@@ -89,6 +89,15 @@ class DecisionRules:
         return RuleResult(None, 0.0, RULE_CRITICAL_SLO_BURN, "SLO burn within limits", fires=False)
 
     @staticmethod
+    def _safe_get_decision_state(state_str: str) -> DecisionState:
+        """Safely convert string to DecisionState enum."""
+        try:
+            return DecisionState(state_str)
+        except ValueError:
+            logger.warning(f"Invalid DecisionState from historical data: {state_str}. Falling back to OBSERVE.")
+            return DecisionState.OBSERVE
+
+    @staticmethod
     def check_historical_boost(
         context: dict,
     ) -> RuleResult:
@@ -100,9 +109,10 @@ class DecisionRules:
             best_match = similar_incidents[0]
             similarity = best_match.get("similarity", 0.0)
             if similarity > 0.8:
+                past_state = DecisionRules._safe_get_decision_state(best_match["snapshot"].decision_state)
                 # Use historical state and boost confidence significantly
                 return RuleResult(
-                    decision_state=DecisionState(best_match["snapshot"].decision_state),
+                    decision_state=past_state,
                     confidence=max(DecisionRules.HIGH_CONFIDENCE, similarity),
                     rule_id=RULE_HISTORICAL_BOOST,
                     justification=f"Strong historical resolution found ({similarity:.1%}). Repeating past successful action from {best_match['snapshot'].incident_id}.",

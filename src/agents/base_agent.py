@@ -61,7 +61,6 @@ class Evidence:
     source: str
     value: Any
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     confidence: float = 1.0
     quantitative_value: Optional[float] = None
     qualitative_summary: Optional[str] = None

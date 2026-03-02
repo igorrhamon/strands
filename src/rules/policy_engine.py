@@ -18,14 +18,14 @@ class PolicyEngine:
     """
     
     def __init__(self):
+        # PolicyEngine logic is being consolidated into DecisionRules
+        # (src/rules/decision_rules.py) for architectural consistency.
         self.rules = [
-            self._rule_slo_burn_rate_critical,
             self._rule_critical_degrading,
             self._rule_stable_metrics,
             self._rule_insufficient_data,
             self._rule_recurrent_pattern,
             self._rule_single_alert_low_severity,
-            self._rule_historical_similarity_boost,
         ]
     
     def evaluate(
@@ -82,26 +82,6 @@ class PolicyEngine:
             "justification": "No specific policy rule matched - default to investigation"
         }
     
-    def _rule_slo_burn_rate_critical(
-        self,
-        cluster: AlertCluster,
-        metrics_result: MetricsAnalysisResult,
-        context: Dict
-    ) -> Dict:
-        """Rule: High SLO Burn Rate (>14.4x) = ESCALATE"""
-        burn_rate = context.get("slo_burn_rate", 0.0)
-
-        if burn_rate > 14.4:
-            return {
-                "applies": True,
-                "rule_name": "CRITICAL_SLO_BURN_RATE",
-                "decision_state": DecisionState.ESCALATE,
-                "confidence": 0.95,
-                "justification": f"Critical SLO burn rate detected: {burn_rate:.1f}x"
-            }
-
-        return {"applies": False}
-
     def _rule_critical_degrading(
         self,
         cluster: AlertCluster,
@@ -212,27 +192,4 @@ class PolicyEngine:
                     "justification": f"Single {alert.severity} severity alert without correlation"
                 }
         
-        return {"applies": False}
-
-    def _rule_historical_similarity_boost(
-        self,
-        cluster: AlertCluster,
-        metrics_result: MetricsAnalysisResult,
-        context: Dict
-    ) -> Dict:
-        """Rule: High similarity to past successful resolutions = BOOST confidence"""
-        similar_incidents = context.get("similar_incidents", [])
-        if not similar_incidents:
-            return {"applies": False}
-
-        best_match = similar_incidents[0]
-        if best_match.get("similarity", 0.0) > 0.9:
-            return {
-                "applies": True,
-                "rule_name": "HISTORICAL_SIMILARITY_BOOST",
-                "decision_state": DecisionState(best_match["snapshot"].decision_state),
-                "confidence": 0.9,
-                "justification": f"Pattern highly similar ({best_match['similarity']:.1%}) to past incident {best_match['snapshot'].incident_id}"
-            }
-
         return {"applies": False}

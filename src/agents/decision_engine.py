@@ -110,7 +110,8 @@ class DecisionEngine:
                 fused_justification = fusion_output.result.get("hypothesis", "")
                 trace.fusion_score = fusion_output.confidence
                 trace.fusion_hypothesis = fused_justification
-                logger.info(f"[{self.AGENT_NAME}] Fused confidence: {fusion_output.confidence:.2f}")
+                trace.conflict_penalty_applied = fusion_output.metadata.get("conflict_penalty_applied", 0.0)
+                logger.info(f"[{self.AGENT_NAME}] Fused confidence: {fusion_output.confidence:.2f} (Penalty: {trace.conflict_penalty_applied:.2f})")
 
         # Step 1: Evaluate deterministic rules
         rule_result, fired_rules = self._rule_engine.evaluate(

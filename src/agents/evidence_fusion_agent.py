@@ -52,7 +52,7 @@ class EvidenceFusionAgent(BaseAgent):
                 return self._failed_output("No agent outputs provided for fusion")
 
             # 1. Aggregation
-            fused_confidence, fused_metrics = self._fuse_quantitative(agent_outputs)
+            fused_confidence, fused_metrics, conflict_penalty = self._fuse_quantitative(agent_outputs)
             fused_hypothesis, fused_findings = self._fuse_qualitative(agent_outputs)
 
             # 2. Hysteresis/Smoothing (Simple version)
@@ -60,6 +60,9 @@ class EvidenceFusionAgent(BaseAgent):
 
             # 3. Generate Evidence
             evidence = await self.generate_evidence(agent_outputs, smoothed_confidence)
+
+            metadata = self.config.copy()
+            metadata["conflict_penalty_applied"] = conflict_penalty
 
             # 4. Return Output
             return AgentOutput(
@@ -70,14 +73,15 @@ class EvidenceFusionAgent(BaseAgent):
                 confidence=smoothed_confidence,
                 evidence=evidence,
                 quantitative_metrics=fused_metrics,
-                qualitative_findings=fused_findings
+                qualitative_findings=fused_findings,
+                metadata=metadata
             )
 
         except Exception as e:
             self.logger.error(f"Fusion failed: {e}")
             return self._failed_output(str(e))
 
-    def _fuse_quantitative(self, outputs: List[SwarmResult]) -> (float, Dict[str, float]):
+    def _fuse_quantitative(self, outputs: List[SwarmResult]) -> (float, Dict[str, float], float):
         total_weight = 0.0
         weighted_confidence = 0.0
         all_metrics = {}
@@ -93,6 +97,7 @@ class EvidenceFusionAgent(BaseAgent):
             all_metrics.update(out.quantitative_metrics)
 
         base_confidence = weighted_confidence / total_weight if total_weight > 0 else 0.0
+        penalty = 0.0
 
         # Apply Conflict Penalty (variance-based)
         if len(confidences) > 1:
@@ -106,7 +111,7 @@ class EvidenceFusionAgent(BaseAgent):
         else:
             final_confidence = base_confidence
 
-        return final_confidence, all_metrics
+        return final_confidence, all_metrics, penalty
 
     def _fuse_qualitative(self, outputs: List[SwarmResult]) -> (str, List[str]):
         findings = []
@@ -120,11 +125,9 @@ class EvidenceFusionAgent(BaseAgent):
         return fused_hypothesis, findings
 
     def _apply_smoothing(self, current_confidence: float) -> float:
-        self._history.append(current_confidence)
-        if len(self._history) > 5:
-            self._history.pop(0)
-
-        return sum(self._history) / len(self._history)
+        # Removing smoothing logic entirely as it mixed confidence across incidents.
+        # Smoothing should be implemented in a stateful/persistent layer if required.
+        return current_confidence
 
     async def collect_data(self, input_data: Dict[str, Any]) -> Any:
         return input_data.get("agent_outputs")

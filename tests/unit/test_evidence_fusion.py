@@ -26,8 +26,10 @@ async def test_evidence_fusion_aggregation():
     fusion_output = await agent.execute({"agent_outputs": outputs})
 
     assert fusion_output.status == "success"
-    # Weighted: (0.8 * 0.4 + 0.9 * 0.4) / 0.8 = (0.32 + 0.36) / 0.8 = 0.68 / 0.8 = 0.85
-    assert pytest.approx(fusion_output.confidence, 0.01) == 0.85
+    # Weighted: (0.8 * 0.4 + 0.9 * 0.4) / 0.8 = 0.85
+    # Variance(0.8, 0.9) = 0.005. Penalty = 0.005 * 2 = 0.01
+    # Final = 0.85 - 0.01 = 0.84
+    assert pytest.approx(fusion_output.confidence, 0.01) == 0.84
     assert "metrics_analysis" in fusion_output.result["hypothesis"]
     assert "correlator" in fusion_output.result["hypothesis"]
     assert fusion_output.quantitative_metrics["cpu"] == 90.0

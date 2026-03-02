@@ -44,13 +44,25 @@ class RunbookResolver:
             logger.error(f"Failed to load runbook catalog: {e}")
 
     def match_runbooks(self, hypothesis: str, service: str, confidence: float) -> List[Runbook]:
+        import re
         matches = []
+
+        # Tokenize hypothesis for better matching (word boundaries)
+        hypothesis_tokens = set(re.findall(r'\w+', hypothesis.lower()))
+
         for rb in self.runbooks:
             # Service match (or 'any')
             service_match = (rb.service == "any" or rb.service == service)
 
-            # Hypothesis keyword match (simple containment for now)
-            hyp_match = any(h.lower() in hypothesis.lower() for h in rb.hypotheses)
+            # Token-based match for hypothesis
+            # Ensures "No High CPU" doesn't naively match "High CPU"
+            hyp_match = False
+            for h in rb.hypotheses:
+                h_tokens = re.findall(r'\w+', h.lower())
+                # Check if all tokens of a runbook hypothesis are present in the target hypothesis
+                if all(tok in hypothesis_tokens for tok in h_tokens):
+                    hyp_match = True
+                    break
 
             # Confidence threshold
             conf_match = (confidence >= rb.min_confidence)
