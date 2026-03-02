@@ -7,6 +7,7 @@ All decisions require human validation before action.
 
 from datetime import datetime, timezone
 from enum import Enum
+from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -113,6 +114,34 @@ class DecisionValidation(BaseModel):
 
     class Config:
         frozen = False
+
+
+class DecisionTrace(BaseModel):
+    """
+    Detailed audit trail of a single decision process.
+    Captures all intermediate scores and transformation steps.
+    """
+    decision_id: UUID
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    raw_input_summary: str
+
+    # Intermediate steps
+    agent_outputs: list[dict] = Field(default_factory=list) # Raw outputs from swarm
+    fusion_score: float = 0.0
+    fusion_hypothesis: str = ""
+    conflict_penalty_applied: float = 0.0
+
+    historical_similarity_max: float = 0.0
+    similar_incidents_count: int = 0
+
+    slo_burn_rate: float = 0.0
+    rules_fired: list[str] = Field(default_factory=list)
+
+    final_state: DecisionState = DecisionState.OBSERVE
+    final_confidence: float = 0.0
+    justification: str = ""
+
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 ###############################################################################

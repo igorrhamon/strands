@@ -29,7 +29,7 @@ class MetricTrend(BaseModel):
     p_value: Optional[float] = Field(None, description="Mann-Kendall test p-value")
     data_points: int = Field(..., description="Number of data points analyzed")
     time_range_seconds: int = Field(..., description="Time range of analysis")
-    analyzed_at: datetime = Field(default_factory=datetime.utcnow)
+    analyzed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     outliers_removed: int = Field(0, description="Number of outliers filtered (p95)")
 
     class Config:

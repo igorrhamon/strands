@@ -53,13 +53,17 @@ class Evidence:
         value: Valor ou conteúdo da evidência
         timestamp: Quando foi coletada
         confidence: Score de confiança (0.0 a 1.0)
+        quantitative_value: Valor numérico (ex: 95.5, 0.001) para análise estatística
+        qualitative_summary: Resumo textual da evidência
         metadata: Dados adicionais
     """
     type: EvidenceType
     source: str
     value: Any
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     confidence: float = 1.0
+    quantitative_value: Optional[float] = None
+    qualitative_summary: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     
     def __post_init__(self):
@@ -85,6 +89,8 @@ class AgentOutput:
         execution_time_ms: Tempo de execução em milissegundos
         error_message: Mensagem de erro, se houver
         metadata: Dados adicionais
+        quantitative_metrics: Métricas consolidadas (ex: {"error_rate": 0.05})
+        qualitative_findings: Descobertas qualitativas relevantes
     """
     agent_id: str
     agent_name: str
@@ -96,6 +102,8 @@ class AgentOutput:
     error_message: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.utcnow)
+    quantitative_metrics: Dict[str, float] = field(default_factory=dict)
+    qualitative_findings: List[str] = field(default_factory=list)
     
     def __post_init__(self):
         """Valida a saída após inicialização."""
@@ -263,6 +271,24 @@ class BaseAgent(ABC):
         """
         pass
     
+    def calculate_deterministic_confidence(self, evidence: List[Evidence]) -> float:
+        """Calcula confiança de forma determinística baseada em evidências.
+
+        Pode ser sobrescrito por agentes específicos para lógica customizada.
+
+        Args:
+            evidence: Lista de evidências coletadas
+
+        Returns:
+            Score de confiança (0.0 a 1.0)
+        """
+        if not evidence:
+            return 0.0
+
+        # Média ponderada simples como baseline
+        confidences = [e.confidence for e in evidence]
+        return sum(confidences) / len(confidences)
+
     async def register_evidence(self, evidence: List[Evidence], context_id: str) -> bool:
         """Registra evidências no Neo4j.
         

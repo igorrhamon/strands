@@ -18,6 +18,8 @@ class PolicyEngine:
     """
     
     def __init__(self):
+        # PolicyEngine logic is being consolidated into DecisionRules
+        # (src/rules/decision_rules.py) for architectural consistency.
         self.rules = [
             self._rule_critical_degrading,
             self._rule_stable_metrics,

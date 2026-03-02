@@ -24,7 +24,7 @@ class AuditLog(BaseModel):
     """Immutable audit log entry"""
     log_id: str = Field(..., description="Unique log identifier")
     event_type: AuditEventType
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     agent_name: str = Field(..., description="Agent that generated this log")
     entity_id: str = Field(..., description="ID of entity being audited (alert, decision, etc)")
     event_data: Dict[str, Any] = Field(..., description="Event-specific payload")
@@ -75,4 +75,4 @@ class RepositoryAssociation(BaseModel):
     commit_shas: List[str] = Field(default_factory=list)
     related_issues: List[int] = Field(default_factory=list)
     relevance_score: float = Field(..., ge=0.0, le=1.0)
-    extracted_at: datetime = Field(default_factory=datetime.utcnow)
+    extracted_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

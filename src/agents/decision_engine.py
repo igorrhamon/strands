@@ -11,14 +11,17 @@ Constitution Principle II: Determinismo - Rules BEFORE LLM.
 import logging
 import json
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from src.models.cluster import AlertCluster
 from src.models.metric_trend import MetricTrend
-from src.models.decision import Decision, DecisionState, HumanValidationStatus, SemanticEvidence
+from src.models.decision import Decision, DecisionState, HumanValidationStatus, SemanticEvidence, DecisionTrace
 from src.rules.decision_rules import RuleEngine, RuleResult
 from src.providers.github_models import GitHubModels, MissingTokenError
 from src.services.semantic_recovery_service import SemanticRecoveryService
+from src.agents.evidence_fusion_agent import EvidenceFusionAgent
+from src.agents.base_agent import AgentStatus
+from src.models.swarm import SwarmResult
 
 logger = logging.getLogger(__name__)
 
@@ -64,13 +67,16 @@ class DecisionEngine:
         self._llm_threshold = llm_fallback_threshold
         self._llm_enabled = llm_enabled
         self._semantic_recovery = SemanticRecoveryService(threshold=llm_fallback_threshold)
+        self._fusion_agent = EvidenceFusionAgent()
     
     async def decide(
         self,
         cluster: AlertCluster,
         trends: dict[str, MetricTrend],
         semantic_evidence: list[SemanticEvidence],
-    ) -> Decision:
+        swarm_results: list[SwarmResult] = None,
+        context: dict = None,
+    ) -> (Decision, DecisionTrace):
         """
         Generate a decision for an alert cluster.
         
@@ -87,13 +93,39 @@ class DecisionEngine:
             f"({cluster.alert_count} alerts, {cluster.primary_severity} severity)"
         )
         
+        # Audit Trace Initialization
+        trace = DecisionTrace(
+            decision_id=uuid4(),
+            raw_input_summary=f"Cluster {cluster.cluster_id}, {cluster.alert_count} alerts, {cluster.primary_severity} severity",
+            agent_outputs=[r.model_dump() for r in (swarm_results or [])],
+            slo_burn_rate=(context or {}).get("slo_burn_rate", 0.0)
+        )
+
+        # Step 0: Evidence Fusion (if swarm results provided)
+        fused_justification = ""
+        if swarm_results:
+            logger.info(f"[{self.AGENT_NAME}] Fusing {len(swarm_results)} swarm results")
+            fusion_output = await self._fusion_agent.execute({"agent_outputs": swarm_results})
+            if fusion_output.status == AgentStatus.SUCCESS:
+                fused_justification = fusion_output.result.get("hypothesis", "")
+                trace.fusion_score = fusion_output.confidence
+                trace.fusion_hypothesis = fused_justification
+                trace.conflict_penalty_applied = fusion_output.metadata.get("conflict_penalty_applied", 0.0)
+                logger.info(f"[{self.AGENT_NAME}] Fused confidence: {fusion_output.confidence:.2f} (Penalty: {trace.conflict_penalty_applied:.2f})")
+
         # Step 1: Evaluate deterministic rules
         rule_result, fired_rules = self._rule_engine.evaluate(
             cluster=cluster,
             trends=trends,
             semantic_evidence=semantic_evidence,
+            context=context
         )
-        
+
+        trace.rules_fired = fired_rules
+
+        if fused_justification:
+            rule_result.justification = f"{rule_result.justification} | Fused: {fused_justification}"
+
         logger.info(
             f"[{self.AGENT_NAME}] Rules result: {rule_result.decision_state.value} "
             f"(confidence: {rule_result.confidence:.2f}, rules: {fired_rules})"
@@ -135,8 +167,19 @@ class DecisionEngine:
                     llm_contribution = True
                     llm_reason = "Rule confidence below threshold"
         
+        # Step 2.5: Burn Rate Policy Enforcement
+        # High burn rate should adjust automation expectations or force human gates
+        burn_rate = (context or {}).get("slo_burn_rate", 0.0)
+        metadata = {}
+        if burn_rate > 10.0:
+            logger.warning(f"[{self.AGENT_NAME}] EXTREME Burn Rate ({burn_rate:.1f}x). Restricting automation.")
+            metadata["automation_restriction"] = "HUMAN_GATE_REQUIRED"
+            metadata["burn_rate_severity"] = "EXTREME"
+            # We don't change the rule result state here, but we mark the metadata for the controller
+
         # Step 3: Create Decision object
         decision = Decision(
+            decision_id=trace.decision_id,
             decision_state=rule_result.decision_state,
             confidence=rule_result.confidence,
             justification=rule_result.justification,
@@ -144,14 +187,20 @@ class DecisionEngine:
             semantic_evidence=semantic_evidence,
             llm_contribution=llm_contribution,
             llm_reason=llm_reason,
+            metadata=metadata
         )
         
+        # Finalize Trace
+        trace.final_state = decision.decision_state
+        trace.final_confidence = decision.confidence
+        trace.justification = decision.justification
+
         logger.info(
             f"[{self.AGENT_NAME}] Decision: {decision.decision_state.value} "
             f"(confidence: {decision.confidence:.2f}, LLM: {llm_contribution})"
         )
         
-        return decision
+        return decision, trace
     
     async def _invoke_llm_fallback(
         self,
@@ -313,19 +362,32 @@ class DecisionEngine:
         cluster: AlertCluster,
         trends: dict[str, MetricTrend],
         semantic_evidence: list[SemanticEvidence],
-    ) -> Decision:
+        context: dict = None,
+    ) -> (Decision, DecisionTrace):
         """
         Synchronous version of decide() - rules only, no LLM.
         
         Useful for testing and when LLM is not available.
         """
+        # Audit Trace Initialization (Minimal for sync)
+        trace = DecisionTrace(
+            decision_id=uuid4(),
+            raw_input_summary=f"SYNC Cluster {cluster.cluster_id}",
+            slo_burn_rate=(context or {}).get("slo_burn_rate", 0.0),
+            final_state=DecisionState.OBSERVE, # Default
+            final_confidence=0.0,
+            justification=""
+        )
+
         rule_result, fired_rules = self._rule_engine.evaluate(
             cluster=cluster,
             trends=trends,
             semantic_evidence=semantic_evidence,
+            context=context
         )
         
-        return Decision(
+        decision = Decision(
+            decision_id=trace.decision_id,
             decision_state=rule_result.decision_state,
             confidence=rule_result.confidence,
             justification=rule_result.justification,
@@ -333,6 +395,14 @@ class DecisionEngine:
             semantic_evidence=semantic_evidence,
             llm_contribution=False,
         )
+
+        # Finalize Trace
+        trace.final_state = decision.decision_state
+        trace.final_confidence = decision.confidence
+        trace.justification = decision.justification
+        trace.rules_fired = fired_rules
+
+        return decision, trace
 
 
 # Strands agent tool definition

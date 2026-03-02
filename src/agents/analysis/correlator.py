@@ -121,7 +121,9 @@ class CorrelatorAgent:
             hypothesis=hypothesis,
             confidence=confidence,
             evidence=evidence,
-            suggested_actions=suggested_actions
+            suggested_actions=suggested_actions,
+            quantitative_metrics={"correlation_strength": confidence},
+            qualitative_findings=[p.description for p in self.detected_patterns]
         )
     
     def _analyze_log_metric_correlation(self, alert: NormalizedAlert) -> None:
@@ -163,7 +165,16 @@ class CorrelatorAgent:
                 source_domain_2="METRICS",
                 correlation_strength=correlation_strength,
                 description=f"Picos de erro em logs correlacionam exatamente com aumento de latência em métricas para {alert.service}",
-                evidence_items=evidence,
+                evidence_items=[
+                    EvidenceItem(
+                        type=e.type,
+                        description=e.description,
+                        source_url=e.source_url,
+                        timestamp=e.timestamp,
+                        quantitative_value=correlation_strength,
+                        qualitative_summary=f"Correlation detected: {CorrelationType.LOG_METRIC_CORRELATION}"
+                    ) for e in evidence
+                ],
                 suggested_action="Investigar causa raiz de aumento de latência (possível gargalo em DB ou serviço downstream)"
             )
             
@@ -187,7 +198,7 @@ class CorrelatorAgent:
             # Hipótese: Falhas em traces correlacionam com restart de pod
             correlation_strength = 0.88
             
-            evidence = [
+            evidence_raw = [
                 EvidenceItem(
                     type=EvidenceType.TRACE,
                     description="Trace #xyz falhou no passo de conexão com banco de dados",
@@ -208,7 +219,16 @@ class CorrelatorAgent:
                 source_domain_2="EVENTS",
                 correlation_strength=correlation_strength,
                 description=f"Falhas em traces distribuídos correlacionam com restart contínuo do pod {alert.service}",
-                evidence_items=evidence,
+                evidence_items=[
+                    EvidenceItem(
+                        type=e.type,
+                        description=e.description,
+                        source_url=e.source_url,
+                        timestamp=e.timestamp,
+                        quantitative_value=correlation_strength,
+                        qualitative_summary=f"Correlation detected: {CorrelationType.TRACE_EVENT_CORRELATION}"
+                    ) for e in evidence_raw
+                ],
                 suggested_action="Verificar logs do pod para identificar causa raiz do restart (possível memory leak ou crash)"
             )
             
@@ -232,7 +252,7 @@ class CorrelatorAgent:
             # Hipótese: CPU alto correlaciona com Memória alta
             correlation_strength = 0.92
             
-            evidence = [
+            evidence_raw = [
                 EvidenceItem(
                     type=EvidenceType.METRIC,
                     description="CPU aumentou de 30% para 95% em 2 minutos",
@@ -253,7 +273,16 @@ class CorrelatorAgent:
                 source_domain_2="MEMORY_METRIC",
                 correlation_strength=correlation_strength,
                 description=f"Aumento de CPU correlaciona fortemente com aumento de memória em {alert.service}",
-                evidence_items=evidence,
+                evidence_items=[
+                    EvidenceItem(
+                        type=e.type,
+                        description=e.description,
+                        source_url=e.source_url,
+                        timestamp=e.timestamp,
+                        quantitative_value=correlation_strength,
+                        qualitative_summary=f"Correlation detected: {CorrelationType.METRIC_METRIC_CORRELATION}"
+                    ) for e in evidence_raw
+                ],
                 suggested_action="Investigar possível memory leak ou processamento de dados em larga escala"
             )
             
@@ -278,7 +307,7 @@ class CorrelatorAgent:
         # Hipótese: Sequência de eventos que levou ao alerta
         correlation_strength = 0.85
         
-        evidence = [
+        evidence_raw = [
             EvidenceItem(
                 type=EvidenceType.DOCUMENT,
                 description="Deployment de versão 2.5.0 iniciado às 22:15 UTC",
@@ -311,7 +340,16 @@ class CorrelatorAgent:
             source_domain_2="TIMELINE",
             correlation_strength=correlation_strength,
             description=f"Sequência temporal: Deployment → Aumento de requisições → CPU alto → Timeout de conexão",
-            evidence_items=evidence,
+            evidence_items=[
+                EvidenceItem(
+                    type=e.type,
+                    description=e.description,
+                    source_url=e.source_url,
+                    timestamp=e.timestamp,
+                    quantitative_value=correlation_strength,
+                    qualitative_summary=f"Correlation detected: {CorrelationType.TEMPORAL_CORRELATION}"
+                ) for e in evidence_raw
+            ],
             suggested_action="Considerar rollback de deployment ou aumentar recursos alocados"
         )
         

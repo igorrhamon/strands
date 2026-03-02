@@ -5,7 +5,7 @@ Represents a group of related alerts clustered by fingerprint,
 service, and temporal proximity.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -29,7 +29,7 @@ class AlertCluster(BaseModel):
         ..., ge=0.0, le=1.0, description="Confidence of grouping (0.0-1.0)"
     )
     created_at: datetime = Field(
-        default_factory=datetime.utcnow, description="Cluster formation time"
+        default_factory=lambda: datetime.now(timezone.utc), description="Cluster formation time"
     )
 
     # Computed properties
